@@ -14,6 +14,8 @@ type StockBalance struct {
 	ReservedQty  float64   `gorm:"type:numeric(15,4);default:0;not null" json:"reserved_qty"`
 	AvailableQty float64   `gorm:"type:numeric(15,4);default:0;not null" json:"available_qty"`
 	AvgCost      float64   `gorm:"type:numeric(15,4);default:0;not null" json:"avg_cost"`
+	BatchNumber  string     `gorm:"size:100" json:"batch_number"`
+	ExpiredDate  *time.Time `json:"expired_date"`
 
 	Warehouse *Warehouse `gorm:"foreignKey:WarehouseID" json:"warehouse,omitempty"`
 	Product   *Product   `gorm:"foreignKey:ProductID" json:"product,omitempty"`

@@ -17,6 +17,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { api, formatCurrency } from "@/lib/api";
+import { CariObatSalesModal } from "@/components/sales/CariObatSalesModal";
 
 interface CartItem {
   product_id: string;
@@ -44,6 +45,7 @@ export default function PosPage() {
   const [submitting, setSubmitting] = useState(false);
   const [completedSale, setCompletedSale] = useState<any>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isCariModalOpen, setIsCariModalOpen] = useState(false);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
@@ -86,9 +88,18 @@ export default function PosPage() {
     }
   }, [customers, customerID]);
 
-  // Focus barcode input on mount
+  // Focus barcode input on mount and handle F2 shortcut
   useEffect(() => {
     barcodeInputRef.current?.focus();
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "F2") {
+        e.preventDefault();
+        setIsCariModalOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   // Handle barcode scanning
@@ -258,6 +269,17 @@ export default function PosPage() {
                 className="w-full pl-9 pr-3 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
+
+            {/* Modal Cari Item Button (Matching Ketoko Spec) */}
+            <button
+              type="button"
+              onClick={() => setIsCariModalOpen(true)}
+              className="h-10 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center gap-1.5 shadow-xs text-xs shrink-0 transition active:scale-95"
+              title="Buka Pencarian Item & Filter Farmasi (F2)"
+            >
+              <Search className="w-4 h-4" />
+              <span>Cari Item (F2)</span>
+            </button>
           </div>
 
           {errorMsg && (
@@ -560,6 +582,18 @@ export default function PosPage() {
           </div>
         </div>
       )}
+
+      {/* CARI OBAT / ITEM SALES MODAL */}
+      <CariObatSalesModal
+        isOpen={isCariModalOpen}
+        onClose={() => setIsCariModalOpen(false)}
+        onSelect={(prod) => {
+          addToCart(prod);
+          setIsCariModalOpen(false);
+        }}
+        saleType="APOTEK"
+        warehouseId={warehouseID || undefined}
+      />
     </div>
   );
 }

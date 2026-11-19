@@ -44,3 +44,9 @@ pnpm-debug.log*
 test_*.py
 fix_*.py
 frontend/tsconfig.tsbuildinfo
+
+db_data/
+backend/uploads/
+uploads/
+
+

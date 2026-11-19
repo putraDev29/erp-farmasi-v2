@@ -67,6 +67,7 @@ func MigrateDB(db *gorm.DB) error {
 		&models.Permission{},
 		&models.Role{},
 		&models.RolePermission{},
+		&models.RoleModulePermission{},
 		&models.User{},
 		&models.UserRole{},
 		&models.BranchAccess{},
@@ -162,6 +163,9 @@ func MigrateDB(db *gorm.DB) error {
 		&models.AuditNote{},
 		&models.AuditNoteItem{},
 		&models.InitialBalanceEntry{},
+
+		// Documents & PBF Compliance Attachments
+		&models.DocumentAttachment{},
 	)
 
 	if err != nil {

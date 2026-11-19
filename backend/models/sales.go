@@ -21,6 +21,11 @@ type SalesOrder struct {
 	Discount    float64          `gorm:"type:numeric(15,2);default:0" json:"discount"`
 	TotalAmount float64          `gorm:"type:numeric(15,2);default:0" json:"total_amount"`
 	Notes       string           `gorm:"type:text" json:"notes"`
+	// PBF / SP Pemesan Requirements
+	CustomerSPNumber   string     `gorm:"size:100" json:"customer_sp_number"`
+	CustomerSPDate     *time.Time `json:"customer_sp_date"`
+	CustomerSPType     string     `gorm:"size:50;default:'REGULER'" json:"customer_sp_type"`
+	PBFOriginInvoiceNo string     `gorm:"size:100" json:"pbf_origin_invoice_no"`
 	CreatedBy   uuid.UUID        `gorm:"type:uuid;not null" json:"created_by"`
 	Items       []SalesOrderItem `gorm:"foreignKey:SalesOrderID" json:"items,omitempty"`
 
@@ -67,14 +72,23 @@ type Sale struct {
 	ChangeAmount    float64       `gorm:"type:numeric(15,2);default:0" json:"change_amount"`
 	RemainingAmount float64       `gorm:"type:numeric(15,2);default:0" json:"remaining_amount"`
 	Notes           string        `gorm:"type:text" json:"notes"`
+	// PBF / Penjualan Farmasi Requirements
+	CustomerSPNumber   string     `gorm:"size:100" json:"customer_sp_number"`
+	CustomerSPDate     *time.Time `json:"customer_sp_date"`
+	CustomerSPType     string     `gorm:"size:50;default:'REGULER'" json:"customer_sp_type"`
+	PBFOriginInvoiceNo string     `gorm:"size:100" json:"pbf_origin_invoice_no"`
+	OriginPurchaseID   *uuid.UUID `gorm:"type:uuid;index" json:"origin_purchase_id"`
+	TaxInvoiceNo       string     `gorm:"size:100" json:"tax_invoice_no"`
+	DeliveryOrderNo    string     `gorm:"size:100" json:"delivery_order_no"`
 	CreatedBy       uuid.UUID     `gorm:"type:uuid;not null" json:"created_by"`
 	Items           []SaleItem    `gorm:"foreignKey:SaleID" json:"items,omitempty"`
 	Payments        []SalePayment `gorm:"foreignKey:SaleID" json:"payments,omitempty"`
 
-	Warehouse *Warehouse           `gorm:"foreignKey:WarehouseID" json:"warehouse,omitempty"`
-	Customer  *Customer            `gorm:"foreignKey:CustomerID" json:"customer,omitempty"`
-	SalesRep  *SalesRepresentative `gorm:"foreignKey:SalesRepID" json:"sales_rep,omitempty"`
-	User      *User                `gorm:"foreignKey:CreatedBy" json:"user,omitempty"`
+	Warehouse      *Warehouse           `gorm:"foreignKey:WarehouseID" json:"warehouse,omitempty"`
+	Customer       *Customer            `gorm:"foreignKey:CustomerID" json:"customer,omitempty"`
+	OriginPurchase *Purchase            `gorm:"foreignKey:OriginPurchaseID" json:"origin_purchase,omitempty"`
+	SalesRep       *SalesRepresentative `gorm:"foreignKey:SalesRepID" json:"sales_rep,omitempty"`
+	User           *User                `gorm:"foreignKey:CreatedBy" json:"user,omitempty"`
 }
 
 type SaleItem struct {

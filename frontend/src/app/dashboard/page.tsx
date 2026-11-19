@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -15,6 +15,10 @@ import {
   PlusCircle,
   FileText,
   Boxes,
+  ShieldAlert,
+  Clock,
+  X,
+  ExternalLink,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -29,6 +33,8 @@ import {
 import { api, formatCurrency, formatDate } from "@/lib/api";
 
 export default function DashboardPage() {
+  const [showExpiryModal, setShowExpiryModal] = useState(false);
+
   const { data, isLoading } = useQuery({
     queryKey: ["dashboard-summary"],
     queryFn: async () => {
@@ -36,6 +42,17 @@ export default function DashboardPage() {
       return res.data?.data;
     },
   });
+
+  // Popup obat expired & mendekati expired (≤ 1 minggu) saat pertama kali buka halaman dashboard
+  useEffect(() => {
+    if (data?.expiring_critical_count && data.expiring_critical_count > 0) {
+      const hasShown = sessionStorage.getItem("hasShownExpiryAlertModal");
+      if (!hasShown) {
+        setShowExpiryModal(true);
+        sessionStorage.setItem("hasShownExpiryAlertModal", "true");
+      }
+    }
+  }, [data?.expiring_critical_count]);
 
   if (isLoading) {
     return (
@@ -54,14 +71,16 @@ export default function DashboardPage() {
   const chartData = data?.chart_data || [];
   const topProds = data?.top_products || [];
   const recentSales = data?.recent_sales || [];
+  const expiringCount = data?.expiring_critical_count || 0;
+  const expiringItems = data?.expiring_critical_items || [];
 
   return (
-    <div className="flex flex-col h-full min-h-0 space-y-3 text-xs select-none">
+    <div className="flex flex-col h-full min-h-0 space-y-3 text-xs select-none relative">
       {/* Page Title & Quick Actions */}
       <div className="shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">
-            Ringkasan Eksekutif & Dasbor
+            Ringkasan Eksekutif &amp; Dasbor
           </h1>
           <p className="text-xs sm:text-sm text-slate-500">
             Pemantauan performa penjualan, pembelian, kasir, dan persediaan apotek secara real-time.
@@ -69,6 +88,16 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {expiringCount > 0 && (
+            <button
+              onClick={() => setShowExpiryModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 rounded-xl text-xs sm:text-sm font-semibold transition shadow-sm animate-pulse"
+            >
+              <ShieldAlert className="w-4 h-4 text-rose-600" />
+              <span>Peringatan ED ({expiringCount})</span>
+            </button>
+          )}
+
           <Link
             href="/pos"
             className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition shadow-sm"
@@ -86,265 +115,446 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
-        {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Sales */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Penjualan</p>
-            <h3 className="text-xl font-bold text-slate-900 mt-1">
-              {formatCurrency(data?.sales_summary?.total_amount)}
-            </h3>
-            <p className="text-[11px] text-emerald-600 font-medium mt-1">
-              {data?.sales_summary?.total_count || 0} Transaksi Selesai
-            </p>
+      {/* Banner Peringatan Obat Expired Kritis */}
+      {expiringCount > 0 && (
+        <div className="shrink-0 bg-gradient-to-r from-rose-500 via-rose-600 to-red-600 text-white p-3 sm:p-3.5 rounded-2xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+              <ShieldAlert className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <div className="font-bold text-sm tracking-tight flex items-center gap-2">
+                Peringatan: {expiringCount} Obat Kadaluarsa / Kritis (≤ 1 Minggu)
+              </div>
+              <p className="text-[11px] text-white/90">
+                Terdapat obat yang telah kadaluarsa atau mendekati tanggal ED dalam 7 hari. Lakukan pengecekan &amp; karantina obat segera.
+              </p>
+            </div>
           </div>
-          <div className="w-12 h-12 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600 shrink-0">
-            <TrendingUp className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Purchases */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Pengadaan (PO)</p>
-            <h3 className="text-xl font-bold text-slate-900 mt-1">
-              {formatCurrency(data?.purchase_summary?.total_amount)}
-            </h3>
-            <p className="text-[11px] text-slate-500 font-medium mt-1">
-              {data?.purchase_summary?.total_count || 0} Faktur Diterima
-            </p>
-          </div>
-          <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 shrink-0">
-            <TrendingDown className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Gross Profit */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Laba Kotor Est.</p>
-            <h3 className="text-xl font-bold text-emerald-600 mt-1">
-              {formatCurrency(fin.gross_profit)}
-            </h3>
-            <p className="text-[11px] text-slate-400 mt-1">Estimasi Margin Penjualan</p>
-          </div>
-          <div className="w-12 h-12 bg-teal-50 rounded-xl flex items-center justify-center text-teal-600 shrink-0">
-            <DollarSign className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Cash & Bank Balance */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Saldo Kas & Bank</p>
-            <h3 className="text-xl font-bold text-slate-900 mt-1">
-              {formatCurrency(fin.cash_bank_balance)}
-            </h3>
-            <p className="text-[11px] text-slate-500 mt-1">Laci Kasir & Rekening Operasional</p>
-          </div>
-          <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 shrink-0">
-            <CreditCard className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Receivables (Piutang) */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Piutang Usaha (AR)</p>
-            <h3 className="text-xl font-bold text-amber-600 mt-1">
-              {formatCurrency(fin.receivables)}
-            </h3>
-            <p className="text-[11px] text-slate-500 mt-1">Faktur Belum Terbayar</p>
-          </div>
-          <div className="w-12 h-12 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 shrink-0">
-            <FileText className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Payables (Utang) */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Utang Usaha (AP)</p>
-            <h3 className="text-xl font-bold text-red-600 mt-1">
-              {formatCurrency(fin.payables)}
-            </h3>
-            <p className="text-[11px] text-slate-500 mt-1">Tagihan PBF / Supplier</p>
-          </div>
-          <div className="w-12 h-12 bg-red-50 rounded-xl flex items-center justify-center text-red-600 shrink-0">
-            <TrendingDown className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Inventory Valuation */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Nilai Persediaan</p>
-            <h3 className="text-xl font-bold text-slate-900 mt-1">
-              {formatCurrency(fin.inventory_valuation)}
-            </h3>
-            <p className="text-[11px] text-slate-500 mt-1">Moving Average Cost</p>
-          </div>
-          <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center text-purple-600 shrink-0">
-            <Package className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Low Stock Alert */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Peringatan Stok Minimum</p>
-            <h3 className="text-xl font-bold text-orange-600 mt-1">
-              {data?.low_stock_count || 0} Produk
-            </h3>
-            <Link href="/inventory/balances?low_stock=true" className="text-[11px] text-orange-600 font-semibold mt-1 flex items-center gap-1 hover:underline">
-              Periksa Stok Menipis <ArrowUpRight className="w-3 h-3" />
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setShowExpiryModal(true)}
+              className="px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white font-semibold text-xs transition"
+            >
+              Buka Popup Detail
+            </button>
+            <Link
+              href="/inventory/expired?filter=1_week"
+              className="px-3 py-1.5 rounded-lg bg-white text-rose-700 hover:bg-rose-50 font-bold text-xs transition shadow-sm flex items-center gap-1"
+            >
+              Menu Obat ED <ExternalLink className="w-3.5 h-3.5" />
             </Link>
           </div>
-          <div className="w-12 h-12 bg-orange-50 rounded-xl flex items-center justify-center text-orange-600 shrink-0">
-            <AlertTriangle className="w-6 h-6" />
-          </div>
         </div>
-      </div>
+      )}
 
-      {/* Main Charts & Bestsellers Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Trend Bar Chart */}
-        <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold text-slate-800">
-              Tren Transaksi Penjualan vs Pengadaan (6 Bulan Terakhir)
-            </h3>
-            <span className="text-xs text-slate-400">Dalam Satuan Rupiah (IDR)</span>
-          </div>
-
-          <div className="h-72 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="month" stroke="#94a3b8" fontSize={11} />
-                <YAxis stroke="#94a3b8" fontSize={11} tickFormatter={(val) => `Rp ${(val / 1000).toFixed(0)}k`} />
-                <Tooltip
-                  formatter={(val: number) => [formatCurrency(val), ""]}
-                  contentStyle={{ backgroundColor: "#0f172a", borderRadius: "8px", border: "none", color: "#fff" }}
-                />
-                <Legend wrapperStyle={{ fontSize: "12px", paddingTop: "8px" }} />
-                <Bar dataKey="sales" name="Penjualan" fill="#10b981" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="purchases" name="Pembelian" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Best Selling Products */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                <Boxes className="w-4 h-4 text-emerald-600" />
-                <span>Obat & Produk Terlaris</span>
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
+        {/* KPI Cards Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Sales */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Penjualan</p>
+              <h3 className="text-xl font-bold text-slate-900 mt-1">
+                {formatCurrency(data?.sales_summary?.total_amount)}
               </h3>
+              <p className="text-[11px] text-emerald-600 font-medium mt-1">
+                {data?.sales_summary?.total_count || 0} Transaksi Selesai
+              </p>
             </div>
-
-            <div className="divide-y divide-slate-100">
-              {topProds.length === 0 ? (
-                <div className="py-8 text-center text-slate-400 text-xs">
-                  Belum ada data transaksi penjualan bulan ini.
-                </div>
-              ) : (
-                topProds.map((item: any, i: number) => (
-                  <div key={i} className="py-2.5 flex items-center justify-between text-xs">
-                    <div>
-                      <p className="font-semibold text-slate-800">{item.name}</p>
-                      <p className="text-[11px] text-slate-400 mt-0.5">Terjual: {item.total_qty} Unit</p>
-                    </div>
-                    <span className="font-semibold text-emerald-600">
-                      {formatCurrency(item.total_sales)}
-                    </span>
-                  </div>
-                ))
-              )}
+            <div className="w-12 h-12 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600 shrink-0">
+              <TrendingUp className="w-6 h-6" />
             </div>
           </div>
 
-          <Link
-            href="/reports/sales"
-            className="w-full mt-4 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-medium rounded-xl text-center block transition border border-slate-200"
-          >
-            Lihat Laporan Penjualan Lengkap
-          </Link>
-        </div>
-      </div>
+          {/* Purchases */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Pengadaan (PO)</p>
+              <h3 className="text-xl font-bold text-slate-900 mt-1">
+                {formatCurrency(data?.purchase_summary?.total_amount)}
+              </h3>
+              <p className="text-[11px] text-slate-500 font-medium mt-1">
+                {data?.purchase_summary?.total_count || 0} Faktur Diterima
+              </p>
+            </div>
+            <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 shrink-0">
+              <TrendingDown className="w-6 h-6" />
+            </div>
+          </div>
 
-      {/* Recent Transactions Table */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-bold text-slate-800">Transaksi Penjualan & Kasir Terbaru</h3>
-          <Link href="/sales/invoices" className="text-xs text-emerald-600 hover:underline font-semibold">
-            Semua Faktur Penjualan &rarr;
-          </Link>
+          {/* Gross Profit */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Laba Kotor Est.</p>
+              <h3 className="text-xl font-bold text-emerald-600 mt-1">
+                {formatCurrency(fin.gross_profit)}
+              </h3>
+              <p className="text-[11px] text-slate-400 mt-1">Estimasi Margin Penjualan</p>
+            </div>
+            <div className="w-12 h-12 bg-teal-50 rounded-xl flex items-center justify-center text-teal-600 shrink-0">
+              <DollarSign className="w-6 h-6" />
+            </div>
+          </div>
+
+          {/* Cash & Bank Balance */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Saldo Kas &amp; Bank</p>
+              <h3 className="text-xl font-bold text-slate-900 mt-1">
+                {formatCurrency(fin.cash_bank_balance)}
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-1">Laci Kasir &amp; Rekening Operasional</p>
+            </div>
+            <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 shrink-0">
+              <CreditCard className="w-6 h-6" />
+            </div>
+          </div>
+
+          {/* Receivables (Piutang) */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Piutang Usaha (AR)</p>
+              <h3 className="text-xl font-bold text-amber-600 mt-1">
+                {formatCurrency(fin.receivables)}
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-1">Faktur Belum Terbayar</p>
+            </div>
+            <div className="w-12 h-12 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 shrink-0">
+              <FileText className="w-6 h-6" />
+            </div>
+          </div>
+
+          {/* Payables (Utang) */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Utang Usaha (AP)</p>
+              <h3 className="text-xl font-bold text-red-600 mt-1">
+                {formatCurrency(fin.payables)}
+              </h3>
+              <p className="text-[11px] text-slate-500 mt-1">Tagihan PBF / Supplier</p>
+            </div>
+            <div className="w-12 h-12 bg-red-50 rounded-xl flex items-center justify-center text-red-600 shrink-0">
+              <TrendingDown className="w-6 h-6" />
+            </div>
+          </div>
+
+          {/* Low Stock Alert */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Peringatan Stok Minimum</p>
+              <h3 className="text-xl font-bold text-orange-600 mt-1">
+                {data?.low_stock_count || 0} Produk
+              </h3>
+              <Link
+                href="/inventory/minimum-stock"
+                className="text-[11px] text-orange-600 font-semibold mt-1 flex items-center gap-1 hover:underline"
+              >
+                Periksa Stok Menipis <ArrowUpRight className="w-3 h-3" />
+              </Link>
+            </div>
+            <div className="w-12 h-12 bg-orange-50 rounded-xl flex items-center justify-center text-orange-600 shrink-0">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+          </div>
+
+          {/* Expired Drugs Card */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Obat Kritis &amp; Expired</p>
+              <h3 className="text-xl font-bold text-rose-600 mt-1">
+                {expiringCount} Obat
+              </h3>
+              <Link
+                href="/inventory/expired?filter=1_week"
+                className="text-[11px] text-rose-600 font-semibold mt-1 flex items-center gap-1 hover:underline"
+              >
+                Monitoring Obat ED <ArrowUpRight className="w-3 h-3" />
+              </Link>
+            </div>
+            <div className="w-12 h-12 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600 shrink-0">
+              <ShieldAlert className="w-6 h-6" />
+            </div>
+          </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-600 uppercase font-semibold text-[11px]">
-              <tr>
-                <th className="py-2.5 px-3 rounded-l-lg">No Faktur</th>
-                <th className="py-2.5 px-3">Tanggal</th>
-                <th className="py-2.5 px-3">Pelanggan</th>
-                <th className="py-2.5 px-3">Tipe</th>
-                <th className="py-2.5 px-3">Total</th>
-                <th className="py-2.5 px-3">Status</th>
-                <th className="py-2.5 px-3 rounded-r-lg text-right">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {recentSales.length === 0 ? (
+        {/* Main Charts & Bestsellers Row */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Trend Bar Chart */}
+          <div className="lg:col-span-2 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold text-slate-800">
+                Tren Transaksi Penjualan vs Pengadaan (6 Bulan Terakhir)
+              </h3>
+              <span className="text-xs text-slate-400">Dalam Satuan Rupiah (IDR)</span>
+            </div>
+
+            <div className="h-72 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="month" stroke="#94a3b8" fontSize={11} />
+                  <YAxis stroke="#94a3b8" fontSize={11} tickFormatter={(val) => `Rp ${(val / 1000).toFixed(0)}k`} />
+                  <Tooltip
+                    formatter={(val: number) => [formatCurrency(val), ""]}
+                    contentStyle={{ backgroundColor: "#0f172a", borderRadius: "8px", border: "none", color: "#fff" }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: "12px", paddingTop: "8px" }} />
+                  <Bar dataKey="sales" name="Penjualan" fill="#10b981" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="purchases" name="Pembelian" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Best Selling Products */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                  <Boxes className="w-4 h-4 text-emerald-600" />
+                  <span>Obat &amp; Produk Terlaris</span>
+                </h3>
+              </div>
+
+              <div className="divide-y divide-slate-100">
+                {topProds.length === 0 ? (
+                  <div className="py-8 text-center text-slate-400 text-xs">
+                    Belum ada data transaksi penjualan bulan ini.
+                  </div>
+                ) : (
+                  topProds.map((item: any, i: number) => (
+                    <div key={i} className="py-2.5 flex items-center justify-between text-xs">
+                      <div>
+                        <p className="font-semibold text-slate-800">{item.name}</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">Terjual: {item.total_qty} Unit</p>
+                      </div>
+                      <span className="font-semibold text-emerald-600">
+                        {formatCurrency(item.total_sales)}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <Link
+              href="/reports/sales"
+              className="w-full mt-4 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-medium rounded-xl text-center block transition border border-slate-200"
+            >
+              Lihat Laporan Penjualan Lengkap
+            </Link>
+          </div>
+        </div>
+
+        {/* Recent Transactions Table */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-bold text-slate-800">Transaksi Penjualan &amp; Kasir Terbaru</h3>
+            <Link href="/sales/invoices" className="text-xs text-emerald-600 hover:underline font-semibold">
+              Semua Faktur Penjualan &rarr;
+            </Link>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-600 uppercase font-semibold text-[11px]">
                 <tr>
-                  <td colSpan={7} className="py-6 text-center text-slate-400">
-                    Belum ada riwayat transaksi penjualan.
-                  </td>
+                  <th className="py-2.5 px-3 rounded-l-lg">No Faktur</th>
+                  <th className="py-2.5 px-3">Tanggal</th>
+                  <th className="py-2.5 px-3">Pelanggan</th>
+                  <th className="py-2.5 px-3">Tipe</th>
+                  <th className="py-2.5 px-3">Total</th>
+                  <th className="py-2.5 px-3">Status</th>
+                  <th className="py-2.5 px-3 rounded-r-lg text-right">Aksi</th>
                 </tr>
-              ) : (
-                recentSales.map((s: any) => (
-                  <tr key={s.id} className="hover:bg-slate-50/80 transition">
-                    <td className="py-2.5 px-3 font-semibold text-slate-900">{s.invoice_no}</td>
-                    <td className="py-2.5 px-3 text-slate-500">{formatDate(s.date)}</td>
-                    <td className="py-2.5 px-3 text-slate-700">{s.customer?.name || "Pelanggan Umum"}</td>
-                    <td className="py-2.5 px-3">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
-                        {s.type}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 font-semibold text-slate-900">{formatCurrency(s.total_amount)}</td>
-                    <td className="py-2.5 px-3">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                        s.payment_status === "PAID"
-                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                          : "bg-amber-50 text-amber-700 border border-amber-200"
-                      }`}>
-                        {s.payment_status}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-right">
-                      <a
-                        href={`http://localhost:8080/api/v1/reports/invoices/${s.id}/pdf`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-emerald-600 hover:text-emerald-700 font-semibold"
-                      >
-                        Cetak PDF
-                      </a>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {recentSales.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-6 text-center text-slate-400">
+                      Belum ada riwayat transaksi penjualan.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  recentSales.map((s: any) => (
+                    <tr key={s.id} className="hover:bg-slate-50/80 transition">
+                      <td className="py-2.5 px-3 font-semibold text-slate-900">{s.invoice_no}</td>
+                      <td className="py-2.5 px-3 text-slate-500">{formatDate(s.date)}</td>
+                      <td className="py-2.5 px-3 text-slate-700">{s.customer?.name || "Pelanggan Umum"}</td>
+                      <td className="py-2.5 px-3">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700">
+                          {s.type}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 font-semibold text-slate-900">{formatCurrency(s.total_amount)}</td>
+                      <td className="py-2.5 px-3">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                            s.payment_status === "PAID"
+                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                              : "bg-amber-50 text-amber-700 border border-amber-200"
+                          }`}
+                        >
+                          {s.payment_status}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        <a
+                          href={`http://localhost:8080/api/v1/reports/invoices/${s.id}/pdf`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-emerald-600 hover:text-emerald-700 font-semibold"
+                        >
+                          Cetak PDF
+                        </a>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
-      </div>
+
+      {/* ======================================================== */}
+      {/* POPUP MODAL PERINGATAN OBAT EXPIRED ≤ 1 MINGGU           */}
+      {/* ======================================================== */}
+      {showExpiryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-2xl w-full border border-rose-200 shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-rose-600 to-red-600 text-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                  <ShieldAlert className="w-7 h-7 text-white" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base sm:text-lg font-bold tracking-tight">
+                      Peringatan Obat Expired &amp; Mendekati ED
+                    </h2>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase bg-white/25 text-white">
+                      ≤ 1 Minggu
+                    </span>
+                  </div>
+                  <p className="text-xs text-rose-100 mt-0.5">
+                    Sistem mendeteksi {expiringCount} item obat telah kadaluarsa atau kadaluarsa dalam waktu &le; 7 hari.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowExpiryModal(false)}
+                className="text-white/80 hover:text-white hover:bg-white/10 rounded-xl p-1.5 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Notice */}
+            <div className="bg-rose-50 border-b border-rose-100 p-3 px-5 text-rose-800 text-xs flex items-center gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>
+                <strong>Tindakan yang Disarankan (CDOB):</strong> Segera pisahkan produk fisik dari etalase ke area karantina atau lakukan proses retur ke PBF / Distributor.
+              </span>
+            </div>
+
+            {/* Modal List Table */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-2">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] sticky top-0 border-b border-slate-200">
+                  <tr>
+                    <th className="py-2 px-3">No</th>
+                    <th className="py-2 px-3">Kode &amp; Nama Obat</th>
+                    <th className="py-2 px-3">No. Batch</th>
+                    <th className="py-2 px-3">Tanggal ED</th>
+                    <th className="py-2 px-3">Sisa Waktu</th>
+                    <th className="py-2 px-3 text-right">Stok</th>
+                    <th className="py-2 px-3 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {expiringItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-6 text-center text-slate-400">
+                        Tidak ada obat yang kadaluarsa dalam 1 minggu.
+                      </td>
+                    </tr>
+                  ) : (
+                    expiringItems.map((item: any, idx: number) => {
+                      const isExpired = item.days_remaining < 0;
+                      return (
+                        <tr
+                          key={item.id || idx}
+                          className={`hover:bg-slate-50 transition ${
+                            isExpired ? "bg-rose-50/40" : "bg-red-50/20"
+                          }`}
+                        >
+                          <td className="py-2.5 px-3 text-slate-400 font-medium">{idx + 1}</td>
+                          <td className="py-2.5 px-3">
+                            <div className="font-bold text-slate-800">{item.name}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">{item.code}</div>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold border border-slate-200 text-[10px]">
+                              {item.batch_number || "NON-BATCH"}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-700 whitespace-nowrap">
+                            {formatDate(item.expired_date)}
+                          </td>
+                          <td className="py-2.5 px-3 font-bold text-slate-800 whitespace-nowrap">
+                            {item.status_label}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-black text-slate-800">
+                            {item.current_stock} <span className="text-[10px] text-slate-500 font-normal">{item.unit_name}</span>
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                isExpired
+                                  ? "bg-rose-100 text-rose-800 border border-rose-300"
+                                  : "bg-red-100 text-red-800 border border-red-300"
+                              }`}
+                            >
+                              {isExpired ? "EXPIRED" : "KRITIS"}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <span className="text-slate-500 text-xs">
+                Peringatan ini dapat dibuka kembali melalui tombol di header dasbor.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowExpiryModal(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs transition"
+                >
+                  Tutup / Mengerti
+                </button>
+                <Link
+                  href="/inventory/expired?filter=1_week"
+                  onClick={() => setShowExpiryModal(false)}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-sm flex items-center gap-1.5"
+                >
+                  Buka Menu Obat ED Lengkap
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -28,6 +28,9 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		})
 	})
 
+	// Serve static uploaded files
+	r.Static("/uploads", "./uploads")
+
 	authHandler := handlers.NewAuthHandler(cfg)
 	companyHandler := handlers.NewCompanyHandler()
 	userHandler := handlers.NewUserHandler()
@@ -40,6 +43,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	dashboardHandler := handlers.NewDashboardHandler()
 	reportHandler := handlers.NewReportHandler()
 	settingHandler := handlers.NewSettingHandler()
+	documentHandler := handlers.NewDocumentHandler()
 
 	api := r.Group("/api/v1")
 	{
@@ -74,7 +78,13 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			protected.GET("/users", userHandler.GetUsers)
 			protected.POST("/users", userHandler.CreateUser)
 			protected.PUT("/users/:id", userHandler.UpdateUser)
+			protected.DELETE("/users/:id", userHandler.DeleteUser)
 			protected.GET("/roles", userHandler.GetRoles)
+			protected.POST("/roles", userHandler.CreateRole)
+			protected.PUT("/roles/:id", userHandler.UpdateRole)
+			protected.DELETE("/roles/:id", userHandler.DeleteRole)
+			protected.GET("/roles/:id/permissions", userHandler.GetRolePermissions)
+			protected.PUT("/roles/:id/permissions", userHandler.UpdateRolePermissions)
 			protected.GET("/permissions", userHandler.GetPermissions)
 
 			// Master Data
@@ -191,6 +201,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			protected.GET("/inventory/stock-card", inventoryHandler.GetStockCard)
 			protected.GET("/inventory/opname", inventoryHandler.GetStockOpnames)
 			protected.POST("/inventory/opname", inventoryHandler.CreateStockOpname)
+			protected.GET("/inventory/expired-drugs", inventoryHandler.GetExpiredDrugs)
+			protected.PUT("/inventory/expired-drugs/:id", inventoryHandler.UpdateDrugExpiry)
 
 			// Item Masuk
 			protected.GET("/inventory/item-entries", inventoryHandler.GetItemEntries)
@@ -268,6 +280,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			protected.GET("/sales", salesHandler.GetSales)
 			protected.GET("/sales/:id", salesHandler.GetSale)
 			protected.POST("/sales", salesHandler.CreateSale)
+			protected.PUT("/sales/:id", salesHandler.UpdateSale)
 			protected.DELETE("/sales/:id", salesHandler.DeleteSale)
 
 			// Sales Returns
@@ -373,9 +386,25 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			protected.GET("/reports/inventory/excel", reportHandler.ExportInventoryReportExcel)
 			protected.GET("/reports/invoices/:id/pdf", reportHandler.ExportInvoicePDF)
 
-			// Settings & Audit Logs
+			// Settings, Numbering, Audit Logs, Integrations & System
 			protected.GET("/settings/numbering", settingHandler.GetNumberingFormats)
+			protected.PUT("/settings/numbering/:id", settingHandler.UpdateNumberingFormat)
 			protected.GET("/settings/audit-logs", settingHandler.GetAuditLogs)
+			protected.GET("/settings/groups/:group", settingHandler.GetGroupSettings)
+			protected.PUT("/settings/groups/:group", settingHandler.UpdateGroupSettings)
+			protected.GET("/settings/open-modules", settingHandler.GetOpenModules)
+			protected.DELETE("/settings/open-modules/:id", settingHandler.CloseOpenModule)
+			protected.GET("/settings/database/stats", settingHandler.GetDatabaseStats)
+			protected.POST("/settings/database/vacuum", settingHandler.VacuumDatabase)
+			protected.GET("/settings/system-info", settingHandler.GetSystemInfo)
+
+			// Document & PBF Compliance Attachments (Dual Mode Upload, Approval Workflow & Edit)
+			protected.POST("/documents/upload", documentHandler.UploadDocument)
+			protected.GET("/documents", documentHandler.GetDocuments)
+			protected.PUT("/documents/:id", documentHandler.UpdateDocument)
+			protected.PUT("/documents/:id/approval", documentHandler.ApproveDocument)
+			protected.DELETE("/documents/:id", documentHandler.DeleteDocument)
+			protected.GET("/documents/requirements", documentHandler.GetPbfRequirements)
 		}
 	}
 

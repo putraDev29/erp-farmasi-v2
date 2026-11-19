@@ -107,6 +107,10 @@ func (h *SalesHandler) CreateSalesOrder(c *gin.Context) {
 		Notes      string     `json:"notes"`
 		TaxPercent float64    `json:"tax_percent"`
 		Discount   float64    `json:"discount"`
+		CustomerSPNumber   string     `json:"customer_sp_number"`
+		CustomerSPDate     *time.Time `json:"customer_sp_date"`
+		CustomerSPType     string     `json:"customer_sp_type"`
+		PBFOriginInvoiceNo string     `json:"pbf_origin_invoice_no"`
 		Items      []struct {
 			ProductID uuid.UUID `json:"product_id" binding:"required"`
 			UnitID    uuid.UUID `json:"unit_id" binding:"required"`
@@ -152,6 +156,10 @@ func (h *SalesHandler) CreateSalesOrder(c *gin.Context) {
 		Discount:    req.Discount,
 		TotalAmount: totalAmount,
 		Notes:       req.Notes,
+		CustomerSPNumber:   req.CustomerSPNumber,
+		CustomerSPDate:     req.CustomerSPDate,
+		CustomerSPType:     req.CustomerSPType,
+		PBFOriginInvoiceNo: req.PBFOriginInvoiceNo,
 		CreatedBy:   userID,
 	}
 
@@ -199,6 +207,10 @@ func (h *SalesHandler) UpdateSalesOrder(c *gin.Context) {
 		Status     string     `json:"status"`
 		TaxPercent float64    `json:"tax_percent"`
 		Discount   float64    `json:"discount"`
+		CustomerSPNumber   string     `json:"customer_sp_number"`
+		CustomerSPDate     *time.Time `json:"customer_sp_date"`
+		CustomerSPType     string     `json:"customer_sp_type"`
+		PBFOriginInvoiceNo string     `json:"pbf_origin_invoice_no"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.SendError(c, http.StatusBadRequest, "Data update tidak valid", err.Error())
@@ -217,6 +229,12 @@ func (h *SalesHandler) UpdateSalesOrder(c *gin.Context) {
 	if req.Status != "" {
 		so.Status = req.Status
 	}
+	if req.CustomerSPType != "" {
+		so.CustomerSPType = req.CustomerSPType
+	}
+	so.CustomerSPNumber = req.CustomerSPNumber
+	so.CustomerSPDate = req.CustomerSPDate
+	so.PBFOriginInvoiceNo = req.PBFOriginInvoiceNo
 	so.TaxPercent = req.TaxPercent
 	so.Discount = req.Discount
 
@@ -302,6 +320,7 @@ func (h *SalesHandler) GetSales(c *gin.Context) {
 	var sales []models.Sale
 	if err := query.Preload("Customer").
 		Preload("Warehouse").
+		Preload("OriginPurchase.Supplier").
 		Preload("SalesRep").
 		Preload("User").
 		Preload("Items.Product").
@@ -327,6 +346,7 @@ func (h *SalesHandler) GetSale(c *gin.Context) {
 	if err := database.DB.Where("id = ? AND company_id = ?", id, companyID).
 		Preload("Customer").
 		Preload("Warehouse").
+		Preload("OriginPurchase.Supplier").
 		Preload("SalesRep").
 		Preload("User").
 		Preload("Items.Product").
@@ -356,6 +376,7 @@ type CheckoutItem struct {
 }
 
 type CheckoutRequest struct {
+	ID           *uuid.UUID        `json:"id"`
 	WarehouseID  uuid.UUID         `json:"warehouse_id" binding:"required"`
 	CustomerID   uuid.UUID         `json:"customer_id" binding:"required"`
 	SalesOrderID *uuid.UUID        `json:"sales_order_id"`
@@ -365,6 +386,16 @@ type CheckoutRequest struct {
 	Discount     float64           `json:"discount"`
 	ShippingFee  float64           `json:"shipping_fee"`
 	Notes        string            `json:"notes"`
+	CustomerSPNumber   string      `json:"customer_sp_number"`
+	CustomerSPDate     *time.Time  `json:"customer_sp_date"`
+	CustomerSPType     string      `json:"customer_sp_type"`
+	PBFOriginInvoiceNo string      `json:"pbf_origin_invoice_no"`
+	OriginPurchaseID   *uuid.UUID  `json:"origin_purchase_id"`
+	TaxInvoiceNo       string      `json:"tax_invoice_no"`
+	DeliveryOrderNo    string      `json:"delivery_order_no"`
+	DueDate            *time.Time  `json:"due_date"`
+	InvoiceDate        *time.Time  `json:"invoice_date"`
+	CashAccountID      *uuid.UUID  `json:"cash_account_id"`
 	Items        []CheckoutItem    `json:"items" binding:"required"`
 	Payments     []CheckoutPayment `json:"payments"`
 }
@@ -429,6 +460,15 @@ func (h *SalesHandler) CreateSale(c *gin.Context) {
 		remainingAmount = totalAmount
 	}
 
+	saleDate := time.Now()
+	if req.InvoiceDate != nil {
+		saleDate = *req.InvoiceDate
+	}
+	saleDueDate := time.Now().AddDate(0, 0, 14)
+	if req.DueDate != nil {
+		saleDueDate = *req.DueDate
+	}
+
 	sale := models.Sale{
 		CompanyID:       companyID,
 		BranchID:        branchID,
@@ -437,8 +477,8 @@ func (h *SalesHandler) CreateSale(c *gin.Context) {
 		SalesOrderID:    req.SalesOrderID,
 		SalesRepID:      req.SalesRepID,
 		InvoiceNo:       invNo,
-		Date:            time.Now(),
-		DueDate:         time.Now().AddDate(0, 0, 14),
+		Date:            saleDate,
+		DueDate:         saleDueDate,
 		Type:            saleType,
 		Status:          "POSTED",
 		PaymentStatus:   paymentStatus,
@@ -452,7 +492,18 @@ func (h *SalesHandler) CreateSale(c *gin.Context) {
 		ChangeAmount:    changeAmount,
 		RemainingAmount: remainingAmount,
 		Notes:           req.Notes,
+		CustomerSPNumber:   req.CustomerSPNumber,
+		CustomerSPDate:     req.CustomerSPDate,
+		CustomerSPType:     req.CustomerSPType,
+		PBFOriginInvoiceNo: req.PBFOriginInvoiceNo,
+		OriginPurchaseID:   req.OriginPurchaseID,
+		TaxInvoiceNo:       req.TaxInvoiceNo,
+		DeliveryOrderNo:    req.DeliveryOrderNo,
 		CreatedBy:       userID,
+	}
+
+	if req.ID != nil && *req.ID != uuid.Nil {
+		sale.ID = *req.ID
 	}
 
 	if err := tx.Create(&sale).Error; err != nil {
@@ -529,15 +580,31 @@ func (h *SalesHandler) CreateSale(c *gin.Context) {
 		tx.Create(&sp)
 	}
 
+	// Resolve Cash / Bank Account Code
+	cashAccountCode := "1-1110" // Default Kas Kecil / Kasir
+	if req.CashAccountID != nil {
+		var customAcc models.Account
+		if err := tx.First(&customAcc, *req.CashAccountID).Error; err == nil && customAcc.Code != "" {
+			cashAccountCode = customAcc.Code
+		}
+	} else if len(req.Payments) > 0 {
+		firstPay := req.Payments[0]
+		if firstPay.Method == "TRANSFER" || firstPay.Method == "BANK" || firstPay.BankID != nil {
+			cashAccountCode = "1-1120" // Bank BCA
+		} else if firstPay.Method == "CASH" && saleType != "POS" {
+			cashAccountCode = "1-1121" // Kas Besar untuk transaksi B2B/PBF
+		}
+	}
+
 	// Double-entry journal entries
 	var journalEntries []services.JournalEntryParam
 	effectivePaid := totalPaid - changeAmount
 	if effectivePaid > 0 {
 		journalEntries = append(journalEntries, services.JournalEntryParam{
-			AccountCode: "1-1110", // Kas Kecil / Kasir
+			AccountCode: cashAccountCode,
 			Debit:       effectivePaid,
 			Credit:      0,
-			Description: fmt.Sprintf("Penerimaan Kas Faktur %s", sale.InvoiceNo),
+			Description: fmt.Sprintf("Penerimaan Kas/Bank Faktur %s", sale.InvoiceNo),
 		})
 	}
 
@@ -550,12 +617,23 @@ func (h *SalesHandler) CreateSale(c *gin.Context) {
 		})
 	}
 
+	// Split Net Sales vs PPN Keluaran
+	netSalesAmount := totalAmount - taxAmount
 	journalEntries = append(journalEntries, services.JournalEntryParam{
 		AccountCode: "4-1000", // Pendapatan Penjualan
 		Debit:       0,
-		Credit:      totalAmount,
-		Description: fmt.Sprintf("Penjualan Faktur %s", sale.InvoiceNo),
+		Credit:      netSalesAmount,
+		Description: fmt.Sprintf("Pendapatan Penjualan Faktur %s", sale.InvoiceNo),
 	})
+
+	if taxAmount > 0 {
+		journalEntries = append(journalEntries, services.JournalEntryParam{
+			AccountCode: "2-1100", // Utang PPN Keluaran
+			Debit:       0,
+			Credit:      taxAmount,
+			Description: fmt.Sprintf("PPN Keluaran Faktur %s", sale.InvoiceNo),
+		})
+	}
 
 	if totalCOGS > 0 {
 		journalEntries = append(journalEntries,
@@ -582,6 +660,72 @@ func (h *SalesHandler) CreateSale(c *gin.Context) {
 
 	tx.Commit()
 	utils.SendCreated(c, "Transaksi kasir / penjualan berhasil disimpan dan diposting", sale)
+}
+
+func (h *SalesHandler) UpdateSale(c *gin.Context) {
+	companyID := c.MustGet("company_id").(uuid.UUID)
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		utils.SendError(c, http.StatusBadRequest, "ID tidak valid", nil)
+		return
+	}
+
+	var sale models.Sale
+	if err := database.DB.Where("id = ? AND company_id = ?", id, companyID).First(&sale).Error; err != nil {
+		utils.SendError(c, http.StatusNotFound, "Faktur penjualan tidak ditemukan", nil)
+		return
+	}
+
+	var req struct {
+		Notes              string     `json:"notes"`
+		CustomerSPNumber   string     `json:"customer_sp_number"`
+		CustomerSPDate     *time.Time `json:"customer_sp_date"`
+		CustomerSPType     string     `json:"customer_sp_type"`
+		PBFOriginInvoiceNo string     `json:"pbf_origin_invoice_no"`
+		OriginPurchaseID   *uuid.UUID `json:"origin_purchase_id"`
+		TaxInvoiceNo       string     `json:"tax_invoice_no"`
+		DeliveryOrderNo    string     `json:"delivery_order_no"`
+		DueDate            *time.Time `json:"due_date"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.SendError(c, http.StatusBadRequest, "Data update tidak valid", err.Error())
+		return
+	}
+
+	updates := map[string]interface{}{}
+	if req.Notes != "" {
+		updates["notes"] = req.Notes
+	}
+	if req.CustomerSPNumber != "" {
+		updates["customer_sp_number"] = req.CustomerSPNumber
+	}
+	if req.CustomerSPDate != nil {
+		updates["customer_sp_date"] = req.CustomerSPDate
+	}
+	if req.CustomerSPType != "" {
+		updates["customer_sp_type"] = req.CustomerSPType
+	}
+	if req.PBFOriginInvoiceNo != "" {
+		updates["pbf_origin_invoice_no"] = req.PBFOriginInvoiceNo
+	}
+	if req.OriginPurchaseID != nil {
+		updates["origin_purchase_id"] = req.OriginPurchaseID
+	}
+	if req.TaxInvoiceNo != "" {
+		updates["tax_invoice_no"] = req.TaxInvoiceNo
+	}
+	if req.DeliveryOrderNo != "" {
+		updates["delivery_order_no"] = req.DeliveryOrderNo
+	}
+	if req.DueDate != nil {
+		updates["due_date"] = req.DueDate
+	}
+
+	if len(updates) > 0 {
+		database.DB.Model(&sale).Updates(updates)
+	}
+
+	utils.SendSuccess(c, "Faktur penjualan berhasil diperbarui", sale)
 }
 
 func (h *SalesHandler) DeleteSale(c *gin.Context) {

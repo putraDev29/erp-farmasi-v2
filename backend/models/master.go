@@ -1,6 +1,10 @@
 package models
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type Category struct {
 	BaseModel
@@ -40,6 +44,8 @@ type Product struct {
 	SubCategoryID *uuid.UUID `gorm:"type:uuid;index" json:"sub_category_id"`
 	BrandID       *uuid.UUID `gorm:"type:uuid;index" json:"brand_id"`
 	Rack          string     `gorm:"size:100" json:"rack"`
+	BatchNumber   string     `gorm:"size:100;index" json:"batch_number"`
+	ExpiredDate   *time.Time `gorm:"index" json:"expired_date"`
 	SalesStatus   string     `gorm:"size:30;default:'MASIH_DIJUAL'" json:"sales_status"` // MASIH_DIJUAL, TIDAK_DIJUAL, BISA_BELI_TIDAK_DIJUAL
 	MinStock      float64    `gorm:"type:numeric(12,2);default:0" json:"min_stock"`
 	MaxStock      float64    `gorm:"type:numeric(12,2);default:0" json:"max_stock"`
@@ -47,6 +53,12 @@ type Product struct {
 	Description   string     `gorm:"type:text" json:"description"`
 	Notes         string     `gorm:"type:text" json:"notes"`
 	IsActive      bool       `gorm:"default:true" json:"is_active"`
+
+	// Regulasi Farmasi BPOM & Saluran Distribusi (Apotek vs PBF / RS)
+	DistributionChannel string  `gorm:"size:30;default:'ALL';not null" json:"distribution_channel"` // ALL (Apotek & PBF), PBF_ONLY (Hanya PBF/RS), APOTEK_ONLY (Khusus Apotek)
+	IsSoldInPharmacy    bool    `gorm:"default:true" json:"is_sold_in_pharmacy"`                     // True jika diizinkan dijual di Apotek retail
+	DrugClassification  string  `gorm:"size:50;default:'OBAT_KERAS'" json:"drug_classification"`    // OBAT_BEBAS, OBAT_BEBAS_TERBATAS, OBAT_KERAS, PSIKOTROPIKA, NARKOTIKA, PREKURSOR, OOT, OBAT_KHUSUS_RS, ALKES, LAINNYA
+	BPOMNumber          string  `gorm:"size:100" json:"bpom_number"`                                // Nomor Izin Edar BPOM (NIE)
 
 	// Tab 2: Satuan dan Harga
 	LockPriceOnSale bool       `gorm:"default:false" json:"lock_price_on_sale"`
@@ -207,6 +219,15 @@ type Customer struct {
 	Points            int64      `gorm:"default:0" json:"points"`
 	IsActive          bool       `gorm:"default:true" json:"is_active"`
 
+	// PBF / Farmasi Compliance
+	IsPharmacyFacility bool       `gorm:"default:false" json:"is_pharmacy_facility"`
+	PharmacyType       string     `gorm:"size:50;default:'UMUM'" json:"pharmacy_type"` // APOTEK, RUMAH_SAKIT, KLINIK, PBF, TOKO_OBAT, UMUM
+	SIANumber          string     `gorm:"size:100" json:"sia_number"`
+	SIAExpiryDate      *time.Time `json:"sia_expiry_date"`
+	APJName            string     `gorm:"size:150" json:"apj_name"`
+	APJSIPANumber      string     `gorm:"size:100" json:"apj_sipa_number"`
+	APJSIPAExpiryDate  *time.Time `json:"apj_sipa_expiry_date"`
+
 	CustomerGroup *CustomerGroup `gorm:"foreignKey:CustomerGroupID" json:"customer_group,omitempty"`
 	Territory     *Territory     `gorm:"foreignKey:TerritoryID" json:"territory,omitempty"`
 }
@@ -228,6 +249,18 @@ type Supplier struct {
 	BankAccount       string    `gorm:"size:50" json:"bank_account"`
 	BankHolder        string    `gorm:"size:100" json:"bank_holder"`
 	IsActive          bool      `gorm:"default:true" json:"is_active"`
+
+	// PBF Compliance
+	IsPBF                 bool       `gorm:"default:false" json:"is_pbf"`
+	PBFLicenseNo          string     `gorm:"size:100" json:"pbf_license_no"`
+	PBFLicenseExpiryDate  *time.Time `json:"pbf_license_expiry_date"`
+	CDOBLicenseNo         string     `gorm:"size:100" json:"cdob_license_no"`
+	CDOBLicenseExpiryDate *time.Time `json:"cdob_license_expiry_date"`
+	APJName               string     `gorm:"size:150" json:"apj_name"`
+	APJSIPANo             string     `gorm:"size:100" json:"apj_sipa_no"`
+	APJSIPAExpiryDate     *time.Time `json:"apj_sipa_expiry_date"`
+	NPWP                  string     `gorm:"size:50" json:"npwp"`
+	PBFType               string     `gorm:"size:50;default:'PBF Pusat'" json:"pbf_type"` // PBF Pusat, PBF Cabang, PAKF
 }
 
 type Bank struct {

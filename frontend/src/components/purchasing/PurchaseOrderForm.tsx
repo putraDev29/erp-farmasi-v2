@@ -27,6 +27,7 @@ import { CariSupplierModal } from "./CariSupplierModal";
 import { CariItemModal } from "./CariItemModal";
 import { IncludeBiayaModal } from "./IncludeBiayaModal";
 import { DetailItemModal } from "./DetailItemModal";
+import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
 
 interface POItemRow {
   product_id: string;
@@ -86,6 +87,14 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
   const [orderStatus, setOrderStatus] = useState("Select...");
   const [warehouseId, setWarehouseId] = useState("");
   const [ppnType, setPpnType] = useState<"Non" | "Include" | "Exclude">("Non");
+
+  // PBF Surat Pesanan (SP) Fields
+  const [spType, setSpType] = useState("REGULER");
+  const [spNumber, setSpNumber] = useState("");
+  const [apjName, setApjName] = useState("apt. Rahmat Hidayat, S.Farm.");
+  const [apjSipaNo, setApjSipaNo] = useState("19920101/SIPA_61.71/2022/2048");
+  const [isPbfDocModalOpen, setIsPbfDocModalOpen] = useState(false);
+  const [pbfDocCount, setPbfDocCount] = useState(0);
 
   // Items table
   const [items, setItems] = useState<POItemRow[]>([]);
@@ -172,6 +181,10 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
       if (existingPO.notes) {
         setNotes(existingPO.notes);
       }
+      if (existingPO.sp_type) setSpType(existingPO.sp_type);
+      if (existingPO.sp_number) setSpNumber(existingPO.sp_number);
+      if (existingPO.apj_name) setApjName(existingPO.apj_name);
+      if (existingPO.apj_sipa_no) setApjSipaNo(existingPO.apj_sipa_no);
       if (existingPO.expected_date) {
         setExpectedDate(existingPO.expected_date.split("T")[0]);
       }
@@ -452,6 +465,10 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         discount: calculatedNominalDiscount,
         shipping_fee: Number(extraFee) || 0,
         status: orderStatus !== "Select..." ? orderStatus : "PENDING",
+        sp_type: spType,
+        sp_number: spNumber,
+        apj_name: apjName,
+        apj_sipa_no: apjSipaNo,
         items: items.map((it) => {
           let resolvedUnitId = it.unit_id;
           if (!resolvedUnitId || resolvedUnitId.length < 20) {
@@ -665,6 +682,87 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
               <option value="Include">Include</option>
               <option value="Exclude">Exclude</option>
             </select>
+          </div>
+
+          {/* Jenis SP Farmasi */}
+          <div className="md:col-span-4">
+            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
+              Jenis SP Farmasi (BPOM) :
+            </label>
+            <select
+              value={spType}
+              onChange={(e) => setSpType(e.target.value)}
+              className="w-full h-6 px-1.5 py-0 border border-emerald-300 rounded text-[11px] font-semibold text-emerald-800 bg-emerald-50/40 focus:outline-none focus:border-emerald-500"
+            >
+              <option value="REGULER">SP REGULER (Obat Bebas & Keras)</option>
+              <option value="NARKOTIKA">SP NARKOTIKA (Formulir Khusus)</option>
+              <option value="PSIKOTROPIKA">SP PSIKOTROPIKA</option>
+              <option value="PREKURSOR">SP PREKURSOR FARMASI</option>
+              <option value="OOT">SP OBAT-OBAT TERTENTU (OOT)</option>
+            </select>
+          </div>
+        </div>
+
+        {/* ROW 3: PBF SP Compliance & Upload */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-1.5 items-end pt-0.5">
+          {/* No. SP Farmasi */}
+          <div className="md:col-span-3">
+            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
+              No. SP Farmasi Resmi :
+            </label>
+            <input
+              type="text"
+              value={spNumber}
+              onChange={(e) => setSpNumber(e.target.value)}
+              placeholder="Contoh: SP/AB/2026/XI/001"
+              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 font-mono"
+            />
+          </div>
+
+          {/* Nama APJ */}
+          <div className="md:col-span-3">
+            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
+              Apoteker Penanggung Jawab (APJ) :
+            </label>
+            <input
+              type="text"
+              value={apjName}
+              onChange={(e) => setApjName(e.target.value)}
+              placeholder="Nama APJ Pemesan"
+              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500"
+            />
+          </div>
+
+          {/* SIPA APJ */}
+          <div className="md:col-span-3">
+            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
+              No. SIPA APJ :
+            </label>
+            <input
+              type="text"
+              value={apjSipaNo}
+              onChange={(e) => setApjSipaNo(e.target.value)}
+              placeholder="No. SIPA APJ"
+              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 font-mono"
+            />
+          </div>
+
+          {/* Lampiran Dokumen SP */}
+          <div className="md:col-span-3">
+            <button
+              type="button"
+              onClick={() => setIsPbfDocModalOpen(true)}
+              className="w-full h-6 px-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-semibold rounded text-[11px] inline-flex items-center justify-between shadow-2xs transition active:scale-95"
+              title="Upload scan Surat Pesanan fisik bertandatangan basah APJ"
+            >
+              <span className="flex items-center gap-1">
+                <span>📎</span>
+                <span>Upload Scan SP APJ</span>
+              </span>
+              <span className="bg-emerald-600 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+                {pbfDocCount}
+              </span>
+            </button>
           </div>
         </div>
       </div>
@@ -1414,6 +1512,45 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                 className="px-4 py-1.5 bg-[#009b62] hover:bg-[#008754] text-white rounded font-bold text-xs shadow-xs"
               >
                 Simpan DP
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 7: DOKUMEN SP & PBF UPLOAD (Dual Mode Upload) */}
+      {isPbfDocModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-2xs p-3">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-4xl max-h-[90vh] overflow-y-auto flex flex-col animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-4 py-2.5 bg-slate-100 border-b border-slate-200 flex justify-between items-center">
+              <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                <span>📎</span>
+                <span>Lampiran Dokumen Surat Pesanan (SP) Farmasi</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsPbfDocModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4">
+              <PbfDocumentUpload
+                entityType="purchase_order"
+                entityId={orderId || "temp"}
+                title={`Dokumen Surat Pesanan (SP): ${orderNo || "PO"}`}
+                subtitle="Unggah scan fisik Surat Pesanan (SP) bertandatangan basah APJ dan berstempel resmi apotek"
+                onUploadedCountChange={setPbfDocCount}
+              />
+            </div>
+            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsPbfDocModalOpen(false)}
+                className="h-7 px-4 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-xs shadow-2xs transition"
+              >
+                Selesai
               </button>
             </div>
           </div>

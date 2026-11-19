@@ -68,6 +68,27 @@ func (h *MasterHandler) GetProducts(c *gin.Context) {
 		query = query.Where("sales_status = 'MASIH_DIJUAL'")
 	}
 
+	// Filter Regulasi Obat PBF vs Apotek
+	distChannel := c.Query("distribution_channel")
+	isSoldPharmacy := c.Query("is_sold_in_pharmacy")
+	drugClass := c.Query("drug_classification")
+	targetFacility := c.Query("target_facility")
+
+	if distChannel != "" && distChannel != "ALL" && distChannel != "Semua" {
+		query = query.Where("distribution_channel = ?", distChannel)
+	}
+	if isSoldPharmacy == "true" {
+		query = query.Where("is_sold_in_pharmacy = true AND distribution_channel != 'PBF_ONLY'")
+	} else if isSoldPharmacy == "false" {
+		query = query.Where("is_sold_in_pharmacy = false OR distribution_channel = 'PBF_ONLY'")
+	}
+	if drugClass != "" && drugClass != "ALL" && drugClass != "Semua" {
+		query = query.Where("drug_classification = ?", drugClass)
+	}
+	if strings.ToLower(targetFacility) == "apotek" {
+		query = query.Where("is_sold_in_pharmacy = true AND distribution_channel != 'PBF_ONLY'")
+	}
+
 	// Order by clause
 	direction := "ASC"
 	if strings.ToLower(sortDir) == "desc" {

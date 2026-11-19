@@ -1676,3 +1676,244 @@ func (h *InventoryHandler) FixStockBalances(c *gin.Context) {
 		"fixed_count": fixedCount,
 	})
 }
+
+// ==========================================
+// MONITORING OBAT EXPIRED / KADALUARSA (ED)
+// ==========================================
+
+type ExpiredDrugItem struct {
+	ID            uuid.UUID  `json:"id"`
+	Code          string     `json:"code"`
+	Barcode       string     `json:"barcode"`
+	Name          string     `json:"name"`
+	BatchNumber   string     `json:"batch_number"`
+	ExpiredDate   *time.Time `json:"expired_date"`
+	ExpiredDateStr string    `json:"expired_date_str"`
+	DaysRemaining int        `json:"days_remaining"`
+	Status        string     `json:"status"`
+	StatusLabel   string     `json:"status_label"`
+	CategoryName  string     `json:"category_name"`
+	BrandName     string     `json:"brand_name"`
+	UnitName      string     `json:"unit_name"`
+	Rack          string     `json:"rack"`
+	CurrentStock  float64    `json:"current_stock"`
+	PurchasePrice float64    `json:"purchase_price"`
+	SellingPrice  float64    `json:"selling_price"`
+	RiskValue     float64    `json:"risk_value"`
+}
+
+func (h *InventoryHandler) GetExpiredDrugs(c *gin.Context) {
+	companyID := c.MustGet("company_id").(uuid.UUID)
+	filter := c.DefaultQuery("filter", "all") // all, expired, 1_week, 2_weeks, 30_days, 2_months, 3_months
+	search := c.Query("search")
+	categoryID := c.Query("category_id")
+	brandID := c.Query("brand_id")
+	stockOnly := c.Query("stock_only") == "true"
+
+	var products []models.Product
+	q := database.DB.Model(&models.Product{}).
+		Where("company_id = ? AND expired_date IS NOT NULL", companyID).
+		Preload("Category").
+		Preload("Brand").
+		Preload("BaseUnit").
+		Preload("StockBalances")
+
+	if categoryID != "" && categoryID != "ALL" && categoryID != "-- Semua Jenis --" {
+		q = q.Where("category_id = ?", categoryID)
+	}
+	if brandID != "" && brandID != "ALL" && brandID != "-- Semua Merek --" {
+		q = q.Where("brand_id = ?", brandID)
+	}
+	if search != "" {
+		s := "%" + search + "%"
+		q = q.Where("name ILIKE ? OR code ILIKE ? OR barcode ILIKE ? OR batch_number ILIKE ?", s, s, s, s)
+	}
+
+	if err := q.Order("expired_date ASC").Find(&products).Error; err != nil {
+		utils.SendError(c, http.StatusInternalServerError, "Gagal memuat data obat expired", err.Error())
+		return
+	}
+
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+
+	var items []ExpiredDrugItem
+	var countExpired, count1Week, count2Weeks, count30Days, count2Months, count3Months int
+	var totalRiskValue float64
+	var totalRiskQty float64
+
+	for _, p := range products {
+		var stockQty float64
+		for _, sb := range p.StockBalances {
+			stockQty += sb.AvailableQty
+		}
+
+		if stockOnly && stockQty <= 0 {
+			continue
+		}
+
+		if p.ExpiredDate == nil {
+			continue
+		}
+
+		expDate := *p.ExpiredDate
+		expDateDay := time.Date(expDate.Year(), expDate.Month(), expDate.Day(), 0, 0, 0, 0, expDate.Location())
+		daysRemaining := int(expDateDay.Sub(today).Hours() / 24)
+
+		var status, statusLabel string
+		if daysRemaining < 0 {
+			status = "EXPIRED"
+			statusLabel = fmt.Sprintf("Expired (%d hari lalu)", -daysRemaining)
+			countExpired++
+		} else if daysRemaining <= 7 {
+			status = "CRITICAL_1_WEEK"
+			statusLabel = fmt.Sprintf("Kritis (%d hari lagi)", daysRemaining)
+			count1Week++
+		} else if daysRemaining <= 14 {
+			status = "WARNING_2_WEEKS"
+			statusLabel = fmt.Sprintf("Perhatian (%d hari lagi)", daysRemaining)
+			count2Weeks++
+		} else if daysRemaining <= 30 {
+			status = "ALERT_30_DAYS"
+			statusLabel = fmt.Sprintf("Waspada (%d hari lagi)", daysRemaining)
+			count30Days++
+		} else if daysRemaining <= 60 {
+			status = "NOTICE_2_MONTHS"
+			statusLabel = fmt.Sprintf("≤ 2 Bulan (%d hari lagi)", daysRemaining)
+			count2Months++
+		} else if daysRemaining <= 90 {
+			status = "NOTICE_3_MONTHS"
+			statusLabel = fmt.Sprintf("≤ 3 Bulan (%d hari lagi)", daysRemaining)
+			count3Months++
+		} else {
+			status = "SAFE"
+			statusLabel = fmt.Sprintf("Aman (%d hari lagi)", daysRemaining)
+		}
+
+		// Calculate risk value
+		riskVal := stockQty * p.PurchasePrice
+		if daysRemaining <= 90 {
+			totalRiskValue += riskVal
+			totalRiskQty += stockQty
+		}
+
+		// Apply filter
+		include := false
+		switch filter {
+		case "expired":
+			include = daysRemaining < 0
+		case "1_week":
+			// 1 minggu: expired or expiring within 7 days
+			include = daysRemaining <= 7
+		case "2_weeks":
+			include = daysRemaining <= 14
+		case "30_days":
+			include = daysRemaining <= 30
+		case "2_months":
+			include = daysRemaining <= 60
+		case "3_months":
+			include = daysRemaining <= 90
+		default: // "all"
+			include = true
+		}
+
+		if include {
+			catName := "-"
+			if p.Category != nil {
+				catName = p.Category.Name
+			}
+			brandName := "-"
+			if p.Brand != nil {
+				brandName = p.Brand.Name
+			}
+			unitName := "PCS"
+			if p.BaseUnit != nil {
+				unitName = p.BaseUnit.Name
+			}
+
+			items = append(items, ExpiredDrugItem{
+				ID:             p.ID,
+				Code:           p.Code,
+				Barcode:        p.Barcode,
+				Name:           p.Name,
+				BatchNumber:    p.BatchNumber,
+				ExpiredDate:    p.ExpiredDate,
+				ExpiredDateStr: expDate.Format("2006-01-02"),
+				DaysRemaining:  daysRemaining,
+				Status:         status,
+				StatusLabel:    statusLabel,
+				CategoryName:   catName,
+				BrandName:      brandName,
+				UnitName:       unitName,
+				Rack:           p.Rack,
+				CurrentStock:   stockQty,
+				PurchasePrice:  p.PurchasePrice,
+				SellingPrice:   p.SellingPrice,
+				RiskValue:      riskVal,
+			})
+		}
+	}
+
+	utils.SendSuccess(c, "Data monitoring obat expired & mendekati expired berhasil dimuat", gin.H{
+		"items": items,
+		"metrics": gin.H{
+			"count_expired":        countExpired,
+			"count_1_week":         count1Week,
+			"count_2_weeks":        count2Weeks,
+			"count_30_days":        count30Days,
+			"count_2_months":       count2Months,
+			"count_3_months":       count3Months,
+			"total_risk_stock_qty": totalRiskQty,
+			"total_risk_value":     totalRiskValue,
+			"total_monitored":      len(products),
+		},
+	})
+}
+
+func (h *InventoryHandler) UpdateDrugExpiry(c *gin.Context) {
+	companyID := c.MustGet("company_id").(uuid.UUID)
+	productID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		utils.SendError(c, http.StatusBadRequest, "ID produk tidak valid", err.Error())
+		return
+	}
+
+	var req struct {
+		BatchNumber string `json:"batch_number"`
+		ExpiredDate string `json:"expired_date"` // YYYY-MM-DD
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.SendError(c, http.StatusBadRequest, "Data tidak valid", err.Error())
+		return
+	}
+
+	var prod models.Product
+	if err := database.DB.Where("id = ? AND company_id = ?", productID, companyID).First(&prod).Error; err != nil {
+		utils.SendError(c, http.StatusNotFound, "Produk tidak ditemukan", err.Error())
+		return
+	}
+
+	prod.BatchNumber = req.BatchNumber
+	if req.ExpiredDate != "" {
+		t, err := time.Parse("2006-01-02", req.ExpiredDate)
+		if err == nil {
+			prod.ExpiredDate = &t
+		}
+	} else {
+		prod.ExpiredDate = nil
+	}
+
+	if err := database.DB.Save(&prod).Error; err != nil {
+		utils.SendError(c, http.StatusInternalServerError, "Gagal memperbarui data expired", err.Error())
+		return
+	}
+
+	// Also sync to stock balances for this product
+	database.DB.Model(&models.StockBalance{}).Where("product_id = ?", productID).Updates(map[string]interface{}{
+		"batch_number": prod.BatchNumber,
+		"expired_date": prod.ExpiredDate,
+	})
+
+	utils.SendSuccess(c, "Data batch dan tanggal kadaluarsa produk berhasil diperbarui", prod)
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -27,6 +27,7 @@ import { useAuthStore } from "@/lib/auth-store";
 interface NestedSubItem {
   title: string;
   href: string;
+  children?: NestedSubItem[];
 }
 
 interface SubMenuItem {
@@ -207,6 +208,7 @@ const menuItems: MenuItem[] = [
       { title: "Saldo Awal", href: "/inventory/initial-stock" },
       { title: "Stock Opname", href: "/inventory/opname" },
       { title: "Stock Minimum", href: "/inventory/minimum-stock" },
+      { title: "Obat Kadaluarsa (ED)", href: "/inventory/expired" },
       { title: "Proses Perbaikan Saldo", href: "/inventory/fix-balance" },
       { title: "Koreksi Nilai Persediaan", href: "/inventory/cost-correction" },
       { title: "Riwayat Serial", href: "/inventory/serial-history" },
@@ -267,12 +269,56 @@ const menuItems: MenuItem[] = [
   {
     title: "Pengaturan",
     icon: Settings,
-    iconColor: "text-slate-500",
+    iconColor: "text-purple-500",
     subItems: [
-      { title: "Profil Perusahaan", href: "/settings/company" },
-      { title: "Manajemen Pengguna", href: "/settings/users" },
-      { title: "Format Penomoran", href: "/settings/numbering" },
-      { title: "Jejak Audit BPOM", href: "/settings/audit-logs" },
+      {
+        title: "Data User",
+        href: "/settings/roles",
+        children: [
+          { title: "Kelompok Akses User", href: "/settings/roles" },
+          { title: "Daftar User", href: "/settings/users" },
+        ],
+      },
+      { title: "Pengaturan Tema", href: "/settings/theme" },
+      { title: "Pengaturan Umum", href: "/settings/general" },
+      { title: "Pengaturan Perusahaan", href: "/settings/company" },
+      { title: "Integrasi PPOB", href: "/settings/ppob" },
+      { title: "Integrasi Marketplace", href: "/settings/marketplace" },
+      { title: "Integrasi Payment Gateway", href: "/settings/payment-gateway" },
+      { title: "Mini Printer", href: "/settings/printer" },
+      {
+        title: "Setting Nomor",
+        href: "/settings/numbering/master",
+        children: [
+          { title: "Setting Nomor Master", href: "/settings/numbering/master" },
+          { title: "Setting Nomor Transaksi", href: "/settings/numbering/transactions" },
+        ],
+      },
+      { title: "Log Aktivitas", href: "/settings/audit-logs" },
+      { title: "Daftar Modul Terbuka", href: "/settings/open-modules" },
+      {
+        title: "Import Data",
+        href: "/settings/import/supplier",
+        children: [
+          { title: "Import Data Supplier", href: "/settings/import/supplier" },
+          { title: "Import Data Pelanggan", href: "/settings/import/customer" },
+          { title: "Import Data Sales", href: "/settings/import/sales" },
+          { title: "Import Data Item Satu Harga", href: "/settings/import/item-single-price" },
+          { title: "Import Data Item Satuan", href: "/settings/import/item-units" },
+          { title: "Import Data Item Jumlah", href: "/settings/import/item-quantity" },
+          { title: "Import Data Item Level", href: "/settings/import/item-level" },
+          {
+            title: "Import Data Item Varian",
+            href: "/settings/import/variant-quantity",
+            children: [
+              { title: "Import Varian Jumlah", href: "/settings/import/variant-quantity" },
+              { title: "Import Varian Level", href: "/settings/import/variant-level" },
+            ],
+          },
+        ],
+      },
+      { title: "Pengaturan Database", href: "/settings/database" },
+      { title: "Informasi Sistem", href: "/settings/system-info" },
     ],
   },
   {
@@ -292,6 +338,14 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
 }) => {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
+  const [themeMode, setThemeMode] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    const savedMode = localStorage.getItem("erp_theme_mode");
+    if (savedMode === "dark") {
+      setThemeMode("dark");
+    }
+  }, []);
 
   const [openGroups, setOpenGroups] = useState<{ [key: string]: boolean }>({
     "Master Data":
@@ -348,6 +402,11 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
       pathname.includes("/accounting/initial-balance") ||
       pathname.includes("/accounting/account-settings") ||
       pathname.includes("/accounting/audit-notes"),
+    // Pengaturan sub-groups
+    "Data User": pathname.startsWith("/settings/roles") || pathname.startsWith("/settings/users"),
+    "Setting Nomor": pathname.startsWith("/settings/numbering"),
+    "Import Data": pathname.startsWith("/settings/import"),
+    "Import Data Item Varian": pathname.includes("/settings/import/variant"),
   });
 
   const toggleGroup = (title: string) => {
@@ -364,18 +423,24 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
 
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-40 w-52 bg-white text-slate-700 flex flex-col transition-transform duration-300 ease-in-out md:translate-x-0 select-none shadow-[2px_0_8px_rgba(0,0,0,0.03)] border-r border-slate-200/90 ${
-        isOpen ? "translate-x-0" : "-translate-x-full"
-      }`}
+      className={`fixed inset-y-0 left-0 z-40 w-52 flex flex-col transition-transform duration-300 ease-in-out md:translate-x-0 select-none shadow-[2px_0_8px_rgba(0,0,0,0.03)] border-r ${
+        themeMode === "dark"
+          ? "bg-[#2d323f] text-slate-200 border-slate-700/80"
+          : "bg-white text-slate-700 border-slate-200/90"
+      } ${isOpen ? "translate-x-0" : "-translate-x-full"}`}
     >
       {/* 1. BRAND HEADER (Compact Width) */}
-      <div className="h-13 px-3 flex items-center justify-between border-b border-slate-100 shrink-0">
+      <div className={`h-13 px-3 flex items-center justify-between border-b shrink-0 ${
+        themeMode === "dark" ? "border-slate-700/60" : "border-slate-100"
+      }`}>
         <Link href="/dashboard" className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#00c875] to-emerald-700 flex items-center justify-center text-white shadow-xs shadow-emerald-500/20 shrink-0">
             <Pill className="w-4 h-4 text-white" />
           </div>
           <div className="min-w-0">
-            <span className="font-extrabold text-[13px] tracking-tight text-slate-900 leading-none block truncate">
+            <span className={`font-extrabold text-[13px] tracking-tight leading-none block truncate ${
+              themeMode === "dark" ? "text-white" : "text-slate-900"
+            }`}>
               Ketoko.co.id
             </span>
             <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200/60 uppercase tracking-wider block mt-0.5 w-fit leading-none">
@@ -414,6 +479,8 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                 className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11.5px] transition-all duration-150 ${
                   isCurrentActive
                     ? "bg-[#00c875] text-white font-bold shadow-sm shadow-[#00c875]/30"
+                    : themeMode === "dark"
+                    ? "text-slate-300 hover:bg-[#252936] hover:text-white font-medium"
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium"
                 }`}
               >
@@ -434,6 +501,8 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
             return false;
           });
 
+          const isSettings = item.title === "Pengaturan";
+
           return (
             <div key={item.title} className="space-y-0.5">
               <button
@@ -441,16 +510,32 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                 onClick={() => toggleGroup(item.title)}
                 className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11.5px] transition-all duration-150 ${
                   isAnyChildActive
-                    ? "text-emerald-900 bg-emerald-50/90 font-bold border border-emerald-200/80"
+                    ? isSettings
+                      ? themeMode === "dark"
+                        ? "text-[#c084fc] bg-[#242834] font-bold border border-purple-500/30"
+                        : "text-purple-700 bg-purple-50/90 font-bold border border-purple-200/80"
+                      : themeMode === "dark"
+                      ? "text-emerald-400 bg-slate-800 font-bold border border-emerald-500/30"
+                      : "text-emerald-900 bg-emerald-50/90 font-bold border border-emerald-200/80"
                     : isGroupOpen
-                    ? "text-slate-800 bg-slate-50 font-semibold"
+                    ? themeMode === "dark"
+                      ? "text-white bg-[#262a36] font-semibold"
+                      : "text-slate-800 bg-slate-50 font-semibold"
+                    : themeMode === "dark"
+                    ? "text-slate-300 hover:bg-[#262a36] hover:text-white font-medium"
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium"
                 }`}
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <Icon
                     className={`w-3.5 h-3.5 shrink-0 ${
-                      isAnyChildActive ? "text-[#00c875]" : item.iconColor || "text-slate-400"
+                      isAnyChildActive
+                        ? isSettings
+                          ? themeMode === "dark"
+                            ? "text-[#c084fc]"
+                            : "text-purple-600"
+                          : "text-[#00c875]"
+                        : item.iconColor || "text-slate-400"
                     }`}
                   />
                   <span className="truncate">{item.title}</span>
@@ -464,7 +549,9 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
 
               {/* Sub Menu Drawer */}
               {isGroupOpen && item.subItems && (
-                <div className="pl-2.5 pr-0.5 py-0.5 space-y-0.5 border-l-2 border-slate-100 ml-2.5">
+                <div className={`pl-2.5 pr-0.5 py-0.5 space-y-0.5 border-l-2 ml-2.5 ${
+                  themeMode === "dark" ? "border-slate-700/60 bg-[#252936]/30 rounded-r" : "border-slate-100"
+                }`}>
                   {item.subItems.map((sub) => {
                     const hasChildren = sub.children && sub.children.length > 0;
                     const isNestedOpen = openNested[sub.title];
@@ -489,9 +576,19 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                             onClick={() => toggleNested(sub.title)}
                             className={`w-full flex items-center justify-between px-2 py-1 rounded-md text-[11px] transition-all ${
                               isAnyGrandchildActive
-                                ? "text-emerald-900 font-bold bg-emerald-50"
+                                ? isSettings
+                                  ? themeMode === "dark"
+                                    ? "text-[#c084fc] font-bold bg-[#242834]"
+                                    : "text-purple-700 font-bold bg-purple-50"
+                                  : themeMode === "dark"
+                                  ? "text-emerald-400 font-bold bg-slate-800"
+                                  : "text-emerald-900 font-bold bg-emerald-50"
                                 : isNestedOpen
-                                ? "text-slate-800 font-semibold bg-slate-50"
+                                ? themeMode === "dark"
+                                  ? "text-white font-semibold bg-[#262a36]"
+                                  : "text-slate-800 font-semibold bg-slate-50"
+                                : themeMode === "dark"
+                                ? "text-slate-400 hover:text-white hover:bg-[#262a36] font-medium"
                                 : "text-slate-500 hover:text-slate-800 hover:bg-slate-50 font-medium"
                             }`}
                           >
@@ -505,8 +602,79 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
 
                           {/* Nested Sub-Children */}
                           {isNestedOpen && (
-                            <div className="pl-2.5 pr-0.5 py-0.5 space-y-0.5 border-l border-slate-200 ml-1.5">
+                            <div className={`pl-2.5 pr-0.5 py-0.5 space-y-0.5 border-l ml-1.5 ${
+                              themeMode === "dark" ? "border-slate-700" : "border-slate-200"
+                            }`}>
                               {sub.children!.map((child) => {
+                                const hasGrandchildren = child.children && child.children.length > 0;
+                                if (hasGrandchildren) {
+                                  const isChildNestedOpen = openNested[child.title];
+                                  const isAnyGcActive = child.children!.some(
+                                    (gc) => pathname === gc.href
+                                  );
+
+                                  return (
+                                    <div key={child.title} className="space-y-0.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleNested(child.title)}
+                                        className={`w-full flex items-center justify-between px-2 py-1 rounded text-[10.5px] transition-all ${
+                                          isAnyGcActive
+                                            ? isSettings
+                                              ? themeMode === "dark"
+                                                ? "text-[#c084fc] font-bold bg-[#242834]"
+                                                : "text-purple-700 font-bold bg-purple-50"
+                                              : themeMode === "dark"
+                                              ? "text-emerald-400 font-bold bg-slate-800"
+                                              : "text-emerald-900 font-bold bg-emerald-50"
+                                            : isChildNestedOpen
+                                            ? themeMode === "dark"
+                                              ? "text-white font-semibold bg-[#262a36]"
+                                              : "text-slate-800 font-semibold bg-slate-50"
+                                            : themeMode === "dark"
+                                            ? "text-slate-400 hover:text-white hover:bg-[#262a36] font-medium"
+                                            : "text-slate-500 hover:text-slate-800 hover:bg-slate-50 font-medium"
+                                        }`}
+                                      >
+                                        <span className="truncate">{child.title}</span>
+                                        {isChildNestedOpen ? (
+                                          <ChevronDown className="w-2.5 h-2.5 text-slate-400 shrink-0 ml-1" />
+                                        ) : (
+                                          <ChevronRight className="w-2.5 h-2.5 text-slate-400 shrink-0 ml-1" />
+                                        )}
+                                      </button>
+
+                                      {isChildNestedOpen && (
+                                        <div className={`pl-2 pr-0.5 py-0.5 space-y-0.5 border-l ml-1.5 ${
+                                          themeMode === "dark" ? "border-slate-700" : "border-slate-200"
+                                        }`}>
+                                          {child.children!.map((gc) => {
+                                            const isGcActive = pathname === gc.href;
+                                            return (
+                                              <Link
+                                                key={gc.href}
+                                                href={gc.href}
+                                                onClick={onClose}
+                                                className={`block px-2 py-0.5 rounded text-[10px] transition-all truncate ${
+                                                  isGcActive
+                                                    ? isSettings
+                                                      ? "bg-purple-600 text-white font-bold shadow-xs shadow-purple-600/30"
+                                                      : "bg-[#00c875] text-white font-bold shadow-xs shadow-[#00c875]/30"
+                                                    : themeMode === "dark"
+                                                    ? "text-slate-400 hover:text-white hover:bg-[#262a36]"
+                                                    : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+                                                }`}
+                                              >
+                                                {gc.title}
+                                              </Link>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                }
+
                                 const isChildActive = pathname === child.href;
                                 return (
                                   <Link
@@ -515,7 +683,11 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                                     onClick={onClose}
                                     className={`block px-2 py-1 rounded text-[10.5px] transition-all truncate ${
                                       isChildActive
-                                        ? "bg-[#00c875] text-white font-bold shadow-xs shadow-[#00c875]/30"
+                                        ? isSettings
+                                          ? "bg-purple-600 text-white font-bold shadow-xs shadow-purple-600/30"
+                                          : "bg-[#00c875] text-white font-bold shadow-xs shadow-[#00c875]/30"
+                                        : themeMode === "dark"
+                                        ? "text-slate-400 hover:text-white hover:bg-[#262a36]"
                                         : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
                                     }`}
                                   >
@@ -537,7 +709,11 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                         onClick={onClose}
                         className={`block px-2 py-1 rounded-md text-[11px] transition-all truncate ${
                           isSubActive
-                            ? "bg-[#00c875] text-white font-bold shadow-xs shadow-[#00c875]/30"
+                            ? isSettings
+                              ? "bg-purple-600 text-white font-bold shadow-xs shadow-purple-600/30"
+                              : "bg-[#00c875] text-white font-bold shadow-xs shadow-[#00c875]/30"
+                            : themeMode === "dark"
+                            ? "text-slate-300 hover:text-white hover:bg-[#262a36] font-medium"
                             : "text-slate-500 hover:text-slate-900 hover:bg-slate-50 font-medium"
                         }`}
                       >
@@ -553,7 +729,9 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
       </div>
 
       {/* 4. PINNED MODERN USER PROFILE FOOTER */}
-      <div className="p-2.5 bg-slate-50/90 border-t border-slate-200/90 flex items-center justify-between shrink-0">
+      <div className={`p-2.5 border-t flex items-center justify-between shrink-0 ${
+        themeMode === "dark" ? "bg-[#242834] border-slate-700/80 text-slate-300" : "bg-slate-50/90 border-slate-200/90"
+      }`}>
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-[11px] border border-emerald-200 shrink-0 shadow-xs">
             {initialLetter}

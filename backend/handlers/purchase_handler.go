@@ -126,6 +126,10 @@ func (h *PurchaseHandler) CreatePurchaseOrder(c *gin.Context) {
 		TaxPercent   float64    `json:"tax_percent"`
 		Discount     float64    `json:"discount"`
 		ShippingFee  float64    `json:"shipping_fee"`
+		SPType       string     `json:"sp_type"`
+		SPNumber     string     `json:"sp_number"`
+		APJName      string     `json:"apj_name"`
+		APJSIPANo    string     `json:"apj_sipa_no"`
 		Items        []struct {
 			ProductID uuid.UUID `json:"product_id" binding:"required"`
 			UnitID    uuid.UUID `json:"unit_id" binding:"required"`
@@ -179,6 +183,10 @@ func (h *PurchaseHandler) CreatePurchaseOrder(c *gin.Context) {
 		TotalOrderedQty:  totalOrderedQty,
 		TotalReceivedQty: 0,
 		Notes:            req.Notes,
+		SPType:           req.SPType,
+		SPNumber:         req.SPNumber,
+		APJName:          req.APJName,
+		APJSIPANo:        req.APJSIPANo,
 		CreatedBy:        userID,
 	}
 
@@ -240,6 +248,10 @@ func (h *PurchaseHandler) UpdatePurchaseOrder(c *gin.Context) {
 		ShippingFee   float64    `json:"shipping_fee"`
 		Status        string     `json:"status"`
 		ProcessStatus string     `json:"process_status"`
+		SPType        string     `json:"sp_type"`
+		SPNumber      string     `json:"sp_number"`
+		APJName       string     `json:"apj_name"`
+		APJSIPANo     string     `json:"apj_sipa_no"`
 		Items         []struct {
 			ProductID uuid.UUID `json:"product_id"`
 			UnitID    uuid.UUID `json:"unit_id"`
@@ -274,6 +286,12 @@ func (h *PurchaseHandler) UpdatePurchaseOrder(c *gin.Context) {
 	if req.ProcessStatus != "" {
 		po.ProcessStatus = req.ProcessStatus
 	}
+	if req.SPType != "" {
+		po.SPType = req.SPType
+	}
+	po.SPNumber = req.SPNumber
+	po.APJName = req.APJName
+	po.APJSIPANo = req.APJSIPANo
 	po.TaxPercent = req.TaxPercent
 	po.Discount = req.Discount
 	po.ShippingFee = req.ShippingFee
@@ -420,6 +438,9 @@ func (h *PurchaseHandler) CreatePurchase(c *gin.Context) {
 		PaidAmount      float64    `json:"paid_amount"`
 		CashAccountID   *uuid.UUID `json:"cash_account_id"`
 		ComputerName    string     `json:"computer_name"`
+		PBFInvoiceNo       string  `json:"pbf_invoice_no"`
+		PBFDeliveryOrderNo string  `json:"pbf_delivery_order_no"`
+		TaxInvoiceNo       string  `json:"tax_invoice_no"`
 		Items           []struct {
 			ProductID uuid.UUID `json:"product_id" binding:"required"`
 			UnitID    uuid.UUID `json:"unit_id"`
@@ -489,6 +510,9 @@ func (h *PurchaseHandler) CreatePurchase(c *gin.Context) {
 		PaidAmount:      req.PaidAmount,
 		RemainingAmount: remaining,
 		Notes:           req.Notes,
+		PBFInvoiceNo:       req.PBFInvoiceNo,
+		PBFDeliveryOrderNo: req.PBFDeliveryOrderNo,
+		TaxInvoiceNo:       req.TaxInvoiceNo,
 		ComputerName:    computer,
 		CreatedBy:       userID,
 	}
@@ -665,6 +689,9 @@ func (h *PurchaseHandler) UpdatePurchase(c *gin.Context) {
 		ShippingFee     float64    `json:"shipping_fee"`
 		PaidAmount      float64    `json:"paid_amount"`
 		CashAccountID   *uuid.UUID `json:"cash_account_id"`
+		PBFInvoiceNo       string  `json:"pbf_invoice_no"`
+		PBFDeliveryOrderNo string  `json:"pbf_delivery_order_no"`
+		TaxInvoiceNo       string  `json:"tax_invoice_no"`
 		Items           []struct {
 			ProductID uuid.UUID `json:"product_id"`
 			UnitID    uuid.UUID `json:"unit_id"`
@@ -694,6 +721,9 @@ func (h *PurchaseHandler) UpdatePurchase(c *gin.Context) {
 		purchase.DueDate = req.DueDate
 	}
 	purchase.Notes = req.Notes
+	purchase.PBFInvoiceNo = req.PBFInvoiceNo
+	purchase.PBFDeliveryOrderNo = req.PBFDeliveryOrderNo
+	purchase.TaxInvoiceNo = req.TaxInvoiceNo
 	purchase.TaxPercent = req.TaxPercent
 	purchase.Discount = req.Discount
 	purchase.ShippingFee = req.ShippingFee

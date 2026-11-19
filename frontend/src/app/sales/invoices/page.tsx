@@ -13,9 +13,11 @@ import {
   ChevronRight,
   ArrowUpDown,
   Wallet,
+  X,
   ChevronLeft as BackIcon,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
 
 export default function SalesInvoicesPage() {
   const router = useRouter();
@@ -36,6 +38,7 @@ export default function SalesInvoicesPage() {
 
   // Modals
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [isDocModalOpen, setIsDocModalOpen] = useState(false);
 
   // Queries
   const { data: sales = [], isLoading } = useQuery({
@@ -119,23 +122,42 @@ export default function SalesInvoicesPage() {
         <Search className="w-3.5 h-3.5 stroke-[2.5]" />
       </button>
 
-      {/* + Tambah button (Green) */}
+      {/* + Tambah button (Green) -> Menuju Form Faktur Penjualan Baru */}
       <Link
-        href="/pos"
+        href="/sales/invoices/new"
         className="h-6 px-2.5 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95"
       >
         <Plus className="w-3.5 h-3.5 stroke-[3]" />
         <span>Tambah</span>
       </Link>
 
-      {/* ✏️ Ubah button (Blue) */}
+      {/* ✏️ Ubah button (Blue) -> Menuju Form Edit Penjualan */}
       <button
         type="button"
         disabled={!selectedId}
+        onClick={() => selectedId && router.push(`/sales/invoices/${selectedId}/edit`)}
         className="h-6 px-2.5 bg-[#3b82f6] hover:bg-blue-600 text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40"
       >
         <Pencil className="w-3 h-3 stroke-[2.5]" />
         <span>Ubah</span>
+      </button>
+
+      {/* 📎 Dokumen & Faktur PBF Asal button */}
+      <button
+        type="button"
+        onClick={() => {
+          if (!selectedId) {
+            alert("Silakan pilih baris faktur penjualan terlebih dahulu.");
+            return;
+          }
+          setIsDocModalOpen(true);
+        }}
+        disabled={!selectedId}
+        className="h-6 px-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40"
+        title="Upload / Kelola Scan Surat Pesanan & Faktur Pembelian PBF Asal"
+      >
+        <span>📎</span>
+        <span>Dokumen & Faktur PBF Asal</span>
       </button>
 
       {/* 🗑️ Hapus button (Red) */}
@@ -313,17 +335,41 @@ export default function SalesInvoicesPage() {
                   <tr
                     key={s.id}
                     onClick={() => setSelectedId(isSelected ? null : s.id)}
+                    onDoubleClick={() => router.push(`/sales/invoices/${s.id}/edit`)}
                     className={`border-b border-slate-100 cursor-pointer h-6 transition-colors ${
                       isSelected ? "bg-sky-50 text-sky-900 font-medium" : "hover:bg-slate-50/80"
                     }`}
                   >
                     <td className="py-0.5 px-2 border-r border-slate-100 text-center">
-                      <button className="text-sky-600 hover:text-sky-800">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          router.push(`/sales/invoices/${s.id}/edit`);
+                        }}
+                        className="text-sky-600 hover:text-sky-800"
+                        title="Ubah Transaksi Penjualan"
+                      >
                         <Pencil className="w-3 h-3" />
                       </button>
                     </td>
                     <td className="py-0.5 px-2.5 border-r border-slate-100 font-semibold text-emerald-700">
-                      {s.invoice_no}
+                      <div className="flex items-center gap-1.5">
+                        <span>{s.invoice_no}</span>
+                        {s.type === "BACKOFFICE" && (
+                          <span className="text-[9px] px-1 py-0.2 bg-blue-100 text-blue-800 font-bold rounded">
+                            PBF
+                          </span>
+                        )}
+                        {s.pbf_origin_invoice_no && (
+                          <span
+                            className="text-[9px] px-1 py-0.2 bg-amber-100 text-amber-800 font-medium rounded"
+                            title={`Faktur Asal: ${s.pbf_origin_invoice_no}`}
+                          >
+                            📎 Asal: {s.pbf_origin_invoice_no}
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-0.5 px-2.5 border-r border-slate-100">
                       {formatDate(s.date)}
@@ -400,6 +446,44 @@ export default function SalesInvoicesPage() {
                 className="h-6 px-3 bg-red-600 hover:bg-red-700 text-white rounded font-semibold text-[11px]"
               >
                 {deleteMutation.isPending ? "Menghapus..." : "Ya, Hapus"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PBF & SALES INVOICE DOCUMENTS MODAL (Dual Mode Upload) */}
+      {isDocModalOpen && selectedId && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-2xs flex items-center justify-center p-3">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-4xl max-h-[90vh] overflow-y-auto flex flex-col animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-4 py-2.5 bg-slate-100 border-b border-slate-200 flex justify-between items-center">
+              <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                <span>📎</span>
+                <span>Lampiran Dokumen Faktur Penjualan Farmasi / PBF</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsDocModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4">
+              <PbfDocumentUpload
+                entityType="sale"
+                entityId={selectedId}
+                title="Dokumen Faktur Penjualan & Faktur PBF Asal"
+                subtitle="Unggah Scan Surat Pesanan (SP) Pemesan, Faktur Asal saat Pembelian ke PBF, Surat Jalan, dan Faktur Pajak Penjualan"
+              />
+            </div>
+            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsDocModalOpen(false)}
+                className="h-7 px-4 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-xs shadow-2xs transition"
+              >
+                Tutup
               </button>
             </div>
           </div>

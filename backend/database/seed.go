@@ -74,7 +74,7 @@ func SeedInitialData(db *gorm.DB) error {
 		wh2 = models.Warehouse{
 			BranchID: branch.ID,
 			Code:     "WH02",
-			Name:     "Gudang Pendingin Cold Chain (2-8°C)",
+			Name:     "Gudang Pendingin Cold Chain (2-8Â°C)",
 			Address:  "Ruang Refrigerator Khusus",
 			Type:     "COLD_CHAIN",
 			IsActive: true,
@@ -752,8 +752,75 @@ func SeedInitialData(db *gorm.DB) error {
 	// 26. Sync existing purchases & supplier payments to CashTransactions (Kas Keluar)
 	SyncExistingPurchasesToCashTransactions(db)
 
+	// 27. Seed Batch Number & Tanggal Kadaluarsa (ED) Farmasi
+	SeedDrugExpiryDates(db)
+
+	// 28. Seed Sample Sales if empty
+	SeedSampleSales(db)
+
 	log.Println("[Seed] All initial data seeded successfully!")
 	return nil
+}
+
+func SeedDrugExpiryDates(db *gorm.DB) {
+	now := time.Now()
+	type DrugExpirySeed struct {
+		Code        string
+		BatchNumber string
+		DaysOffset  int
+	}
+
+		seeds := []DrugExpirySeed{
+		// 1. Sudah Kadaluarsa (Expired)
+		{"ABBOCATH-0001", "BATCH-ABC-2025-01", -8},
+		{"ACARBOSE-0001", "BATCH-ACR-2025-09", -15},
+
+		// 2. Kritis <= 1 Minggu (1-7 Hari) -> Pemicu Popup Peringatan Dashboard
+		{"OBT001", "BATCH-PCT-2026-X1", 3},  // Paracetamol 500mg: ED 3 hari lagi!
+		{"OBT005", "BATCH-ATD-2026-04", 5},  // Antasida Doen: ED 5 hari lagi!
+		{"ABBOCATH-0002", "BATCH-ABB-2026-KRT1", 3},
+		{"ABBOCATH-0003", "BATCH-ABB-2026-KRT2", 4},
+		{"ABBOCATH-0007", "BATCH-ABB-2026-W1", 6},
+
+		// 3. <= 2 Minggu (8-14 Hari)
+		{"OBT002", "BATCH-AMX-2026-08", 11}, // Amoxicillin: ED 11 hari lagi!
+		{"ACARBOSE-0002", "BATCH-ECL-2026-10", 11},
+
+		// 4. <= 30 Hari (15-30 Hari)
+		{"OBT003", "BATCH-VIT-2026-11", 22}, // Vitamin C: ED 22 hari lagi!
+		{"ABBOCATH-0008", "BATCH-ABB-2026-08", 24},
+
+		// 5. <= 2 Bulan (31-60 Hari)
+		{"OBT004", "BATCH-MKP-2026-12", 45}, // Minyak Kayu Putih: ED 45 hari lagi!
+		{"ABBOCATH-0010", "BATCH-ABB-2026-B2", 42},
+		{"ACARBOSE-0003", "BATCH-ECL-2026-50", 52},
+
+		// 6. <= 3 Bulan (61-90 Hari)
+		{"OBT006", "BATCH-KAS-2026-03", 75}, // Kasa Steril: ED 75 hari lagi!
+		{"ACARBOSE-0004", "BATCH-ACR-2026-04", 78},
+
+		// 7. Aman / Jauh (> 90 Hari)
+		{"ITM-0008", "BATCH-BTD-2027-01", 240},
+		{"ASM001", "BATCH-P3K-2027-01", 365},
+		{"ABBOCATH-0006", "BATCH-ABB-2027-06", 450},
+	}
+
+	for _, s := range seeds {
+		expDate := now.AddDate(0, 0, s.DaysOffset)
+		db.Model(&models.Product{}).Where("code = ?", s.Code).Updates(map[string]interface{}{
+			"batch_number": s.BatchNumber,
+			"expired_date": expDate,
+		})
+
+		var prod models.Product
+		if err := db.Where("code = ?", s.Code).First(&prod).Error; err == nil {
+			db.Model(&models.StockBalance{}).Where("product_id = ?", prod.ID).Updates(map[string]interface{}{
+				"batch_number": s.BatchNumber,
+				"expired_date": expDate,
+			})
+		}
+	}
+	log.Println("[Seed] Farmasi Drug Expiry dates & Batch numbers initialized!")
 }
 
 func SyncExistingPurchasesToCashTransactions(db *gorm.DB) {
@@ -892,4 +959,205 @@ func SyncExistingPurchasesToCashTransactions(db *gorm.DB) {
 			}
 		}
 	}
+}
+
+
+func SeedSampleSales(db *gorm.DB) {
+	var salesCount int64
+	db.Model(&models.Sale{}).Count(&salesCount)
+	if salesCount > 0 {
+		return
+	}
+
+	var company models.Company
+	if err := db.First(&company).Error; err != nil {
+		return
+	}
+	var branch models.Branch
+	if err := db.Where("company_id = ?", company.ID).First(&branch).Error; err != nil {
+		return
+	}
+	var warehouse models.Warehouse
+	if err := db.Where("branch_id = ?", branch.ID).First(&warehouse).Error; err != nil {
+		return
+	}
+	var adminUser models.User
+	if err := db.Where("company_id = ?", company.ID).First(&adminUser).Error; err != nil {
+		return
+	}
+	var customers []models.Customer
+	db.Where("company_id = ?", company.ID).Find(&customers)
+	if len(customers) == 0 {
+		return
+	}
+
+	var prods []models.Product
+	db.Where("company_id = ?", company.ID).Find(&prods)
+	if len(prods) == 0 {
+		return
+	}
+
+	prodMap := make(map[string]models.Product)
+	for _, p := range prods {
+		prodMap[p.Code] = p
+	}
+
+	now := time.Now()
+
+	type SampleSaleData struct {
+		InvoiceNo     string
+		Date          time.Time
+		CustomerIndex int
+		Type          string
+		Items         []struct {
+			Code string
+			Qty  float64
+		}
+	}
+
+	salesData := []SampleSaleData{
+		{
+			InvoiceNo:     "POS/2026/11/00001",
+			Date:          now.Add(-2 * time.Hour),
+			CustomerIndex: 0,
+			Type:          "POS",
+			Items: []struct {
+				Code string
+				Qty  float64
+			}{
+				{"OBT001", 3},
+				{"OBT005", 2},
+				{"OBT004", 1},
+			},
+		},
+		{
+			InvoiceNo:     "POS/2026/11/00002",
+			Date:          now.Add(-26 * time.Hour),
+			CustomerIndex: 1 % len(customers),
+			Type:          "POS",
+			Items: []struct {
+				Code string
+				Qty  float64
+			}{
+				{"OBT002", 2},
+				{"OBT003", 1},
+			},
+		},
+		{
+			InvoiceNo:     "POS/2026/11/00003",
+			Date:          now.Add(-50 * time.Hour),
+			CustomerIndex: 2 % len(customers),
+			Type:          "POS",
+			Items: []struct {
+				Code string
+				Qty  float64
+			}{
+				{"OBT001", 5},
+				{"OBT006", 1},
+			},
+		},
+		{
+			InvoiceNo:     "SI/2026/11/00001",
+			Date:          now.Add(-74 * time.Hour),
+			CustomerIndex: 3 % len(customers),
+			Type:          "BACKOFFICE",
+			Items: []struct {
+				Code string
+				Qty  float64
+			}{
+				{"ASM001", 1},
+				{"OBT003", 2},
+			},
+		},
+		{
+			InvoiceNo:     "POS/2026/10/00001",
+			Date:          now.AddDate(0, -1, -5),
+			CustomerIndex: 0,
+			Type:          "POS",
+			Items: []struct {
+				Code string
+				Qty  float64
+			}{
+				{"OBT001", 10},
+				{"OBT002", 5},
+			},
+		},
+		{
+			InvoiceNo:     "POS/2026/09/00001",
+			Date:          now.AddDate(0, -2, -10),
+			CustomerIndex: 1 % len(customers),
+			Type:          "POS",
+			Items: []struct {
+				Code string
+				Qty  float64
+			}{
+				{"OBT003", 4},
+				{"OBT004", 3},
+			},
+		},
+	}
+
+	for _, sd := range salesData {
+		var subtotal float64
+		var saleItems []models.SaleItem
+
+		for _, it := range sd.Items {
+			p, ok := prodMap[it.Code]
+			if !ok {
+				p = prods[0]
+			}
+			unitID := uuid.Nil
+			if p.BaseUnitID != nil {
+				unitID = *p.BaseUnitID
+			}
+			tot := it.Qty * p.SellingPrice
+			subtotal += tot
+			saleItems = append(saleItems, models.SaleItem{
+				ProductID:   p.ID,
+				UnitID:      unitID,
+				Qty:         it.Qty,
+				UnitPrice:   p.SellingPrice,
+				CostPrice:   p.PurchasePrice,
+				TotalAmount: tot,
+			})
+		}
+
+		tax := subtotal * 0.11
+		total := subtotal + tax
+		cust := customers[sd.CustomerIndex]
+
+		sale := models.Sale{
+			CompanyID:       company.ID,
+			BranchID:        branch.ID,
+			WarehouseID:     warehouse.ID,
+			CustomerID:      cust.ID,
+			InvoiceNo:       sd.InvoiceNo,
+			Date:            sd.Date,
+			DueDate:         sd.Date,
+			Type:            sd.Type,
+			Status:          "POSTED",
+			PaymentStatus:   "PAID",
+			Subtotal:        subtotal,
+			TaxPercent:      11,
+			TaxAmount:       tax,
+			TotalAmount:     total,
+			PaidAmount:      total,
+			RemainingAmount: 0,
+			Notes:           "Transaksi Penjualan Apotek Farmasi",
+			CreatedBy:      adminUser.ID,
+		}
+
+		if err := db.Create(&sale).Error; err == nil {
+			for i := range saleItems {
+				saleItems[i].SaleID = sale.ID
+				db.Create(&saleItems[i])
+			}
+			db.Create(&models.SalePayment{
+				SaleID: sale.ID,
+				Method: "CASH",
+				Amount: total,
+			})
+		}
+	}
+	log.Println("[Seed] Sample Sales transactions seeded successfully!")
 }

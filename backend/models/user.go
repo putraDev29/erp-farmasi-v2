@@ -15,10 +15,24 @@ type Permission struct {
 
 type Role struct {
 	BaseModel
-	Name        string       `gorm:"size:50;uniqueIndex;not null" json:"name"`
-	Description string       `gorm:"size:255" json:"description"`
-	IsSystem    bool         `gorm:"default:false" json:"is_system"`
-	Permissions []Permission `gorm:"many2many:role_permissions;" json:"permissions,omitempty"`
+	Name              string                 `gorm:"size:50;uniqueIndex;not null" json:"name"`
+	Description       string                 `gorm:"size:255" json:"description"`
+	IsSystem          bool                   `gorm:"default:false" json:"is_system"`
+	Permissions       []Permission           `gorm:"many2many:role_permissions;" json:"permissions,omitempty"`
+	ModulePermissions []RoleModulePermission `gorm:"foreignKey:RoleID" json:"module_permissions,omitempty"`
+}
+
+type RoleModulePermission struct {
+	BaseModel
+	RoleID                uuid.UUID `gorm:"type:uuid;index;not null" json:"role_id"`
+	Category              string    `gorm:"size:50;not null" json:"category"`
+	Module                string    `gorm:"size:150;not null" json:"module"`
+	CanOpen               bool      `gorm:"default:false" json:"can_open"`
+	CanCreate             bool      `gorm:"default:false" json:"can_create"`
+	CanEdit               bool      `gorm:"default:false" json:"can_edit"`
+	CanDelete             bool      `gorm:"default:false" json:"can_delete"`
+	LockTransactionNumber bool      `gorm:"default:false" json:"lock_transaction_number"`
+	LockDate              bool      `gorm:"default:false" json:"lock_date"`
 }
 
 type RolePermission struct {

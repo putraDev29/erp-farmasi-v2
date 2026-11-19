@@ -16,6 +16,8 @@ import {
   ChevronLeft as BackIcon,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
+import { CariObatSalesModal } from "@/components/sales/CariObatSalesModal";
 
 export default function SalesOrdersPage() {
   const router = useRouter();
@@ -49,6 +51,15 @@ export default function SalesOrdersPage() {
   const [formNotes, setFormNotes] = useState("");
   const [formTaxPercent, setFormTaxPercent] = useState<number>(0);
   const [formDiscount, setFormDiscount] = useState<number>(0);
+  // PBF & SP Compliance fields
+  const [formCustomerSPNumber, setFormCustomerSPNumber] = useState("");
+  const [formCustomerSPDate, setFormCustomerSPDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [formCustomerSPType, setFormCustomerSPType] = useState("REGULER");
+  const [formPBFOriginInvoiceNo, setFormPBFOriginInvoiceNo] = useState("");
+  const [isDocModalOpen, setIsDocModalOpen] = useState(false);
+  const [docModalTargetId, setDocModalTargetId] = useState<string | null>(null);
+  const [isItemModalOpen, setIsItemModalOpen] = useState(false);
+  const [orderDraftId, setOrderDraftId] = useState(() => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "so-" + Date.now()));
   const [formItems, setFormItems] = useState<
     Array<{
       product_id: string;
@@ -167,6 +178,10 @@ export default function SalesOrdersPage() {
     setFormNotes("");
     setFormTaxPercent(0);
     setFormDiscount(0);
+    setFormCustomerSPNumber("");
+    setFormCustomerSPDate(new Date().toISOString().split("T")[0]);
+    setFormCustomerSPType("REGULER");
+    setFormPBFOriginInvoiceNo("");
     setFormItems([]);
     setErrorMsg(null);
   };
@@ -196,22 +211,35 @@ export default function SalesOrdersPage() {
     setFormNotes(item.notes || "");
     setFormTaxPercent(item.tax_percent || 0);
     setFormDiscount(item.discount || 0);
+    setFormCustomerSPNumber(item.customer_sp_number || "");
+    setFormCustomerSPDate(item.customer_sp_date ? item.customer_sp_date.split("T")[0] : new Date().toISOString().split("T")[0]);
+    setFormCustomerSPType(item.customer_sp_type || "REGULER");
+    setFormPBFOriginInvoiceNo(item.pbf_origin_invoice_no || "");
     setEditModalOpen(true);
   };
 
+  const handleSelectProductFromModal = (prod: any) => {
+    const existingIdx = formItems.findIndex((it) => it.product_id === prod.id);
+    if (existingIdx >= 0) {
+      const updated = [...formItems];
+      updated[existingIdx].qty += 1;
+      setFormItems(updated);
+    } else {
+      setFormItems([
+        ...formItems,
+        {
+          product_id: prod.id,
+          unit_id: prod.base_unit_id || "",
+          qty: 1,
+          unit_price: prod.selling_price || 0,
+          discount: 0,
+        },
+      ]);
+    }
+  };
+
   const handleAddItemRow = () => {
-    const firstP = products[0];
-    if (!firstP) return;
-    setFormItems([
-      ...formItems,
-      {
-        product_id: firstP.id,
-        unit_id: firstP.base_unit_id || "",
-        qty: 1,
-        unit_price: firstP.selling_price || 0,
-        discount: 0,
-      },
-    ]);
+    setIsItemModalOpen(true);
   };
 
   const handleRemoveItemRow = (idx: number) => {
@@ -299,6 +327,25 @@ export default function SalesOrdersPage() {
       >
         <Pencil className="w-3 h-3 stroke-[2.5]" />
         <span>Ubah</span>
+      </button>
+
+      {/* 📎 Dokumen & Faktur PBF Asal button */}
+      <button
+        type="button"
+        onClick={() => {
+          if (!selectedId) {
+            alert("Silakan pilih baris pesanan penjualan terlebih dahulu.");
+            return;
+          }
+          setDocModalTargetId(selectedId);
+          setIsDocModalOpen(true);
+        }}
+        disabled={!selectedId}
+        className="h-6 px-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40"
+        title="Upload / Kelola Scan Surat Pesanan & Faktur Pembelian PBF Asal"
+      >
+        <span>📎</span>
+        <span>Dokumen & Faktur PBF Asal</span>
       </button>
 
       {/* 🗑️ Hapus button (Red) */}
@@ -592,16 +639,91 @@ export default function SalesOrdersPage() {
                 </div>
               </div>
 
+              {/* Compliance Farmasi & PBF */}
+              <div className="bg-emerald-50/50 border border-emerald-200/80 rounded-lg p-2.5 space-y-2">
+                <span className="font-bold text-emerald-900 block text-[11px]">
+                  📋 Legalitas Surat Pesanan (SP) & Faktur Pembelian PBF Asal
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-0.5">
+                      No. SP Pemesan :
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Contoh: SP/APOTEK-A/2026/XI/12"
+                      value={formCustomerSPNumber}
+                      onChange={(e) => setFormCustomerSPNumber(e.target.value)}
+                      className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-0.5">
+                      Tanggal SP Pemesan :
+                    </label>
+                    <input
+                      type="date"
+                      value={formCustomerSPDate}
+                      onChange={(e) => setFormCustomerSPDate(e.target.value)}
+                      className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-xs"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-0.5">
+                      Jenis SP Farmasi (BPOM) :
+                    </label>
+                    <select
+                      value={formCustomerSPType}
+                      onChange={(e) => setFormCustomerSPType(e.target.value)}
+                      className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-xs font-semibold text-emerald-800"
+                    >
+                      <option value="REGULER">SP REGULER (Bebas/Keras)</option>
+                      <option value="NARKOTIKA">SP NARKOTIKA</option>
+                      <option value="PSIKOTROPIKA">SP PSIKOTROPIKA</option>
+                      <option value="PREKURSOR">SP PREKURSOR</option>
+                      <option value="OOT">SP OBAT-OBAT TERTENTU (OOT)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <label className="text-slate-700 font-semibold">
+                        No. Faktur PBF Asal :
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDocModalTargetId(orderDraftId);
+                          setIsDocModalOpen(true);
+                        }}
+                        className="text-[10px] text-blue-700 hover:text-blue-900 font-bold bg-blue-100 hover:bg-blue-200 px-1.5 py-0.2 rounded transition"
+                      >
+                        📎 Upload Faktur PBF Asal
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="No Faktur saat kulakan ke PBF"
+                      value={formPBFOriginInvoiceNo}
+                      onChange={(e) => setFormPBFOriginInvoiceNo(e.target.value)}
+                      className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-xs font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
               {/* Items Table */}
               <div>
                 <div className="flex justify-between items-center mb-1">
-                  <span className="font-semibold">Daftar Item Pesanan</span>
+                  <span className="font-semibold text-slate-800">Daftar Item Pesanan Penjualan</span>
                   <button
                     type="button"
                     onClick={handleAddItemRow}
-                    className="h-6 px-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-medium flex items-center gap-1"
+                    className="h-6 px-2.5 bg-[#00c875] hover:bg-[#00b066] text-white rounded text-[11px] font-bold flex items-center gap-1 shadow-2xs active:scale-95 transition"
                   >
-                    <Plus className="w-3 h-3" /> Tambah Baris
+                    <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                    <span>+ + Item (Cari Item...)</span>
                   </button>
                 </div>
                 <table className="w-full border text-[11px]">
@@ -688,6 +810,10 @@ export default function SalesOrdersPage() {
                   createMutation.mutate({
                     customer_id: formCustomerId,
                     sales_rep_id: formSalesRepId || undefined,
+                    customer_sp_number: formCustomerSPNumber,
+                    customer_sp_date: formCustomerSPDate ? new Date(formCustomerSPDate) : undefined,
+                    customer_sp_type: formCustomerSPType,
+                    pbf_origin_invoice_no: formPBFOriginInvoiceNo,
                     notes: formNotes,
                     tax_percent: formTaxPercent,
                     discount: formDiscount,
@@ -732,6 +858,228 @@ export default function SalesOrdersPage() {
           </div>
         </div>
       )}
+
+      {/* EDIT MODAL */}
+      {editModalOpen && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-3">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl overflow-hidden border border-slate-200">
+            <div className="flex items-center justify-between px-4 py-2 border-b bg-sky-600 text-white font-bold text-xs">
+              <span>Ubah Pesanan Penjualan (SO)</span>
+              <button onClick={() => setEditModalOpen(false)}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-3 max-h-[80vh] overflow-y-auto text-[11px]">
+              {errorMsg && (
+                <div className="p-2 bg-red-50 text-red-700 rounded border border-red-200 flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{errorMsg}</span>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold mb-1">Pelanggan</label>
+                  <select
+                    value={formCustomerId}
+                    onChange={(e) => setFormCustomerId(e.target.value)}
+                    className="w-full h-7 px-2 border rounded"
+                  >
+                    {customers.map((c: any) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.code || "CUST"})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-semibold mb-1">Sales</label>
+                  <select
+                    value={formSalesRepId}
+                    onChange={(e) => setFormSalesRepId(e.target.value)}
+                    className="w-full h-7 px-2 border rounded"
+                  >
+                    <option value="">Pilih Sales (Opsional)...</option>
+                    {salesReps.map((s: any) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Compliance Farmasi & PBF */}
+              <div className="bg-emerald-50/50 border border-emerald-200/80 rounded-lg p-2.5 space-y-2">
+                <span className="font-bold text-emerald-900 block text-[11px]">
+                  📋 Legalitas Surat Pesanan (SP) & Faktur Pembelian PBF Asal
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-0.5">
+                      No. SP Pemesan :
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Contoh: SP/APOTEK-A/2026/XI/12"
+                      value={formCustomerSPNumber}
+                      onChange={(e) => setFormCustomerSPNumber(e.target.value)}
+                      className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-0.5">
+                      Tanggal SP Pemesan :
+                    </label>
+                    <input
+                      type="date"
+                      value={formCustomerSPDate}
+                      onChange={(e) => setFormCustomerSPDate(e.target.value)}
+                      className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-xs"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-0.5">
+                      Jenis SP Farmasi (BPOM) :
+                    </label>
+                    <select
+                      value={formCustomerSPType}
+                      onChange={(e) => setFormCustomerSPType(e.target.value)}
+                      className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-xs font-semibold text-emerald-800"
+                    >
+                      <option value="REGULER">SP REGULER (Bebas/Keras)</option>
+                      <option value="NARKOTIKA">SP NARKOTIKA</option>
+                      <option value="PSIKOTROPIKA">SP PSIKOTROPIKA</option>
+                      <option value="PREKURSOR">SP PREKURSOR</option>
+                      <option value="OOT">SP OBAT-OBAT TERTENTU (OOT)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-0.5">
+                      No. Faktur Pembelian PBF Asal :
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="No Faktur saat kulakan ke PBF"
+                      value={formPBFOriginInvoiceNo}
+                      onChange={(e) => setFormPBFOriginInvoiceNo(e.target.value)}
+                      className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-xs font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold mb-1">Catatan</label>
+                <textarea
+                  rows={2}
+                  value={formNotes}
+                  onChange={(e) => setFormNotes(e.target.value)}
+                  className="w-full p-2 border rounded"
+                  placeholder="Catatan pesanan..."
+                />
+              </div>
+
+              {/* Upload Document Shortcut */}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDocModalTargetId(selectedId);
+                    setIsDocModalOpen(true);
+                  }}
+                  className="w-full h-7 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-semibold rounded text-xs flex items-center justify-center gap-1.5 shadow-2xs"
+                >
+                  <span>📎</span>
+                  <span>Kelola Lampiran Dokumen SP & Faktur PBF Asal</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="px-4 py-2 border-t bg-slate-50 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setEditModalOpen(false)}
+                className="h-6 px-3 border border-slate-300 rounded hover:bg-slate-100 text-[11px]"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!selectedId) return;
+                  updateMutation.mutate({
+                    id: selectedId,
+                    payload: {
+                      customer_id: formCustomerId,
+                      sales_rep_id: formSalesRepId || undefined,
+                      customer_sp_number: formCustomerSPNumber,
+                      customer_sp_date: formCustomerSPDate ? new Date(formCustomerSPDate) : undefined,
+                      customer_sp_type: formCustomerSPType,
+                      pbf_origin_invoice_no: formPBFOriginInvoiceNo,
+                      notes: formNotes,
+                      tax_percent: formTaxPercent,
+                      discount: formDiscount,
+                    },
+                  });
+                }}
+                disabled={updateMutation.isPending}
+                className="h-6 px-3 bg-sky-600 hover:bg-sky-700 text-white rounded text-[11px] font-semibold disabled:opacity-50"
+              >
+                {updateMutation.isPending ? "Menyimpan..." : "Perbarui Pesanan"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PBF & SALES ORDER DOCUMENTS MODAL (Dual Mode Upload) */}
+      {isDocModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-2xs flex items-center justify-center p-3">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-4xl max-h-[90vh] overflow-y-auto flex flex-col animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-4 py-2.5 bg-slate-100 border-b border-slate-200 flex justify-between items-center">
+              <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                <span>📎</span>
+                <span>Lampiran Dokumen Penjualan Farmasi / PBF (CDOB BPOM)</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsDocModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4">
+              <PbfDocumentUpload
+                entityType="sales_order"
+                entityId={docModalTargetId || selectedId || ""}
+                title="Dokumen Pesanan & Faktur Pembelian PBF Asal"
+                subtitle="Unggah Scan Surat Pesanan (SP) Asli Pemesan, Faktur Asal saat Pembelian ke PBF, Surat Jalan, dan Faktur Pajak"
+              />
+            </div>
+            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsDocModalOpen(false)}
+                className="h-7 px-4 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-xs shadow-2xs transition"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CARI ITEM MODAL */}
+      <CariObatSalesModal
+        isOpen={isItemModalOpen}
+        onClose={() => setIsItemModalOpen(false)}
+        onSelect={handleSelectProductFromModal}
+        saleType="PBF"
+        warehouseId={selectedWarehouse !== "all" ? selectedWarehouse : undefined}
+      />
     </div>
   );
 }

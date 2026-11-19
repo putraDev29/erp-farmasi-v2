@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import MasterToolbarButtons from "@/components/common/MasterToolbarButtons";
+import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
 
 export default function SuppliersPage() {
   const queryClient = useQueryClient();
@@ -36,6 +37,8 @@ export default function SuppliersPage() {
   // Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isDocModalOpen, setIsDocModalOpen] = useState(false);
+  const [docModalTargetId, setDocModalTargetId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     id: "",
     code: "",
@@ -47,6 +50,16 @@ export default function SuppliersPage() {
     contact_person: "",
     email: "",
     notes: "",
+    is_pbf: false,
+    pbf_license_no: "",
+    pbf_license_expiry_date: "",
+    cdob_license_no: "",
+    cdob_license_expiry_date: "",
+    apj_name: "",
+    apj_sipa_no: "",
+    apj_sipa_expiry_date: "",
+    npwp: "",
+    pbf_type: "PBF Pusat",
   });
 
   // Fetch Suppliers
@@ -102,6 +115,16 @@ export default function SuppliersPage() {
       contact_person: "",
       email: "",
       notes: "",
+      is_pbf: false,
+      pbf_license_no: "",
+      pbf_license_expiry_date: "",
+      cdob_license_no: "",
+      cdob_license_expiry_date: "",
+      apj_name: "",
+      apj_sipa_no: "",
+      apj_sipa_expiry_date: "",
+      npwp: "",
+      pbf_type: "PBF Pusat",
     });
     setIsEditing(false);
   };
@@ -129,6 +152,16 @@ export default function SuppliersPage() {
       contact_person: target.contact_person || "",
       email: target.email || "",
       notes: target.notes || "",
+      is_pbf: Boolean(target.is_pbf),
+      pbf_license_no: target.pbf_license_no || "",
+      pbf_license_expiry_date: target.pbf_license_expiry_date ? target.pbf_license_expiry_date.split("T")[0] : "",
+      cdob_license_no: target.cdob_license_no || "",
+      cdob_license_expiry_date: target.cdob_license_expiry_date ? target.cdob_license_expiry_date.split("T")[0] : "",
+      apj_name: target.apj_name || "",
+      apj_sipa_no: target.apj_sipa_no || "",
+      apj_sipa_expiry_date: target.apj_sipa_expiry_date ? target.apj_sipa_expiry_date.split("T")[0] : "",
+      npwp: target.npwp || "",
+      pbf_type: target.pbf_type || "PBF Pusat",
     });
     setSelectedId(target.id);
     setIsEditing(true);
@@ -191,6 +224,24 @@ export default function SuppliersPage() {
         deleteDisabled={!selectedId}
         onPrint={() => window.print()}
       />
+
+      <button
+        type="button"
+        onClick={() => {
+          if (!selectedId) {
+            alert("Silakan pilih baris supplier terlebih dahulu.");
+            return;
+          }
+          setDocModalTargetId(selectedId);
+          setIsDocModalOpen(true);
+        }}
+        disabled={!selectedId}
+        className="h-6 px-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40"
+        title="Upload / Kelola Berkas Legalitas PBF (Izin Usaha, CDOB, SIPA APJ)"
+      >
+        <span>📎</span>
+        <span>Dokumen PBF</span>
+      </button>
     </div>
   );
 
@@ -487,6 +538,129 @@ export default function SuppliersPage() {
                 </div>
               </div>
 
+              {/* PBF Compliance Section */}
+              <div className="bg-emerald-50/40 border border-emerald-200 rounded-lg p-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={formData.is_pbf}
+                      onChange={(e) => setFormData({ ...formData, is_pbf: e.target.checked })}
+                      className="w-4 h-4 text-[#00c875] rounded focus:ring-emerald-500"
+                    />
+                    <span>Supplier ini adalah Pedagang Besar Farmasi (PBF)</span>
+                  </label>
+                  {formData.is_pbf && isEditing && formData.id && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDocModalTargetId(formData.id);
+                        setIsDocModalOpen(true);
+                      }}
+                      className="px-2.5 py-1 bg-white hover:bg-emerald-50 border border-emerald-300 text-emerald-800 font-semibold rounded text-[11px] shadow-2xs"
+                    >
+                      📎 Upload Izin PBF & CDOB
+                    </button>
+                  )}
+                </div>
+
+                {formData.is_pbf && (
+                  <div className="space-y-2 pt-1 border-t border-emerald-200/60">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Tipe PBF :</label>
+                        <select
+                          value={formData.pbf_type}
+                          onChange={(e) => setFormData({ ...formData, pbf_type: e.target.value })}
+                          className="w-full h-8 px-2 rounded border border-slate-300 bg-white text-xs"
+                        >
+                          <option value="PBF Pusat">PBF Pusat</option>
+                          <option value="PBF Cabang">PBF Cabang</option>
+                          <option value="PAKF (Penyalur Alkes)">PAKF (Penyalur Alat Kesehatan)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">NPWP Perusahaan :</label>
+                        <input
+                          type="text"
+                          value={formData.npwp}
+                          onChange={(e) => setFormData({ ...formData, npwp: e.target.value })}
+                          placeholder="00.000.000.0-000.000"
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">No. Izin PBF :</label>
+                        <input
+                          type="text"
+                          value={formData.pbf_license_no}
+                          onChange={(e) => setFormData({ ...formData, pbf_license_no: e.target.value })}
+                          placeholder="No. Izin PBF Kemenkes"
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs font-mono mb-1.5"
+                        />
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Tgl Expired Izin PBF :</label>
+                        <input
+                          type="date"
+                          value={formData.pbf_license_expiry_date}
+                          onChange={(e) => setFormData({ ...formData, pbf_license_expiry_date: e.target.value })}
+                          className="w-full h-8 px-2 rounded border border-slate-300 text-xs bg-white text-slate-800"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">No. Sertifikat CDOB :</label>
+                        <input
+                          type="text"
+                          value={formData.cdob_license_no}
+                          onChange={(e) => setFormData({ ...formData, cdob_license_no: e.target.value })}
+                          placeholder="No. Sertifikat CDOB BPOM"
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs font-mono mb-1.5"
+                        />
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Tgl Expired Sertifikat CDOB :</label>
+                        <input
+                          type="date"
+                          value={formData.cdob_license_expiry_date}
+                          onChange={(e) => setFormData({ ...formData, cdob_license_expiry_date: e.target.value })}
+                          className="w-full h-8 px-2 rounded border border-slate-300 text-xs bg-white text-slate-800"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Nama APJ (Apoteker Penanggung Jawab) :</label>
+                        <input
+                          type="text"
+                          value={formData.apj_name}
+                          onChange={(e) => setFormData({ ...formData, apj_name: e.target.value })}
+                          placeholder="apt. ..."
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">No. SIPA APJ :</label>
+                        <input
+                          type="text"
+                          value={formData.apj_sipa_no}
+                          onChange={(e) => setFormData({ ...formData, apj_sipa_no: e.target.value })}
+                          placeholder="No. SIPA APJ PBF"
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs font-mono mb-1.5"
+                        />
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Tgl Expired SIPA APJ :</label>
+                        <input
+                          type="date"
+                          value={formData.apj_sipa_expiry_date}
+                          onChange={(e) => setFormData({ ...formData, apj_sipa_expiry_date: e.target.value })}
+                          className="w-full h-8 px-2 rounded border border-slate-300 text-xs bg-white text-slate-800"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
                 <button
                   type="button"
@@ -504,6 +678,44 @@ export default function SuppliersPage() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* PBF LEGAL DOCUMENTS MODAL (Dual Mode Upload) */}
+      {isDocModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-2xs flex items-center justify-center p-3">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-4xl max-h-[90vh] overflow-y-auto flex flex-col animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-4 py-2.5 bg-slate-100 border-b border-slate-200 flex justify-between items-center">
+              <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                <span>📎</span>
+                <span>Berkas Legalitas PBF & Sertifikat CDOB Supplier</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsDocModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4">
+              <PbfDocumentUpload
+                entityType="supplier"
+                entityId={docModalTargetId || selectedId || ""}
+                title="Dokumen Legalitas Distributor PBF"
+                subtitle="Unggah Izin Usaha PBF Kemenkes, Sertifikat CDOB BPOM, dan SIPA Apoteker Penanggung Jawab"
+              />
+            </div>
+            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsDocModalOpen(false)}
+                className="h-7 px-4 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-xs shadow-2xs transition"
+              >
+                Tutup
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"time"
 
 	"farmasi/backend/database"
@@ -110,6 +111,69 @@ func (h *DashboardHandler) GetSummary(c *gin.Context) {
 	grossProfit := totalSalesAmount - (totalSalesAmount * 0.6) // Based on COGS ~60%
 	netProfit := grossProfit - (totalPurchasesAmount * 0.1)
 
+	// 11. Expiring Drugs Alert (≤ 1 Minggu & Sudah Expired)
+	todayMidnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	oneWeekFromNow := todayMidnight.AddDate(0, 0, 7).Add(23*time.Hour + 59*time.Minute + 59*time.Second)
+
+	type ExpiringCriticalDrug struct {
+		ID            uuid.UUID  `json:"id"`
+		Code          string     `json:"code"`
+		Name          string     `json:"name"`
+		BatchNumber   string     `json:"batch_number"`
+		ExpiredDate   *time.Time `json:"expired_date"`
+		DaysRemaining int        `json:"days_remaining"`
+		Status        string     `json:"status"`
+		StatusLabel   string     `json:"status_label"`
+		CurrentStock  float64    `json:"current_stock"`
+		UnitName      string     `json:"unit_name"`
+	}
+
+	var rawExpiringProds []models.Product
+	database.DB.Model(&models.Product{}).
+		Where("company_id = ? AND expired_date IS NOT NULL AND expired_date <= ?", companyID, oneWeekFromNow).
+		Preload("BaseUnit").
+		Preload("StockBalances").
+		Order("expired_date ASC").
+		Find(&rawExpiringProds)
+
+	var expiringCriticalItems []ExpiringCriticalDrug
+	for _, p := range rawExpiringProds {
+		var stockQty float64
+		for _, sb := range p.StockBalances {
+			stockQty += sb.AvailableQty
+		}
+
+		days := int(time.Date(p.ExpiredDate.Year(), p.ExpiredDate.Month(), p.ExpiredDate.Day(), 0, 0, 0, 0, p.ExpiredDate.Location()).Sub(todayMidnight).Hours() / 24)
+		st := "CRITICAL_1_WEEK"
+		stLabel := "Kritis (Hari ini)"
+		if days < 0 {
+			st = "EXPIRED"
+			stLabel = fmt.Sprintf("Expired (%d hari lalu)", -days)
+		} else if days == 0 {
+			stLabel = "Expired Hari Ini"
+		} else {
+			stLabel = fmt.Sprintf("Expired dlm %d hari", days)
+		}
+
+		uName := "PCS"
+		if p.BaseUnit != nil {
+			uName = p.BaseUnit.Name
+		}
+
+		expiringCriticalItems = append(expiringCriticalItems, ExpiringCriticalDrug{
+			ID:            p.ID,
+			Code:          p.Code,
+			Name:          p.Name,
+			BatchNumber:   p.BatchNumber,
+			ExpiredDate:   p.ExpiredDate,
+			DaysRemaining: days,
+			Status:        st,
+			StatusLabel:   stLabel,
+			CurrentStock:  stockQty,
+			UnitName:      uName,
+		})
+	}
+
 	utils.SendSuccess(c, "Ringkasan data dashboard eksekutif", gin.H{
 		"sales_summary": gin.H{
 			"total_amount": totalSalesAmount,
@@ -127,9 +191,11 @@ func (h *DashboardHandler) GetSummary(c *gin.Context) {
 			"gross_profit":        grossProfit,
 			"net_profit":          netProfit,
 		},
-		"low_stock_count":     lowStockCount,
-		"recent_sales":        recentSales,
-		"chart_data":          chartData,
-		"top_products":        topProducts,
+		"low_stock_count":         lowStockCount,
+		"expiring_critical_count": len(expiringCriticalItems),
+		"expiring_critical_items": expiringCriticalItems,
+		"recent_sales":            recentSales,
+		"chart_data":              chartData,
+		"top_products":            topProducts,
 	})
 }

@@ -30,6 +30,7 @@ import { CariItemModal } from "./CariItemModal";
 import { DetailItemModal } from "./DetailItemModal";
 import { IncludeBiayaModal } from "./IncludeBiayaModal";
 import { CariPesananModal } from "./CariPesananModal";
+import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
 
 export interface InvoiceItemRow {
   product_id: string;
@@ -93,6 +94,13 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
   const [warehouseId, setWarehouseId] = useState("");
   const [ppnType, setPpnType] = useState<"Non" | "Include" | "Exclude">("Non");
   const [selectedPO, setSelectedPO] = useState<any>(null);
+
+  // PBF Specific Fields
+  const [pbfInvoiceNo, setPbfInvoiceNo] = useState("");
+  const [pbfDeliveryOrderNo, setPbfDeliveryOrderNo] = useState("");
+  const [taxInvoiceNo, setTaxInvoiceNo] = useState("");
+  const [isPbfDocModalOpen, setIsPbfDocModalOpen] = useState(false);
+  const [pbfDocCount, setPbfDocCount] = useState(0);
 
   // Table items state
   const [items, setItems] = useState<InvoiceItemRow[]>([]);
@@ -196,6 +204,9 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
       if (existingInvoice.purchase_order) {
         setSelectedPO(existingInvoice.purchase_order);
       }
+      if (existingInvoice.pbf_invoice_no) setPbfInvoiceNo(existingInvoice.pbf_invoice_no);
+      if (existingInvoice.pbf_delivery_order_no) setPbfDeliveryOrderNo(existingInvoice.pbf_delivery_order_no);
+      if (existingInvoice.tax_invoice_no) setTaxInvoiceNo(existingInvoice.tax_invoice_no);
       setNotes(existingInvoice.notes || "");
       setTaxPercent(existingInvoice.tax_percent || 0);
       setPpnType(existingInvoice.tax_percent > 0 ? "Exclude" : "Non");
@@ -530,6 +541,9 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
         warehouse_id: warehouseId || undefined,
         supplier_id: selectedSupplier.id,
         purchase_order_id: selectedPO?.id || undefined,
+        pbf_invoice_no: pbfInvoiceNo,
+        pbf_delivery_order_no: pbfDeliveryOrderNo,
+        tax_invoice_no: taxInvoiceNo,
         due_date: dueDate ? new Date(dueDate) : undefined,
         notes: notes,
         tax_percent: taxPercent,
@@ -753,6 +767,63 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
               <Search className="w-3 h-3" />
             </button>
           </div>
+        </div>
+
+        {/* ROW 3: PBF Invoicing & Documents Compliance (CDOB) */}
+        <div className="md:col-span-3">
+          <label className="block text-slate-600 text-[10px] mb-0.5 font-medium">
+            No. Faktur Asli PBF :
+          </label>
+          <input
+            type="text"
+            value={pbfInvoiceNo}
+            onChange={(e) => setPbfInvoiceNo(e.target.value)}
+            placeholder="Contoh: INV-PBF/2026/089"
+            className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500 font-mono"
+          />
+        </div>
+
+        <div className="md:col-span-3">
+          <label className="block text-slate-600 text-[10px] mb-0.5 font-medium">
+            No. Surat Jalan PBF :
+          </label>
+          <input
+            type="text"
+            value={pbfDeliveryOrderNo}
+            onChange={(e) => setPbfDeliveryOrderNo(e.target.value)}
+            placeholder="Contoh: DO/2026/XI/124"
+            className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500 font-mono"
+          />
+        </div>
+
+        <div className="md:col-span-3">
+          <label className="block text-slate-600 text-[10px] mb-0.5 font-medium">
+            No. Faktur Pajak PBF :
+          </label>
+          <input
+            type="text"
+            value={taxInvoiceNo}
+            onChange={(e) => setTaxInvoiceNo(e.target.value)}
+            placeholder="Contoh: 010.002-26.12345678"
+            className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500 font-mono"
+          />
+        </div>
+
+        <div className="md:col-span-3 flex flex-col justify-end">
+          <button
+            type="button"
+            onClick={() => setIsPbfDocModalOpen(true)}
+            className="w-full h-6 px-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-semibold rounded text-[11px] inline-flex items-center justify-between shadow-2xs transition active:scale-95"
+            title="Upload atau lihat Faktur PBF, Surat Jalan, e-Faktur Pajak, dan CoA"
+          >
+            <span className="flex items-center gap-1">
+              <span>📎</span>
+              <span>Dokumen PBF (Faktur/SJ/CoA)</span>
+            </span>
+            <span className="bg-emerald-600 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+              {pbfDocCount}
+            </span>
+          </button>
         </div>
       </div>
 
@@ -1454,6 +1525,45 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                 className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-semibold hover:bg-emerald-700"
               >
                 Simpan Serial
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 10: DOKUMEN PBF & CDOB UPLOAD (Dual Mode Upload) */}
+      {isPbfDocModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-2xs p-3">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-4xl max-h-[90vh] overflow-y-auto flex flex-col animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-4 py-2.5 bg-slate-100 border-b border-slate-200 flex justify-between items-center">
+              <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                <span>📎</span>
+                <span>Lampiran Dokumen Pembelian PBF (CDOB BPOM)</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsPbfDocModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4">
+              <PbfDocumentUpload
+                entityType="purchase"
+                entityId={invoiceId || "temp"}
+                title={`Dokumen Pembelian Faktur: ${invoiceNo || "Faktur Pembelian"}`}
+                subtitle="Unggah Faktur Asli PBF, Surat Jalan, e-Faktur Pajak, dan CoA mutu bets farmasi"
+                onUploadedCountChange={setPbfDocCount}
+              />
+            </div>
+            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsPbfDocModalOpen(false)}
+                className="h-7 px-4 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-xs shadow-2xs transition"
+              >
+                Selesai
               </button>
             </div>
           </div>

@@ -561,6 +561,9 @@ export default function ItemListPage() {
                 <th className="py-2 px-3 border-r border-slate-300">SKU</th>
                 {/* Column 5: Nama Item */}
                 <th className="py-2 px-3 border-r border-slate-300 min-w-[220px]">Nama Item</th>
+                {/* Column Batch & ED */}
+                <th className="py-2 px-2.5 border-r border-slate-300">No. Batch</th>
+                <th className="py-2 px-2.5 border-r border-slate-300">Tgl Kadaluarsa (ED)</th>
                 {/* Column 6: Stok Fisik */}
                 <th className="py-2 px-3 border-r border-slate-300 text-right">Stok Fisik</th>
                 {/* Column 7: Satuan */}
@@ -654,6 +657,14 @@ export default function ItemListPage() {
                       {/* Column 5: Nama Item */}
                       <td className="py-1.5 px-3 border-r border-slate-200 font-medium text-slate-900">
                         {item.name}
+                      </td>
+
+                      {/* Column Batch & ED */}
+                      <td className="py-1.5 px-2.5 border-r border-slate-200 font-mono text-[11px] text-slate-700">
+                        {item.batch_number || "-"}
+                      </td>
+                      <td className="py-1.5 px-2.5 border-r border-slate-200 font-mono text-[11px] text-slate-800">
+                        {item.expired_date ? item.expired_date.substring(0, 10) : "-"}
                       </td>
 
                       {/* Column 6: Stok Fisik */}

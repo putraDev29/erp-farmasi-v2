@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import MasterToolbarButtons from "@/components/common/MasterToolbarButtons";
+import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
 
 export default function CustomersPage() {
   const queryClient = useQueryClient();
@@ -42,6 +43,8 @@ export default function CustomersPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isDocModalOpen, setIsDocModalOpen] = useState(false);
+  const [docModalTargetId, setDocModalTargetId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     id: "",
     code: "",
@@ -55,6 +58,13 @@ export default function CustomersPage() {
     notes: "",
     credit_limit: 0,
     term_of_payment_days: 0,
+    is_pharmacy_facility: false,
+    pharmacy_type: "APOTEK",
+    sia_number: "",
+    sia_expiry_date: "",
+    apj_name: "",
+    apj_sipa_number: "",
+    apj_sipa_expiry_date: "",
   });
 
   // Fetch Customers
@@ -130,6 +140,13 @@ export default function CustomersPage() {
       notes: "",
       credit_limit: 0,
       term_of_payment_days: 0,
+      is_pharmacy_facility: false,
+      pharmacy_type: "APOTEK",
+      sia_number: "",
+      sia_expiry_date: "",
+      apj_name: "",
+      apj_sipa_number: "",
+      apj_sipa_expiry_date: "",
     });
     setIsEditing(false);
   };
@@ -159,6 +176,13 @@ export default function CustomersPage() {
       notes: target.notes || "",
       credit_limit: target.credit_limit || 0,
       term_of_payment_days: target.term_of_payment_days || 0,
+      is_pharmacy_facility: Boolean(target.is_pharmacy_facility),
+      pharmacy_type: target.pharmacy_type || "APOTEK",
+      sia_number: target.sia_number || "",
+      sia_expiry_date: target.sia_expiry_date ? target.sia_expiry_date.split("T")[0] : "",
+      apj_name: target.apj_name || "",
+      apj_sipa_number: target.apj_sipa_number || "",
+      apj_sipa_expiry_date: target.apj_sipa_expiry_date ? target.apj_sipa_expiry_date.split("T")[0] : "",
     });
     setSelectedId(target.id);
     setIsEditing(true);
@@ -260,6 +284,24 @@ export default function CustomersPage() {
                 >
                   <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
                   <span>Verifikasi Pelanggan</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!selectedId) {
+                      alert("Silakan pilih data pelanggan terlebih dahulu.");
+                      return;
+                    }
+                    setDocModalTargetId(selectedId);
+                    setIsDocModalOpen(true);
+                  }}
+                  disabled={!selectedId}
+                  className="h-6 px-3 border border-emerald-300 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold text-xs flex items-center gap-1.5 shadow-xs transition disabled:opacity-40"
+                  title="Upload / Kelola Izin Sarana Farmasi (SIA / Izin RS / SIPA APJ)"
+                >
+                  <span>📎</span>
+                  <span>Dokumen Izin Sarana</span>
                 </button>
               </div>
             ) : null
@@ -587,6 +629,109 @@ export default function CustomersPage() {
                 />
               </div>
 
+              {/* Sarana Farmasi Compliance Section */}
+              <div className="bg-emerald-50/40 border border-emerald-200 rounded-lg p-3 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={formData.is_pharmacy_facility}
+                      onChange={(e) => setFormData({ ...formData, is_pharmacy_facility: e.target.checked })}
+                      className="w-4 h-4 text-[#00c875] rounded focus:ring-emerald-500"
+                    />
+                    <span>Pelanggan ini adalah Sarana Farmasi / Medis Resmi (CDOB Clear)</span>
+                  </label>
+                  {formData.is_pharmacy_facility && isEditing && formData.id && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDocModalTargetId(formData.id);
+                        setIsDocModalOpen(true);
+                      }}
+                      className="px-2.5 py-1 bg-white hover:bg-emerald-50 border border-emerald-300 text-emerald-800 font-semibold rounded text-[11px] shadow-2xs"
+                    >
+                      📎 Upload Izin Sarana & SIPA
+                    </button>
+                  )}
+                </div>
+
+                {formData.is_pharmacy_facility && (
+                  <div className="space-y-2 pt-1 border-t border-emerald-200/60">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Jenis Sarana :</label>
+                        <select
+                          value={formData.pharmacy_type}
+                          onChange={(e) => setFormData({ ...formData, pharmacy_type: e.target.value })}
+                          className="w-full h-8 px-2 rounded border border-slate-300 bg-white text-xs font-semibold text-emerald-800"
+                        >
+                          <option value="APOTEK">Apotek</option>
+                          <option value="RUMAH_SAKIT">Rumah Sakit (RS)</option>
+                          <option value="KLINIK">Klinik Berizin</option>
+                          <option value="PBF">PBF Lain (Pedagang Besar Farmasi)</option>
+                          <option value="TOKO_OBAT">Toko Obat Berizin</option>
+                          <option value="UMUM">Umum / Lainnya</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Nama APJ / Penanggung Jawab :</label>
+                        <input
+                          type="text"
+                          value={formData.apj_name}
+                          onChange={(e) => setFormData({ ...formData, apj_name: e.target.value })}
+                          placeholder="apt. ..."
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">No. Izin Sarana (SIA/Izin RS/Klinik) :</label>
+                        <input
+                          type="text"
+                          value={formData.sia_number}
+                          onChange={(e) => setFormData({ ...formData, sia_number: e.target.value })}
+                          placeholder="No. SIA Dinkes / PTSP"
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Masa Berlaku Izin Sarana :</label>
+                        <input
+                          type="date"
+                          value={formData.sia_expiry_date}
+                          onChange={(e) => setFormData({ ...formData, sia_expiry_date: e.target.value })}
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">No. SIPA APJ :</label>
+                        <input
+                          type="text"
+                          value={formData.apj_sipa_number}
+                          onChange={(e) => setFormData({ ...formData, apj_sipa_number: e.target.value })}
+                          placeholder="No. SIPA / SIPTTK APJ"
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Masa Berlaku SIPA APJ :</label>
+                        <input
+                          type="date"
+                          value={formData.apj_sipa_expiry_date}
+                          onChange={(e) => setFormData({ ...formData, apj_sipa_expiry_date: e.target.value })}
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
                 <button
                   type="button"
@@ -705,6 +850,44 @@ export default function CustomersPage() {
               <button
                 onClick={() => setHistoryModalOpen(false)}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-medium rounded-lg text-xs transition"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PBF SARANA FARMASI LEGAL DOCUMENTS MODAL (Dual Mode Upload) */}
+      {isDocModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-2xs flex items-center justify-center p-3">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-4xl max-h-[90vh] overflow-y-auto flex flex-col animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-4 py-2.5 bg-slate-100 border-b border-slate-200 flex justify-between items-center">
+              <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                <span>📎</span>
+                <span>Berkas Izin Sarana & SIPA APJ Pelanggan (CDOB BPOM)</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsDocModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4">
+              <PbfDocumentUpload
+                entityType="customer"
+                entityId={docModalTargetId || selectedId || ""}
+                title="Dokumen Izin Operasional & SIPA Pemesan"
+                subtitle="Unggah Izin Sarana (SIA / Izin RS / Izin Klinik) dan SIPA / SIPTTK Apoteker Penanggung Jawab Pemesan"
+              />
+            </div>
+            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsDocModalOpen(false)}
+                className="h-7 px-4 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-xs shadow-2xs transition"
               >
                 Tutup
               </button>

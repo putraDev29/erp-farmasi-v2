@@ -59,6 +59,8 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
   const [subCategoryID, setSubCategoryID] = useState<string>("");
   const [brandID, setBrandID] = useState<string>("");
   const [rack, setRack] = useState<string>("");
+  const [batchNumber, setBatchNumber] = useState<string>("");
+  const [expiredDate, setExpiredDate] = useState<string>("");
   const [salesStatus, setSalesStatus] = useState<string>("MASIH_DIJUAL");
   const [minStock, setMinStock] = useState<number>(0);
   const [supplierID, setSupplierID] = useState<string>("");
@@ -117,6 +119,12 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
   const [taxReferenceCode, setTaxReferenceCode] = useState<string>("");
   const [taxGoodsServicesOption, setTaxGoodsServicesOption] = useState<string>("");
 
+  // Regulasi Farmasi (PBF vs Apotek & BPOM)
+  const [distributionChannel, setDistributionChannel] = useState<string>("ALL");
+  const [isSoldInPharmacy, setIsSoldInPharmacy] = useState<boolean>(true);
+  const [drugClassification, setDrugClassification] = useState<string>("OBAT_KERAS");
+  const [bpomNumber, setBpomNumber] = useState<string>("");
+
   // Populate data when editing
   useEffect(() => {
     if (initialData) {
@@ -128,10 +136,17 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
       setSubCategoryID(initialData.sub_category_id || "");
       setBrandID(initialData.brand_id || "");
       setRack(initialData.rack || "");
+      setBatchNumber(initialData.batch_number || "");
+      setExpiredDate(initialData.expired_date ? String(initialData.expired_date).substring(0, 10) : "");
       setSalesStatus(initialData.sales_status || "MASIH_DIJUAL");
       setMinStock(initialData.min_stock || 0);
       setSupplierID(initialData.supplier_id || "");
       setNotes(initialData.notes || initialData.description || "");
+
+      setDistributionChannel(initialData.distribution_channel || "ALL");
+      setIsSoldInPharmacy(initialData.is_sold_in_pharmacy !== undefined ? Boolean(initialData.is_sold_in_pharmacy) : true);
+      setDrugClassification(initialData.drug_classification || "OBAT_KERAS");
+      setBpomNumber(initialData.bpom_number || "");
 
       setLockPriceOnSale(Boolean(initialData.lock_price_on_sale));
       setPricingType(initialData.pricing_type || "SATU_HARGA");
@@ -344,11 +359,18 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
       sub_category_id: subCategoryID || null,
       brand_id: brandID || null,
       rack: rack.trim(),
+      batch_number: batchNumber.trim(),
+      expired_date: expiredDate ? new Date(expiredDate).toISOString() : null,
       sales_status: salesStatus,
       min_stock: Number(minStock),
       supplier_id: supplierID || null,
       notes: notes.trim(),
       description: notes.trim(),
+
+      distribution_channel: distributionChannel,
+      is_sold_in_pharmacy: isSoldInPharmacy,
+      drug_classification: drugClassification,
+      bpom_number: bpomNumber.trim(),
 
       lock_price_on_sale: lockPriceOnSale,
       pricing_type: pricingType,
@@ -629,6 +651,106 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
                 placeholder="Lokasi rak / bin"
                 className="w-full sm:w-80 px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-sky-500 bg-white"
               />
+            </div>
+
+            {/* No. Batch & Tanggal Expired (ED) */}
+            <div>
+              <label className="block text-slate-700 font-medium mb-1">No. Batch / Lot (CDOB) :</label>
+              <input
+                type="text"
+                value={batchNumber}
+                onChange={(e) => setBatchNumber(e.target.value)}
+                placeholder="Contoh: BATCH-2026-X01"
+                className="w-full sm:w-80 px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-sky-500 bg-white font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-slate-700 font-medium mb-1">Tanggal Kadaluarsa (ED) :</label>
+              <input
+                type="date"
+                value={expiredDate}
+                onChange={(e) => setExpiredDate(e.target.value)}
+                className="w-full sm:w-80 px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-sky-500 bg-white font-semibold"
+              />
+            </div>
+
+            {/* Regulasi Farmasi & Saluran Distribusi (Apotek vs PBF / RS) */}
+            <div className="p-3.5 bg-emerald-50/50 border border-emerald-200/80 rounded-lg space-y-3">
+              <span className="font-bold text-emerald-950 text-xs block">
+                Regulasi Farmasi &amp; Saluran Distribusi (CDOB BPOM) :
+              </span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Golongan Obat */}
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">Golongan Obat :</label>
+                  <select
+                    value={drugClassification}
+                    onChange={(e) => setDrugClassification(e.target.value)}
+                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 bg-white focus:outline-none focus:border-emerald-500 font-medium"
+                  >
+                    <option value="OBAT_BEBAS">Obat Bebas (Lingkaran Hijau)</option>
+                    <option value="OBAT_BEBAS_TERBATAS">Obat Bebas Terbatas (Lingkaran Biru)</option>
+                    <option value="OBAT_KERAS">Obat Keras (Lingkaran Merah Huruf K)</option>
+                    <option value="PSIKOTROPIKA">Psikotropika</option>
+                    <option value="NARKOTIKA">Narkotika</option>
+                    <option value="PREKURSOR">Prekursor Farmasi</option>
+                    <option value="OOT">Obat-Obat Tertentu (OOT)</option>
+                    <option value="OBAT_KHUSUS_RS">Obat Khusus Rumah Sakit (Sitostatika, dll.)</option>
+                    <option value="ALKES">Alat Kesehatan (Alkes)</option>
+                    <option value="BMHP">Bahan Medis Habis Pakai (BMHP)</option>
+                    <option value="BAHAN_BAKU">Bahan Baku Obat</option>
+                  </select>
+                </div>
+
+                {/* Saluran Distribusi */}
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">Saluran Distribusi :</label>
+                  <select
+                    value={distributionChannel}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDistributionChannel(val);
+                      if (val === "PBF_ONLY") {
+                        setIsSoldInPharmacy(false);
+                      } else {
+                        setIsSoldInPharmacy(true);
+                      }
+                    }}
+                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 bg-white focus:outline-none focus:border-emerald-500 font-medium"
+                  >
+                    <option value="ALL">Semua (Apotek Retail &amp; PBF Grosir)</option>
+                    <option value="PBF_ONLY">Khusus PBF / RS (Tidak Boleh Dijual di Apotek)</option>
+                    <option value="APOTEK_ONLY">Khusus Apotek Retail</option>
+                  </select>
+                </div>
+
+                {/* NIE BPOM */}
+                <div>
+                  <label className="block text-slate-700 font-semibold mb-1">Nomor Izin Edar BPOM (NIE) :</label>
+                  <input
+                    type="text"
+                    value={bpomNumber}
+                    onChange={(e) => setBpomNumber(e.target.value)}
+                    placeholder="Contoh: DKL1234567890A1"
+                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 bg-white font-mono uppercase"
+                  />
+                </div>
+
+                {/* Checkbox Diizinkan Dijual di Apotek */}
+                <div className="flex items-center pt-5">
+                  <label className="inline-flex items-center gap-2 cursor-pointer font-semibold text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={isSoldInPharmacy}
+                      onChange={(e) => setIsSoldInPharmacy(e.target.checked)}
+                      className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>Diizinkan dijual di Apotek retail</span>
+                  </label>
+                </div>
+              </div>
             </div>
 
             {/* Status Jual */}

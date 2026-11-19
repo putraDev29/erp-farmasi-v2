@@ -26,6 +26,11 @@ type PurchaseOrder struct {
 	TotalOrderedQty  float64             `gorm:"type:numeric(15,4);default:0" json:"total_ordered_qty"`
 	TotalReceivedQty float64             `gorm:"type:numeric(15,4);default:0" json:"total_received_qty"`
 	Notes            string              `gorm:"type:text" json:"notes"`
+	// PBF / SP Requirements
+	SPType           string              `gorm:"size:50;default:'REGULER'" json:"sp_type"` // REGULER, NARKOTIKA, PSIKOTROPIKA, PREKURSOR, OOT
+	SPNumber         string              `gorm:"size:100" json:"sp_number"`
+	APJName          string              `gorm:"size:150" json:"apj_name"`
+	APJSIPANo        string              `gorm:"size:100" json:"apj_sipa_no"`
 	CreatedBy        uuid.UUID           `gorm:"type:uuid;not null" json:"created_by"`
 	UpdatedBy        *uuid.UUID          `gorm:"type:uuid" json:"updated_by"`
 	Items            []PurchaseOrderItem `gorm:"foreignKey:PurchaseOrderID" json:"items,omitempty"`
@@ -71,6 +76,10 @@ type Purchase struct {
 	PaidAmount      float64        `gorm:"type:numeric(15,2);default:0" json:"paid_amount"`
 	RemainingAmount float64        `gorm:"type:numeric(15,2);default:0" json:"remaining_amount"`
 	Notes           string         `gorm:"type:text" json:"notes"`
+	// PBF Invoicing Requirements
+	PBFInvoiceNo       string      `gorm:"size:100" json:"pbf_invoice_no"`
+	PBFDeliveryOrderNo string      `gorm:"size:100" json:"pbf_delivery_order_no"`
+	TaxInvoiceNo       string      `gorm:"size:100" json:"tax_invoice_no"`
 	ComputerName    string         `gorm:"size:50;default:'WEB-CLIENT'" json:"computer_name"`
 	CreatedBy       uuid.UUID      `gorm:"type:uuid;not null" json:"created_by"`
 	UpdatedBy       *uuid.UUID     `gorm:"type:uuid" json:"updated_by"`
