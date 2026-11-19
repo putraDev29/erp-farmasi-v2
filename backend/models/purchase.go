@@ -1,0 +1,182 @@
+package models
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type PurchaseOrder struct {
+	BaseModel
+	CompanyID        uuid.UUID           `gorm:"type:uuid;not null;index" json:"company_id"`
+	BranchID         uuid.UUID           `gorm:"type:uuid;not null;index" json:"branch_id"`
+	WarehouseID      *uuid.UUID          `gorm:"type:uuid;index" json:"warehouse_id"`
+	SupplierID       uuid.UUID           `gorm:"type:uuid;not null;index" json:"supplier_id"`
+	OrderNo          string              `gorm:"size:50;uniqueIndex;not null" json:"order_no"`
+	Date             time.Time           `gorm:"not null" json:"date"`
+	ExpectedDate     *time.Time          `json:"expected_date"`
+	Status           string              `gorm:"size:20;default:'PENDING';not null" json:"status"` // PENDING, PARTIAL, COMPLETED, CANCELLED
+	ProcessStatus    string              `gorm:"size:30;default:'Belum Proses';not null" json:"process_status"` // Belum Proses, Proses Sebagian, Selesai
+	Subtotal         float64             `gorm:"type:numeric(15,2);default:0" json:"subtotal"`
+	TaxPercent       float64             `gorm:"type:numeric(5,2);default:0" json:"tax_percent"`
+	TaxAmount        float64             `gorm:"type:numeric(15,2);default:0" json:"tax_amount"`
+	Discount         float64             `gorm:"type:numeric(15,2);default:0" json:"discount"`
+	ShippingFee      float64             `gorm:"type:numeric(15,2);default:0" json:"shipping_fee"`
+	TotalAmount      float64             `gorm:"type:numeric(15,2);default:0" json:"total_amount"`
+	TotalOrderedQty  float64             `gorm:"type:numeric(15,4);default:0" json:"total_ordered_qty"`
+	TotalReceivedQty float64             `gorm:"type:numeric(15,4);default:0" json:"total_received_qty"`
+	Notes            string              `gorm:"type:text" json:"notes"`
+	CreatedBy        uuid.UUID           `gorm:"type:uuid;not null" json:"created_by"`
+	UpdatedBy        *uuid.UUID          `gorm:"type:uuid" json:"updated_by"`
+	Items            []PurchaseOrderItem `gorm:"foreignKey:PurchaseOrderID" json:"items,omitempty"`
+
+	Warehouse *Warehouse `gorm:"foreignKey:WarehouseID" json:"warehouse,omitempty"`
+	Supplier  *Supplier  `gorm:"foreignKey:SupplierID" json:"supplier,omitempty"`
+	User      *User      `gorm:"foreignKey:CreatedBy" json:"user,omitempty"`
+	Modifier  *User      `gorm:"foreignKey:UpdatedBy" json:"modifier,omitempty"`
+}
+
+type PurchaseOrderItem struct {
+	BaseModel
+	PurchaseOrderID uuid.UUID `gorm:"type:uuid;not null;index" json:"purchase_order_id"`
+	ProductID       uuid.UUID `gorm:"type:uuid;not null;index" json:"product_id"`
+	UnitID          uuid.UUID `gorm:"type:uuid;not null" json:"unit_id"`
+	Qty             float64   `gorm:"type:numeric(15,4);not null" json:"qty"`
+	UnitPrice       float64   `gorm:"type:numeric(15,2);not null" json:"unit_price"`
+	Discount        float64   `gorm:"type:numeric(15,2);default:0" json:"discount"`
+	TotalAmount     float64   `gorm:"type:numeric(15,2);not null" json:"total_amount"`
+
+	Product *Product `gorm:"foreignKey:ProductID" json:"product,omitempty"`
+	Unit    *Unit    `gorm:"foreignKey:UnitID" json:"unit,omitempty"`
+}
+
+type Purchase struct {
+	BaseModel
+	CompanyID       uuid.UUID      `gorm:"type:uuid;not null;index" json:"company_id"`
+	BranchID        uuid.UUID      `gorm:"type:uuid;not null;index" json:"branch_id"`
+	WarehouseID     uuid.UUID      `gorm:"type:uuid;not null;index" json:"warehouse_id"`
+	SupplierID      uuid.UUID      `gorm:"type:uuid;not null;index" json:"supplier_id"`
+	PurchaseOrderID *uuid.UUID     `gorm:"type:uuid;index" json:"purchase_order_id"`
+	InvoiceNo       string         `gorm:"size:50;uniqueIndex;not null" json:"invoice_no"`
+	Date            time.Time      `gorm:"not null" json:"date"`
+	DueDate         time.Time      `gorm:"not null" json:"due_date"`
+	Status          string         `gorm:"size:20;default:'POSTED';not null" json:"status"` // DRAFT, POSTED, CANCELLED
+	PaymentStatus   string         `gorm:"size:20;default:'UNPAID';not null" json:"payment_status"` // UNPAID, PARTIAL, PAID
+	Subtotal        float64        `gorm:"type:numeric(15,2);default:0" json:"subtotal"`
+	TaxPercent      float64        `gorm:"type:numeric(5,2);default:0" json:"tax_percent"`
+	TaxAmount       float64        `gorm:"type:numeric(15,2);default:0" json:"tax_amount"`
+	Discount        float64        `gorm:"type:numeric(15,2);default:0" json:"discount"`
+	ShippingFee     float64        `gorm:"type:numeric(15,2);default:0" json:"shipping_fee"`
+	TotalAmount     float64        `gorm:"type:numeric(15,2);default:0" json:"total_amount"`
+	PaidAmount      float64        `gorm:"type:numeric(15,2);default:0" json:"paid_amount"`
+	RemainingAmount float64        `gorm:"type:numeric(15,2);default:0" json:"remaining_amount"`
+	Notes           string         `gorm:"type:text" json:"notes"`
+	ComputerName    string         `gorm:"size:50;default:'WEB-CLIENT'" json:"computer_name"`
+	CreatedBy       uuid.UUID      `gorm:"type:uuid;not null" json:"created_by"`
+	UpdatedBy       *uuid.UUID     `gorm:"type:uuid" json:"updated_by"`
+	Items           []PurchaseItem `gorm:"foreignKey:PurchaseID" json:"items,omitempty"`
+
+	Warehouse     *Warehouse     `gorm:"foreignKey:WarehouseID" json:"warehouse,omitempty"`
+	Supplier      *Supplier      `gorm:"foreignKey:SupplierID" json:"supplier,omitempty"`
+	PurchaseOrder *PurchaseOrder `gorm:"foreignKey:PurchaseOrderID" json:"purchase_order,omitempty"`
+	User          *User          `gorm:"foreignKey:CreatedBy" json:"user,omitempty"`
+	Modifier      *User          `gorm:"foreignKey:UpdatedBy" json:"modifier,omitempty"`
+}
+
+type PurchaseItem struct {
+	BaseModel
+	PurchaseID  uuid.UUID `gorm:"type:uuid;not null;index" json:"purchase_id"`
+	ProductID   uuid.UUID `gorm:"type:uuid;not null;index" json:"product_id"`
+	UnitID      uuid.UUID `gorm:"type:uuid;not null" json:"unit_id"`
+	Qty         float64   `gorm:"type:numeric(15,4);not null" json:"qty"`
+	UnitPrice   float64   `gorm:"type:numeric(15,2);not null" json:"unit_price"`
+	Discount    float64   `gorm:"type:numeric(15,2);default:0" json:"discount"`
+	TotalAmount float64   `gorm:"type:numeric(15,2);not null" json:"total_amount"`
+
+	Product *Product `gorm:"foreignKey:ProductID" json:"product,omitempty"`
+	Unit    *Unit    `gorm:"foreignKey:UnitID" json:"unit,omitempty"`
+}
+
+type PurchaseReturn struct {
+	BaseModel
+	CompanyID    uuid.UUID            `gorm:"type:uuid;not null;index" json:"company_id"`
+	BranchID     uuid.UUID            `gorm:"type:uuid;not null;index" json:"branch_id"`
+	WarehouseID  uuid.UUID            `gorm:"type:uuid;not null;index" json:"warehouse_id"`
+	SupplierID   uuid.UUID            `gorm:"type:uuid;not null;index" json:"supplier_id"`
+	PurchaseID   *uuid.UUID           `gorm:"type:uuid;index" json:"purchase_id"`
+	ReturnNo     string               `gorm:"size:50;uniqueIndex;not null" json:"return_no"`
+	ReturnMode   string               `gorm:"size:20;default:'MODE_1';not null" json:"return_mode"` // MODE_1, MODE_2
+	Date         time.Time            `gorm:"not null" json:"date"`
+	TaxType      string               `gorm:"size:20;default:'NON'" json:"tax_type"` // NON, INCLUDE, EXCLUDE
+	Subtotal     float64              `gorm:"type:numeric(15,2);default:0" json:"subtotal"`
+	TaxPercent   float64              `gorm:"type:numeric(5,2);default:0" json:"tax_percent"`
+	TaxAmount    float64              `gorm:"type:numeric(15,2);default:0" json:"tax_amount"`
+	OtherCost    float64              `gorm:"type:numeric(15,2);default:0" json:"other_cost"`
+	TotalAmount  float64              `gorm:"type:numeric(15,2);default:0" json:"total_amount"`
+	Status       string               `gorm:"size:20;default:'POSTED';not null" json:"status"` // DRAFT, POSTED, CANCELLED
+	Reason       string               `gorm:"type:text" json:"reason"`
+	ComputerName string               `gorm:"size:50;default:'WEB-CLIENT'" json:"computer_name"`
+	CreatedBy    uuid.UUID            `gorm:"type:uuid;not null" json:"created_by"`
+	UpdatedBy    *uuid.UUID           `gorm:"type:uuid" json:"updated_by"`
+	Items        []PurchaseReturnItem `gorm:"foreignKey:PurchaseReturnID" json:"items,omitempty"`
+
+	Purchase  *Purchase  `gorm:"foreignKey:PurchaseID" json:"purchase,omitempty"`
+	Supplier  *Supplier  `gorm:"foreignKey:SupplierID" json:"supplier,omitempty"`
+	Warehouse *Warehouse `gorm:"foreignKey:WarehouseID" json:"warehouse,omitempty"`
+	User      *User      `gorm:"foreignKey:CreatedBy" json:"user,omitempty"`
+	Modifier  *User      `gorm:"foreignKey:UpdatedBy" json:"modifier,omitempty"`
+}
+
+type PurchaseReturnItem struct {
+	BaseModel
+	PurchaseReturnID   uuid.UUID  `gorm:"type:uuid;not null;index" json:"purchase_return_id"`
+	ProductID          uuid.UUID  `gorm:"type:uuid;not null;index" json:"product_id"`
+	UnitID             uuid.UUID  `gorm:"type:uuid;not null" json:"unit_id"`
+	OriginalInvoiceNo  string     `gorm:"size:50" json:"original_invoice_no"`
+	Brand              string     `gorm:"size:100" json:"brand"`
+	PurchasedQty       float64    `gorm:"type:numeric(15,4);default:0" json:"purchased_qty"`
+	PurchasedUnit      string     `gorm:"size:50" json:"purchased_unit"`
+	Qty                float64    `gorm:"type:numeric(15,4);not null" json:"qty"`
+	UnitPrice          float64    `gorm:"type:numeric(15,2);not null" json:"unit_price"`
+	DiscountPercent    float64    `gorm:"type:numeric(5,2);default:0" json:"discount_percent"`
+	TotalAmount        float64    `gorm:"type:numeric(15,2);not null" json:"total_amount"`
+
+	Product *Product `gorm:"foreignKey:ProductID" json:"product,omitempty"`
+	Unit    *Unit    `gorm:"foreignKey:UnitID" json:"unit,omitempty"`
+}
+
+type SupplierPayment struct {
+	BaseModel
+	CompanyID        uuid.UUID               `gorm:"type:uuid;not null;index" json:"company_id"`
+	BranchID         uuid.UUID               `gorm:"type:uuid;not null;index" json:"branch_id"`
+	SupplierID       uuid.UUID               `gorm:"type:uuid;not null;index" json:"supplier_id"`
+	PaymentNo        string                  `gorm:"size:50;uniqueIndex;not null" json:"payment_no"`
+	Date             time.Time               `gorm:"not null" json:"date"`
+	BankID           *uuid.UUID              `gorm:"type:uuid;index" json:"bank_id"`
+	PaymentMethod    string                  `gorm:"size:50;not null" json:"payment_method"` // TUNAI, TRANSFER, CEK_BG, etc.
+	CheckNo          string                  `gorm:"size:50" json:"check_no"` // Nomor Cek/BG
+	CheckStatus      string                  `gorm:"size:30;default:'BELUM_LUNAS'" json:"check_status"` // BELUM_LUNAS, LUNAS, BATAL
+	IsCheckCleared   bool                    `gorm:"default:false" json:"is_check_cleared"`
+	CheckClearedDate *time.Time              `json:"check_cleared_date"`
+	TotalAmount      float64                 `gorm:"type:numeric(15,2);not null" json:"total_amount"`
+	Notes            string                  `gorm:"type:text" json:"notes"`
+	ComputerName     string                  `gorm:"size:50;default:'WEB-CLIENT'" json:"computer_name"`
+	CreatedBy        uuid.UUID               `gorm:"type:uuid;not null" json:"created_by"`
+	UpdatedBy        *uuid.UUID              `gorm:"type:uuid" json:"updated_by"`
+	Details          []SupplierPaymentDetail `gorm:"foreignKey:SupplierPaymentID" json:"details,omitempty"`
+
+	Supplier *Supplier `gorm:"foreignKey:SupplierID" json:"supplier,omitempty"`
+	Bank     *Bank     `gorm:"foreignKey:BankID" json:"bank,omitempty"`
+	User     *User     `gorm:"foreignKey:CreatedBy" json:"user,omitempty"`
+	Modifier *User     `gorm:"foreignKey:UpdatedBy" json:"modifier,omitempty"`
+}
+
+type SupplierPaymentDetail struct {
+	BaseModel
+	SupplierPaymentID uuid.UUID `gorm:"type:uuid;not null;index" json:"supplier_payment_id"`
+	PurchaseID        uuid.UUID `gorm:"type:uuid;not null;index" json:"purchase_id"`
+	AmountPaid        float64   `gorm:"type:numeric(15,2);not null" json:"amount_paid"`
+
+	Purchase *Purchase `gorm:"foreignKey:PurchaseID" json:"purchase,omitempty"`
+}
+

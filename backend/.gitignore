@@ -1,0 +1,5 @@
+*.exe
+backend.exe
+backend_test.exe
+.env
+*.log
