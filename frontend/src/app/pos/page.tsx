@@ -67,6 +67,15 @@ export default function PosPage() {
     },
   });
 
+  // Fetch general settings
+  const { data: generalSettings = {} } = useQuery<Record<string, string>>({
+    queryKey: ["settings-general"],
+    queryFn: async () => {
+      const res = await api.get("/settings/groups/GENERAL");
+      return res.data?.data || {};
+    },
+  });
+
   // Fetch products with stock
   const { data: productsData } = useQuery({
     queryKey: ["pos-products", searchTerm, warehouseID],
@@ -122,6 +131,22 @@ export default function PosPage() {
   };
 
   const addToCart = (prod: any) => {
+    const purchasePrice = Number(prod.purchase_price || prod.avg_cost || 0);
+    const sellingPrice = Number(prod.selling_price || 0);
+    const confirmBelowHpp = generalSettings?.confirm_price_below_hpp === "true";
+    const minProfit = parseFloat(generalSettings?.min_profit_percent || "0");
+
+    if (purchasePrice > 0) {
+      const margin = ((sellingPrice - purchasePrice) / purchasePrice) * 100;
+      if (confirmBelowHpp && sellingPrice < purchasePrice) {
+        setErrorMsg(`⚠️ Harga jual "${prod.name}" (Rp ${sellingPrice.toLocaleString()}) di bawah HPP (Rp ${purchasePrice.toLocaleString()})!`);
+        setTimeout(() => setErrorMsg(null), 4000);
+      } else if (minProfit > 0 && margin < minProfit) {
+        setErrorMsg(`⚠️ Margin item "${prod.name}" (${margin.toFixed(1)}%) di bawah Min. Profit (${minProfit}%)!`);
+        setTimeout(() => setErrorMsg(null), 4000);
+      }
+    }
+
     setCart((prev) => {
       const existing = prev.find((item) => item.product_id === prod.id);
       if (existing) {

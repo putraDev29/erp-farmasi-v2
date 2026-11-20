@@ -118,6 +118,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			protected.POST("/customers", masterHandler.CreateCustomer)
 			protected.PUT("/customers/:id", masterHandler.UpdateCustomer)
 			protected.DELETE("/customers/:id", masterHandler.DeleteCustomer)
+			protected.POST("/customers/:id/verify", masterHandler.VerifyCustomer)
 
 			protected.GET("/sales-reps", masterHandler.GetSalesReps)
 			protected.POST("/sales-reps", masterHandler.CreateSalesRep)

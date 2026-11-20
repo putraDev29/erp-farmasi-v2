@@ -305,8 +305,9 @@ export default function SalesInvoicesPage() {
               <th className="py-0.5 px-2.5 border-r border-slate-200">Sales</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">Pajak</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200 text-right">Total</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200">Tipe Bayar</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200 text-center">Status Bayar (POS)</th>
+              <th className="py-0.5 px-2.5 border-r border-slate-200 text-right">Terbayar</th>
+              <th className="py-0.5 px-2.5 border-r border-slate-200 text-right">Sisa Piutang</th>
+              <th className="py-0.5 px-2.5 border-r border-slate-200 text-center">Status Bayar</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">Keterangan</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">User Buat</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">User Ubah</th>
@@ -317,13 +318,13 @@ export default function SalesInvoicesPage() {
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={15} className="text-center py-12 text-slate-400">
+                <td colSpan={16} className="text-center py-12 text-slate-400">
                   Memuat data transaksi penjualan...
                 </td>
               </tr>
             ) : paginatedSales.length === 0 ? (
               <tr>
-                <td colSpan={15} className="text-center py-20 text-slate-400">
+                <td colSpan={16} className="text-center py-20 text-slate-400">
                   No data
                 </td>
               </tr>
@@ -389,13 +390,26 @@ export default function SalesInvoicesPage() {
                     <td className="py-0.5 px-2.5 border-r border-slate-100 text-right font-bold text-slate-800">
                       {formatCurrency(s.total_amount)}
                     </td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100">
-                      {s.payments?.[0]?.method || "Tunai"}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-right font-medium text-emerald-700">
+                      {formatCurrency(s.paid_amount || 0)}
+                    </td>
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-right font-medium text-rose-600">
+                      {formatCurrency(s.remaining_amount || 0)}
                     </td>
                     <td className="py-0.5 px-2.5 border-r border-slate-100 text-center">
-                      <span className="px-2 py-0.5 bg-[#00c875] text-white rounded font-bold text-[10px]">
-                        LUNAS
-                      </span>
+                      {s.payment_status === "PAID" || (s.remaining_amount <= 0 && s.total_amount > 0) ? (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          Lunas
+                        </span>
+                      ) : s.paid_amount > 0 ? (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                          Sebagian
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                          Belum Lunas
+                        </span>
+                      )}
                     </td>
                     <td className="py-0.5 px-2.5 border-r border-slate-100 max-w-[120px] truncate text-slate-600">
                       {s.notes || "-"}

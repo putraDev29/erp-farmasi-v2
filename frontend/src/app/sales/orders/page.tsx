@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -308,20 +309,19 @@ export default function SalesOrdersPage() {
         <Search className="w-3.5 h-3.5 stroke-[2.5]" />
       </button>
 
-      {/* + Tambah button (Green) */}
-      <button
-        type="button"
-        onClick={handleOpenCreate}
+      {/* + Tambah button (Green) -> Menuju Form Pesanan Penjualan Baru */}
+      <Link
+        href="/sales/orders/new"
         className="h-6 px-2.5 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95"
       >
         <Plus className="w-3.5 h-3.5 stroke-[3]" />
         <span>Tambah</span>
-      </button>
+      </Link>
 
       {/* ✏️ Ubah button (Blue) */}
       <button
         type="button"
-        onClick={handleOpenEdit}
+        onClick={() => selectedId && router.push(`/sales/orders/${selectedId}/edit`)}
         disabled={!selectedId}
         className="h-6 px-2.5 bg-[#3b82f6] hover:bg-blue-600 text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40"
       >

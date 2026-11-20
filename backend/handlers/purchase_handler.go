@@ -386,11 +386,36 @@ func (h *PurchaseHandler) GetPurchases(c *gin.Context) {
 		query = query.Where("purchases.warehouse_id = ?", warehouseID)
 	}
 
+	if supplierID := c.Query("supplier_id"); supplierID != "" && supplierID != "all" {
+		query = query.Where("purchases.supplier_id = ?", supplierID)
+	}
+
+	if hasDebt := c.Query("has_debt"); hasDebt == "true" {
+		query = query.Where("purchases.remaining_amount > 0")
+	}
+
 	if startDate := c.Query("start_date"); startDate != "" {
 		query = query.Where("purchases.date >= ?", startDate)
 	}
 	if endDate := c.Query("end_date"); endDate != "" {
-		query = query.Where("purchases.date <= ?", endDate)
+		if len(endDate) == 10 {
+			query = query.Where("purchases.date <= ?", endDate+" 23:59:59")
+		} else {
+			query = query.Where("purchases.date <= ?", endDate)
+		}
+	}
+
+	if paymentStatus := c.Query("payment_status"); paymentStatus != "" && paymentStatus != "all" {
+		switch strings.ToUpper(paymentStatus) {
+		case "UNPAID", "BELUM LUNAS":
+			query = query.Where("purchases.payment_status IN ('UNPAID', 'PARTIAL') OR purchases.remaining_amount > 0")
+		case "PAID", "LUNAS":
+			query = query.Where("purchases.payment_status = 'PAID' AND purchases.remaining_amount <= 0")
+		case "PARTIAL", "SEBAGIAN":
+			query = query.Where("purchases.payment_status = 'PARTIAL' AND purchases.remaining_amount > 0")
+		default:
+			query = query.Where("purchases.payment_status = ?", strings.ToUpper(paymentStatus))
+		}
 	}
 
 	sortBy := c.DefaultQuery("sort_by", "date")
@@ -614,7 +639,7 @@ func (h *PurchaseHandler) CreatePurchase(c *gin.Context) {
 
 	if remaining > 0 {
 		journalEntries = append(journalEntries, services.JournalEntryParam{
-			AccountCode: "2-1000", // Utang Usaha
+			AccountCode: "2-1100", // Hutang Usaha (Sub-akun dari 2-1000 Kewajiban Lancar)
 			Debit:       0,
 			Credit:      remaining,
 			Description: fmt.Sprintf("Utang Usaha Faktur %s", purchase.InvoiceNo),
@@ -641,7 +666,12 @@ func (h *PurchaseHandler) CreatePurchase(c *gin.Context) {
 		syncPurchaseCashTransaction(tx, &purchase, companyID, branchID, userID, cashAccountCode)
 	}
 
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		tx.Rollback()
+		utils.SendError(c, http.StatusInternalServerError, "Gagal menyimpan transaksi pembelian: "+err.Error(), nil)
+		return
+	}
+
 	database.DB.Preload("Supplier").Preload("Warehouse").Preload("User").Preload("Items.Product").Preload("Items.Unit").First(&purchase, purchase.ID)
 	utils.SendCreated(c, "Faktur pembelian berhasil diposting, stok bertambah dan jurnal dicatat", purchase)
 }
@@ -825,7 +855,7 @@ func (h *PurchaseHandler) UpdatePurchase(c *gin.Context) {
 
 	if remaining > 0 {
 		journalEntries = append(journalEntries, services.JournalEntryParam{
-			AccountCode: "2-1000",
+			AccountCode: "2-1100", // Hutang Usaha
 			Debit:       0,
 			Credit:      remaining,
 			Description: fmt.Sprintf("Utang Usaha Faktur %s", purchase.InvoiceNo),
@@ -845,7 +875,11 @@ func (h *PurchaseHandler) UpdatePurchase(c *gin.Context) {
 
 	syncPurchaseCashTransaction(tx, &purchase, companyID, purchase.BranchID, userID, cashAccountCode)
 
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		tx.Rollback()
+		utils.SendError(c, http.StatusInternalServerError, "Gagal memperbarui transaksi pembelian: "+err.Error(), nil)
+		return
+	}
 
 	database.DB.Preload("Supplier").Preload("Warehouse").Preload("User").Preload("Modifier").Preload("Items.Product").Preload("Items.Unit").First(&purchase, purchase.ID)
 	utils.SendSuccess(c, "Faktur pembelian berhasil diubah", purchase)
@@ -1078,7 +1112,7 @@ func (h *PurchaseHandler) CreatePurchaseReturn(c *gin.Context) {
 	}
 
 	// Double-entry accounting:
-	// Debit: Utang Usaha (2-1000) = totalAmount
+	// Debit: Utang Usaha (2-1100) = totalAmount
 	// Kredit: Persediaan Obat (1-1300) = totalAmount
 	_, err = services.PostDoubleEntryJournal(tx, services.JournalPostParams{
 		CompanyID:   companyID,
@@ -1089,7 +1123,7 @@ func (h *PurchaseHandler) CreatePurchaseReturn(c *gin.Context) {
 		Description: fmt.Sprintf("Jurnal Retur Pembelian %s (%s)", ret.ReturnNo, mode),
 		CreatedBy:   userID,
 		Entries: []services.JournalEntryParam{
-			{AccountCode: "2-1000", Debit: totalAmount, Credit: 0, Description: "Pengurangan Utang Usaha via Retur"},
+			{AccountCode: "2-1100", Debit: totalAmount, Credit: 0, Description: "Pengurangan Utang Usaha via Retur"},
 			{AccountCode: "1-1300", Debit: 0, Credit: totalAmount, Description: "Pengurangan Persediaan via Retur"},
 		},
 	})
@@ -1190,7 +1224,11 @@ func (h *PurchaseHandler) GetPriceHistory(c *gin.Context) {
 		query = query.Where("purchases.date >= ?", startDate)
 	}
 	if endDate := c.Query("end_date"); endDate != "" {
-		query = query.Where("purchases.date <= ?", endDate)
+		if len(endDate) == 10 {
+			query = query.Where("purchases.date <= ?", endDate+" 23:59:59")
+		} else {
+			query = query.Where("purchases.date <= ?", endDate)
+		}
 	}
 
 	// Order clauses
@@ -1243,7 +1281,11 @@ func (h *PurchaseHandler) GetSupplierPayments(c *gin.Context) {
 		query = query.Where("supplier_payments.date >= ?", startDate)
 	}
 	if endDate := c.Query("end_date"); endDate != "" {
-		query = query.Where("supplier_payments.date <= ?", endDate)
+		if len(endDate) == 10 {
+			query = query.Where("supplier_payments.date <= ?", endDate+" 23:59:59")
+		} else {
+			query = query.Where("supplier_payments.date <= ?", endDate)
+		}
 	}
 
 	sortBy := c.DefaultQuery("sort_by", "date")
@@ -1281,17 +1323,42 @@ func (h *PurchaseHandler) CreateSupplierPayment(c *gin.Context) {
 	var req struct {
 		SupplierID    uuid.UUID  `json:"supplier_id" binding:"required"`
 		BankID        *uuid.UUID `json:"bank_id"`
+		AccountID     *uuid.UUID `json:"account_id"`
 		PaymentMethod string     `json:"payment_method" binding:"required"` // TUNAI, TRANSFER, CEK_BG, etc.
 		CheckNo       string     `json:"check_no"`                          // Nomor Cek/BG
 		Notes         string     `json:"notes"`
 		Allocations   []struct {
-			PurchaseID uuid.UUID `json:"purchase_id" binding:"required"`
-			AmountPaid float64   `json:"amount_paid" binding:"required"`
-		} `json:"allocations" binding:"required"`
+			PurchaseID uuid.UUID `json:"purchase_id"`
+			AmountPaid float64   `json:"amount_paid"`
+		} `json:"allocations"`
+		Items []struct {
+			PurchaseID uuid.UUID `json:"purchase_id"`
+			Amount     float64   `json:"amount"`
+			Discount   float64   `json:"discount"`
+		} `json:"items"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.SendError(c, http.StatusBadRequest, "Data pembayaran utang tidak valid", err.Error())
+		return
+	}
+
+	if len(req.Allocations) == 0 && len(req.Items) > 0 {
+		for _, it := range req.Items {
+			if it.Amount > 0 {
+				req.Allocations = append(req.Allocations, struct {
+					PurchaseID uuid.UUID `json:"purchase_id"`
+					AmountPaid float64   `json:"amount_paid"`
+				}{
+					PurchaseID: it.PurchaseID,
+					AmountPaid: it.Amount,
+				})
+			}
+		}
+	}
+
+	if len(req.Allocations) == 0 {
+		utils.SendError(c, http.StatusBadRequest, "Pilih setidaknya satu faktur hutang yang akan dibayar", nil)
 		return
 	}
 
@@ -1371,10 +1438,50 @@ func (h *PurchaseHandler) CreateSupplierPayment(c *gin.Context) {
 		tx.Create(&detail)
 	}
 
-	// Journal: Debit Utang Usaha (2-1000), Credit Kas/Bank (1-1120 or 1-1110)
-	creditAccount := "1-1110"
-	if req.PaymentMethod != "TUNAI" && req.PaymentMethod != "CASH" {
-		creditAccount = "1-1120" // Bank BCA
+	// Resolve Credit Cash/Bank Account according to user selection
+	var kasAcc models.Account
+	creditAccount := ""
+
+	// 1. If explicit AccountID provided
+	if req.AccountID != nil && *req.AccountID != uuid.Nil {
+		if errAcc := tx.Where("id = ? AND company_id = ?", *req.AccountID, companyID).First(&kasAcc).Error; errAcc == nil {
+			creditAccount = kasAcc.Code
+		}
+	}
+
+	// 2. If BankID provided and has linked AccountID
+	if creditAccount == "" && req.BankID != nil && *req.BankID != uuid.Nil {
+		var b models.Bank
+		if errBank := tx.Where("id = ? AND company_id = ?", *req.BankID, companyID).First(&b).Error; errBank == nil && b.AccountID != nil && *b.AccountID != uuid.Nil {
+			if errAcc := tx.Where("id = ? AND company_id = ?", *b.AccountID, companyID).First(&kasAcc).Error; errAcc == nil {
+				creditAccount = kasAcc.Code
+			}
+		}
+	}
+
+	// 3. Fallback based on payment method if still unresolved
+	if creditAccount == "" {
+		fallbackCode := "1-1110"
+		if req.PaymentMethod != "TUNAI" && req.PaymentMethod != "CASH" {
+			fallbackCode = "1-1131" // Bank BCA
+		}
+		if errAcc := tx.Where("company_id = ? AND code = ?", companyID, fallbackCode).First(&kasAcc).Error; errAcc == nil {
+			creditAccount = kasAcc.Code
+		} else {
+			_ = tx.Where("company_id = ? AND subtype = 'CASH_BANK' AND is_header = false", companyID).Order("code ASC").First(&kasAcc).Error
+			creditAccount = kasAcc.Code
+		}
+	}
+	if creditAccount == "" {
+		creditAccount = "1-1110"
+	}
+
+	if payment.BankID == nil && req.AccountID != nil && *req.AccountID != uuid.Nil {
+		var b models.Bank
+		if errB := tx.Where("company_id = ? AND account_id = ?", companyID, *req.AccountID).First(&b).Error; errB == nil {
+			payment.BankID = &b.ID
+			tx.Model(&payment).Update("bank_id", b.ID)
+		}
 	}
 
 	_, err = services.PostDoubleEntryJournal(tx, services.JournalPostParams{
@@ -1386,8 +1493,8 @@ func (h *PurchaseHandler) CreateSupplierPayment(c *gin.Context) {
 		Description: fmt.Sprintf("Pembayaran Utang ke Pemasok (%s)", payment.PaymentNo),
 		CreatedBy:   userID,
 		Entries: []services.JournalEntryParam{
-			{AccountCode: "2-1000", Debit: totalAmount, Credit: 0, Description: "Pelunasan Utang Usaha"},
-			{AccountCode: creditAccount, Debit: 0, Credit: totalAmount, Description: "Kas/Bank Pengeluaran"},
+			{AccountCode: "2-1100", Debit: totalAmount, Credit: 0, Description: "Pelunasan Utang Usaha"},
+			{AccountCode: creditAccount, Debit: 0, Credit: totalAmount, Description: fmt.Sprintf("Pengeluaran Kas/Bank (%s - %s)", creditAccount, kasAcc.Name)},
 		},
 	})
 	if err != nil {
@@ -1396,9 +1503,14 @@ func (h *PurchaseHandler) CreateSupplierPayment(c *gin.Context) {
 		return
 	}
 
-	syncSupplierPaymentCashTransaction(tx, &payment, companyID, branchID, userID, req.PaymentMethod, totalAmount)
+	syncSupplierPaymentCashTransaction(tx, &payment, companyID, branchID, userID, kasAcc, totalAmount)
 
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		tx.Rollback()
+		utils.SendError(c, http.StatusInternalServerError, "Gagal menyimpan pembayaran utang: "+err.Error(), nil)
+		return
+	}
+
 	database.DB.Preload("Supplier").Preload("Bank").Preload("User").Preload("Details.Purchase").First(&payment, payment.ID)
 	utils.SendCreated(c, "Pembayaran utang berhasil dicatat", payment)
 }
@@ -1588,10 +1700,7 @@ func syncPurchaseCashTransaction(tx *gorm.DB, purchase *models.Purchase, company
 			})
 		}
 	} else {
-		var count int64
-		tx.Model(&models.CashTransaction{}).Where("company_id = ? AND type = 'OUT'", companyID).Count(&count)
-		mmyy := purchase.Date.Format("0106")
-		docNo := fmt.Sprintf("%04d/KASO/UTAMA/%s", count+1, mmyy)
+		docNo := services.GenerateCashTransactionNumber(tx, companyID, "KASO", purchase.Date)
 
 		newCashTrx := models.CashTransaction{
 			CompanyID:      companyID,
@@ -1621,7 +1730,7 @@ func syncPurchaseCashTransaction(tx *gorm.DB, purchase *models.Purchase, company
 	}
 }
 
-func syncSupplierPaymentCashTransaction(tx *gorm.DB, payment *models.SupplierPayment, companyID, branchID, userID uuid.UUID, paymentMethod string, totalAmount float64) {
+func syncSupplierPaymentCashTransaction(tx *gorm.DB, payment *models.SupplierPayment, companyID, branchID, userID uuid.UUID, kasAcc models.Account, totalAmount float64) {
 	var existingCashTrx models.CashTransaction
 	descPattern := "%" + payment.PaymentNo + "%"
 	err := tx.Where("company_id = ? AND type = 'OUT' AND (trx_no = ? OR description LIKE ?)", companyID, payment.PaymentNo, descPattern).First(&existingCashTrx).Error
@@ -1634,17 +1743,14 @@ func syncSupplierPaymentCashTransaction(tx *gorm.DB, payment *models.SupplierPay
 		return
 	}
 
-	var kasAcc models.Account
-	creditCode := "1-1110"
-	if paymentMethod != "TUNAI" && paymentMethod != "CASH" {
-		creditCode = "1-1131"
-	}
-	if errKas := tx.Where("company_id = ? AND code = ?", companyID, creditCode).First(&kasAcc).Error; errKas != nil {
-		tx.Where("company_id = ? AND subtype = 'CASH_BANK' AND is_header = false", companyID).First(&kasAcc)
+	if kasAcc.ID == uuid.Nil {
+		if errKas := tx.Where("company_id = ? AND code = '1-1110'", companyID).First(&kasAcc).Error; errKas != nil {
+			tx.Where("company_id = ? AND subtype = 'CASH_BANK' AND is_header = false", companyID).First(&kasAcc)
+		}
 	}
 
 	var utangAcc models.Account
-	_ = tx.Where("company_id = ? AND code = '2-1000'", companyID).First(&utangAcc).Error
+	_ = tx.Where("company_id = ? AND code = '2-1100'", companyID).First(&utangAcc).Error
 
 	var supplier models.Supplier
 	supplierName := ""
@@ -1675,10 +1781,7 @@ func syncSupplierPaymentCashTransaction(tx *gorm.DB, payment *models.SupplierPay
 			})
 		}
 	} else {
-		var count int64
-		tx.Model(&models.CashTransaction{}).Where("company_id = ? AND type = 'OUT'", companyID).Count(&count)
-		mmyy := payment.Date.Format("0106")
-		docNo := fmt.Sprintf("%04d/KASO/UTAMA/%s", count+1, mmyy)
+		docNo := services.GenerateCashTransactionNumber(tx, companyID, "KASO", payment.Date)
 
 		newCashTrx := models.CashTransaction{
 			CompanyID:      companyID,

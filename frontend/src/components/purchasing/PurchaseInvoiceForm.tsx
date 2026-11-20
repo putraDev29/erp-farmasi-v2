@@ -1335,7 +1335,13 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
           {/* [💳 Bayar] */}
           <button
             type="button"
-            onClick={() => setIsBayarModalOpen(true)}
+            onClick={() => {
+              if (bayarTunai === 0 && bayarKredit === 0 && grandTotal > 0) {
+                setBayarTunai(grandTotal);
+                setBayarKredit(0);
+              }
+              setIsBayarModalOpen(true);
+            }}
             className="h-6 px-2.5 bg-white hover:bg-amber-50 border border-amber-400 text-amber-700 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95"
             title="Bayar Faktur Pembelian"
           >
@@ -1611,11 +1617,13 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                   </label>
                   <div className="flex-1 relative flex items-center">
                     <input
-                      type="text"
-                      value={dpAmount > 0 ? dpAmount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={dpAmount === 0 ? "" : dpAmount}
+                      placeholder="0.00"
                       onChange={(e) => {
-                        const raw = e.target.value.replace(/[^0-9.]/g, "");
-                        const val = Number(raw) || 0;
+                        const val = parseFloat(e.target.value) || 0;
                         setDpAmount(val);
                         setBayarKredit(Math.max(0, grandTotal - (val + bayarTunai + bayarDeposit)));
                       }}
@@ -1663,12 +1671,14 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                     </label>
                     <div className="flex-1 relative flex items-center">
                       <input
-                        type="text"
+                        type="number"
+                        step="any"
+                        min="0"
                         autoFocus
-                        value={bayarTunai > 0 ? bayarTunai.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}
+                        value={bayarTunai === 0 ? "" : bayarTunai}
+                        placeholder="0.00"
                         onChange={(e) => {
-                          const raw = e.target.value.replace(/[^0-9.]/g, "");
-                          const val = Number(raw) || 0;
+                          const val = parseFloat(e.target.value) || 0;
                           setBayarTunai(val);
                           setBayarKredit(Math.max(0, grandTotal - (dpAmount + val + bayarDeposit)));
                         }}
@@ -1699,18 +1709,19 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                         setBayarTunai(fullCash);
                         setBayarKredit(0);
                       }}
-                      className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded text-[10px] font-semibold transition"
+                      className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded text-[10px] font-semibold transition cursor-pointer"
                     >
                       Uang Pas (Lunas)
                     </button>
                     <button
                       type="button"
                       onClick={() => {
-                        const half = Math.round(grandTotal * 0.5);
+                        const net = Math.max(0, grandTotal - dpAmount - bayarDeposit);
+                        const half = Math.round(net * 0.5 * 100) / 100;
                         setBayarTunai(half);
-                        setBayarKredit(Math.max(0, grandTotal - dpAmount - bayarDeposit - half));
+                        setBayarKredit(Math.max(0, net - half));
                       }}
-                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded text-[10px] font-medium transition"
+                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded text-[10px] font-medium transition cursor-pointer"
                     >
                       50% Tunai
                     </button>
@@ -1720,7 +1731,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                         setBayarTunai(0);
                         setBayarKredit(Math.max(0, grandTotal - dpAmount - bayarDeposit));
                       }}
-                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded text-[10px] font-medium transition"
+                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded text-[10px] font-medium transition cursor-pointer"
                     >
                       Kredit / Tempo (Rp 0)
                     </button>
@@ -1734,11 +1745,13 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                   </label>
                   <div className="flex-1 relative flex items-center">
                     <input
-                      type="text"
-                      value={bayarDeposit > 0 ? bayarDeposit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={bayarDeposit === 0 ? "" : bayarDeposit}
+                      placeholder="0.00"
                       onChange={(e) => {
-                        const raw = e.target.value.replace(/[^0-9.]/g, "");
-                        const val = Number(raw) || 0;
+                        const val = parseFloat(e.target.value) || 0;
                         setBayarDeposit(val);
                         setBayarKredit(Math.max(0, grandTotal - (dpAmount + bayarTunai + val)));
                       }}
@@ -1766,12 +1779,15 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                   </label>
                   <div className="flex-1 relative flex items-center">
                     <input
-                      type="text"
-                      value={bayarKredit > 0 ? bayarKredit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={bayarKredit === 0 ? "" : bayarKredit}
+                      placeholder="0.00"
                       onChange={(e) => {
-                        const raw = e.target.value.replace(/[^0-9.]/g, "");
-                        const val = Number(raw) || 0;
+                        const val = parseFloat(e.target.value) || 0;
                         setBayarKredit(val);
+                        setBayarTunai(Math.max(0, grandTotal - (dpAmount + bayarDeposit + val)));
                       }}
                       className="w-full h-7 px-2.5 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
                     />
@@ -1796,7 +1812,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
               <div className="bg-[#22c55e] text-white rounded-lg px-4 py-2 flex items-center justify-between shadow-2xs">
                 <span className="text-sm font-bold tracking-wide">Total :</span>
                 <span className="text-2xl font-black font-mono tracking-tight">
-                  {((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0) + (Number(bayarKredit) || 0)).toLocaleString("en-US", {
+                  {((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0)).toLocaleString("en-US", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
@@ -1809,7 +1825,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                 <span className="text-2xl font-black font-mono tracking-tight">
                   {Math.max(
                     0,
-                    grandTotal - ((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0) + (Number(bayarKredit) || 0))
+                    grandTotal - ((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0))
                   ).toLocaleString("en-US", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,

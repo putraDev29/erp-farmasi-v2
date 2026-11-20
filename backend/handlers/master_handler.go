@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"farmasi/backend/database"
 	"farmasi/backend/models"
@@ -601,14 +602,116 @@ func (h *MasterHandler) GetCustomers(c *gin.Context) {
 	utils.SendSuccess(c, "Daftar pelanggan", customers)
 }
 
+type CustomerInput struct {
+	ID                       *uuid.UUID `json:"id"`
+	Code                     string     `json:"code"`
+	Name                     string     `json:"name"`
+	CustomerGroupID          *uuid.UUID `json:"customer_group_id"`
+	TerritoryID              *uuid.UUID `json:"territory_id"`
+	Phone                    string     `json:"phone"`
+	Email                    string     `json:"email"`
+	Address                  string     `json:"address"`
+	City                     string     `json:"city"`
+	Province                 string     `json:"province"`
+	ContactPerson            string     `json:"contact_person"`
+	Notes                    string     `json:"notes"`
+	CreditLimit              float64    `json:"credit_limit"`
+	TermOfPaymentDays        int        `json:"term_of_payment_days"`
+	IsPharmacyFacility       bool       `json:"is_pharmacy_facility"`
+	PharmacyType             string     `json:"pharmacy_type"`
+	CustomerStatus           string     `json:"customer_status"`
+	NIB                      string     `json:"nib"`
+	OperationalLicenseNumber string     `json:"operational_license_number"`
+	NPWP                     string     `json:"npwp"`
+	SIANumber                string     `json:"sia_number"`
+	SIAExpiryDate            *string    `json:"sia_expiry_date"`
+	APJName                  string     `json:"apj_name"`
+	APJSTRANumber            string     `json:"apj_stra_number"`
+	APJSIPANumber            string     `json:"apj_sipa_number"`
+	APJSIPAExpiryDate        *string    `json:"apj_sipa_expiry_date"`
+	APJPhone                 string     `json:"apj_phone"`
+	APJEmail                 string     `json:"apj_email"`
+	IsActive                 *bool      `json:"is_active"`
+}
+
+func parseCustomerDate(dateStr *string) *time.Time {
+	if dateStr == nil {
+		return nil
+	}
+	s := strings.TrimSpace(*dateStr)
+	if s == "" || s == "null" {
+		return nil
+	}
+	formats := []string{
+		"2006-01-02",
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"02/01/2006",
+	}
+	for _, f := range formats {
+		if t, err := time.Parse(f, s); err == nil {
+			return &t
+		}
+	}
+	return nil
+}
+
 func (h *MasterHandler) CreateCustomer(c *gin.Context) {
 	companyID := c.MustGet("company_id").(uuid.UUID)
-	var cust models.Customer
-	if err := c.ShouldBindJSON(&cust); err != nil {
+	var req CustomerInput
+	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.SendError(c, http.StatusBadRequest, "Data pelanggan tidak valid", err.Error())
 		return
 	}
+
+	var cust models.Customer
+	if req.ID != nil && *req.ID != uuid.Nil {
+		cust.ID = *req.ID
+	}
 	cust.CompanyID = companyID
+	cust.Code = strings.TrimSpace(req.Code)
+	cust.Name = strings.TrimSpace(req.Name)
+	cust.CustomerGroupID = req.CustomerGroupID
+	cust.TerritoryID = req.TerritoryID
+	cust.Phone = req.Phone
+	cust.Email = req.Email
+	cust.Address = req.Address
+	cust.City = req.City
+	cust.Province = req.Province
+	cust.ContactPerson = req.ContactPerson
+	cust.Notes = req.Notes
+	cust.CreditLimit = req.CreditLimit
+	cust.TermOfPaymentDays = req.TermOfPaymentDays
+	cust.IsPharmacyFacility = req.IsPharmacyFacility
+	cust.PharmacyType = req.PharmacyType
+	if cust.PharmacyType == "" {
+		if cust.IsPharmacyFacility {
+			cust.PharmacyType = "KLINIK"
+		} else {
+			cust.PharmacyType = "UMUM"
+		}
+	}
+	cust.CustomerStatus = req.CustomerStatus
+	if cust.CustomerStatus == "" {
+		cust.CustomerStatus = "Terdaftar"
+	}
+	cust.NIB = req.NIB
+	cust.OperationalLicenseNumber = req.OperationalLicenseNumber
+	cust.NPWP = req.NPWP
+	cust.SIANumber = req.SIANumber
+	cust.SIAExpiryDate = parseCustomerDate(req.SIAExpiryDate)
+	cust.APJName = req.APJName
+	cust.APJSTRANumber = req.APJSTRANumber
+	cust.APJSIPANumber = req.APJSIPANumber
+	cust.APJSIPAExpiryDate = parseCustomerDate(req.APJSIPAExpiryDate)
+	cust.APJPhone = req.APJPhone
+	cust.APJEmail = req.APJEmail
+	if req.IsActive != nil {
+		cust.IsActive = *req.IsActive
+	} else {
+		cust.IsActive = true
+	}
+
 	if strings.TrimSpace(cust.Code) == "" || strings.EqualFold(cust.Code, "auto") {
 		var count int64
 		database.DB.Model(&models.Customer{}).Where("company_id = ?", companyID).Count(&count)
@@ -628,11 +731,56 @@ func (h *MasterHandler) UpdateCustomer(c *gin.Context) {
 		utils.SendError(c, http.StatusNotFound, "Pelanggan tidak ditemukan", err.Error())
 		return
 	}
-	if err := c.ShouldBindJSON(&cust); err != nil {
+
+	var req CustomerInput
+	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.SendError(c, http.StatusBadRequest, "Data tidak valid", err.Error())
 		return
 	}
-	database.DB.Save(&cust)
+
+	if req.Code != "" {
+		cust.Code = strings.TrimSpace(req.Code)
+	}
+	if req.Name != "" {
+		cust.Name = strings.TrimSpace(req.Name)
+	}
+	cust.CustomerGroupID = req.CustomerGroupID
+	cust.TerritoryID = req.TerritoryID
+	cust.Phone = req.Phone
+	cust.Email = req.Email
+	cust.Address = req.Address
+	cust.City = req.City
+	cust.Province = req.Province
+	cust.ContactPerson = req.ContactPerson
+	cust.Notes = req.Notes
+	cust.CreditLimit = req.CreditLimit
+	cust.TermOfPaymentDays = req.TermOfPaymentDays
+	cust.IsPharmacyFacility = req.IsPharmacyFacility
+	if req.PharmacyType != "" {
+		cust.PharmacyType = req.PharmacyType
+	}
+	if req.CustomerStatus != "" {
+		cust.CustomerStatus = req.CustomerStatus
+	}
+	cust.NIB = req.NIB
+	cust.OperationalLicenseNumber = req.OperationalLicenseNumber
+	cust.NPWP = req.NPWP
+	cust.SIANumber = req.SIANumber
+	cust.SIAExpiryDate = parseCustomerDate(req.SIAExpiryDate)
+	cust.APJName = req.APJName
+	cust.APJSTRANumber = req.APJSTRANumber
+	cust.APJSIPANumber = req.APJSIPANumber
+	cust.APJSIPAExpiryDate = parseCustomerDate(req.APJSIPAExpiryDate)
+	cust.APJPhone = req.APJPhone
+	cust.APJEmail = req.APJEmail
+	if req.IsActive != nil {
+		cust.IsActive = *req.IsActive
+	}
+
+	if err := database.DB.Save(&cust).Error; err != nil {
+		utils.SendError(c, http.StatusInternalServerError, "Gagal memperbarui pelanggan", err.Error())
+		return
+	}
 	utils.SendSuccess(c, "Pelanggan berhasil diperbarui", cust)
 }
 
@@ -643,6 +791,36 @@ func (h *MasterHandler) DeleteCustomer(c *gin.Context) {
 		return
 	}
 	utils.SendSuccess(c, "Pelanggan berhasil dihapus", nil)
+}
+
+func (h *MasterHandler) VerifyCustomer(c *gin.Context) {
+	id := c.Param("id")
+	var cust models.Customer
+	if err := database.DB.First(&cust, "id = ?", id).Error; err != nil {
+		utils.SendError(c, http.StatusNotFound, "Pelanggan tidak ditemukan", err.Error())
+		return
+	}
+
+	cust.IsVerified = !cust.IsVerified
+	now := time.Now()
+	if cust.IsVerified {
+		cust.VerifiedAt = &now
+		cust.VerifiedNotes = "Diverifikasi & Disetujui oleh Apoteker Penanggung Jawab (APJ)"
+	} else {
+		cust.VerifiedAt = nil
+		cust.VerifiedNotes = ""
+	}
+
+	if err := database.DB.Save(&cust).Error; err != nil {
+		utils.SendError(c, http.StatusInternalServerError, "Gagal mengubah status verifikasi", err.Error())
+		return
+	}
+
+	msg := "Pelanggan berhasil diverifikasi (Legalitas CDOB Aktif)"
+	if !cust.IsVerified {
+		msg = "Verifikasi pelanggan berhasil dibatalkan"
+	}
+	utils.SendSuccess(c, msg, cust)
 }
 
 // Sales Representatives

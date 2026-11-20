@@ -38,6 +38,7 @@ interface RolePermission {
   can_delete: boolean;
   lock_transaction_number: boolean;
   lock_date: boolean;
+  value?: number;
 }
 
 interface ModuleSchema {
@@ -110,11 +111,11 @@ const MODULE_SCHEMA: Record<string, ModuleSchema> = {
   "Aktif Harga pada Pesanan Jual, Penjualan & Kasir": { canOpen: true },
   "History Harga Jual": { canOpen: true },
   "Modul Kasir : Bisa Cetak Laporan Kasir": { canOpen: true },
-  "Modul Penjualan & Kasir : Bisa Jual di bawah Keuntungan Minimal (Aktif sesuai Pengaturan Umum : Tampil Konfirmasi Harga Jual lebih Kecil dari Harga Pokok)": { canOpen: true },
-  "Modul Penjualan & Kasir : Bisa Jual di bawah Harga Pokok (Aktif sesuai Pengaturan Umum : Tampil Konfirmasi Harga Jual lebih Kecil dari Harga Pokok)": { canOpen: true },
+  "Bisa Jual di bawah Keuntungan Minimal (Sesuai Pengaturan Umum)": { canOpen: true },
+  "Bisa Jual di bawah Harga Pokok (Sesuai Pengaturan Umum)": { canOpen: true },
   "Modul Kasir : Aktif Pending Kasir": { canOpen: true },
   "Kas Laci": { canOpen: true, canDelete: true },
-  "Kunci Tgl Modul Daftar Penjualan, Kasir & Tombol Laporan Daftar Kasir : Tanggal hanya bisa 1 hari": { canOpen: true },
+  "Kunci Tanggal Penjualan & Kasir (Hanya 1 Hari)": { canOpen: true },
   "Modul Kasir : Aktif Pembayaran Kredit": { canOpen: true },
   "Bisa batal, menghapus detail item & transaksi pada Penjualan & Kasir": { canOpen: true },
   "Pesanan Marketplace": { canOpen: true, canEdit: true },
@@ -328,6 +329,17 @@ export default function RolesPage() {
       prev.map((item) => {
         if (item.category === activeTab && item.module === moduleName) {
           return { ...item, [field]: !item[field] };
+        }
+        return item;
+      })
+    );
+  };
+
+  const handleValueChange = (moduleName: string, val: number) => {
+    setPermissionsState((prev) =>
+      prev.map((item) => {
+        if (item.category === activeTab && item.module === moduleName) {
+          return { ...item, value: val };
         }
         return item;
       })
@@ -587,18 +599,51 @@ export default function RolesPage() {
                 <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b border-slate-300 sticky top-0 z-10 shadow-2xs">
                   <tr>
                     <th className="py-2 px-3 border-r border-slate-200">Modul</th>
-                    <th className="py-2 px-3 w-16 text-center border-r border-slate-200">Buka</th>
-                    {!isOnlyOpenTab && (
+
+                    {/* 1. NOTIFIKASI: Modul | Buka | Nilai (Screenshot 2) */}
+                    {activeTab === "Notifikasi" && (
                       <>
+                        <th className="py-2 px-3 w-20 text-center border-r border-slate-200">Buka</th>
+                        <th className="py-2 px-3 w-28 text-center">Nilai</th>
+                      </>
+                    )}
+
+                    {/* 2. TAMPILAN MENU: Modul | Tampil (Screenshot 4) */}
+                    {activeTab === "Tampilan Menu" && (
+                      <th className="py-2 px-3 w-20 text-center">Tampil</th>
+                    )}
+
+                    {/* 3. PENGATURAN LAINNYA: Modul | Akses | Hapus (Screenshot 8) */}
+                    {activeTab === "Pengaturan Lainnya" && (
+                      <>
+                        <th className="py-2 px-3 w-20 text-center border-r border-slate-200">Akses</th>
+                        <th className="py-2 px-3 w-20 text-center">Hapus</th>
+                      </>
+                    )}
+
+                    {/* 4. PENGATURAN E-COMMERCE: Modul | Akses (Screenshot 9) */}
+                    {activeTab === "Pengaturan E-commerce" && (
+                      <th className="py-2 px-3 w-20 text-center">Akses</th>
+                    )}
+
+                    {/* 5. LAPORAN: Modul | Buka (Screenshots 1 & 3) */}
+                    {activeTab === "Laporan" && (
+                      <th className="py-2 px-3 w-20 text-center">Buka</th>
+                    )}
+
+                    {/* 6. TRANSAKSI & MASTER DATA */}
+                    {!isOnlyOpenTab && activeTab !== "Pengaturan Lainnya" && activeTab !== "Pengaturan E-commerce" && (
+                      <>
+                        <th className="py-2 px-3 w-16 text-center border-r border-slate-200">Buka</th>
                         <th className="py-2 px-3 w-16 text-center border-r border-slate-200">Baru</th>
                         <th className="py-2 px-3 w-16 text-center border-r border-slate-200">Ubah</th>
                         <th className="py-2 px-3 w-16 text-center border-r border-slate-200">Hapus</th>
-                      </>
-                    )}
-                    {isTransactionTab && (
-                      <>
-                        <th className="py-2 px-3 w-28 text-center border-r border-slate-200">Kunci No Transaksi</th>
-                        <th className="py-2 px-3 w-24 text-center">Kunci Tanggal</th>
+                        {isTransactionTab && (
+                          <>
+                            <th className="py-2 px-3 w-28 text-center border-r border-slate-200">Kunci No Transaksi</th>
+                            <th className="py-2 px-3 w-24 text-center">Kunci Tanggal</th>
+                          </>
+                        )}
                       </>
                     )}
                   </tr>
@@ -620,21 +665,102 @@ export default function RolesPage() {
                             {item.module}
                           </td>
 
-                          {/* BUKA (Always rendered for modules) */}
-                          <td className="py-1.5 px-3 text-center border-r border-slate-200">
-                            {schema.canOpen !== false ? (
+                          {/* 1. NOTIFIKASI TAB */}
+                          {activeTab === "Notifikasi" && (
+                            <>
+                              <td className="py-1.5 px-3 text-center border-r border-slate-200">
+                                <input
+                                  type="checkbox"
+                                  checked={item.can_open}
+                                  onChange={() => handleToggle(item.module, "can_open")}
+                                  className="w-3.5 h-3.5 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer"
+                                />
+                              </td>
+                              <td className="py-1 px-3 text-center">
+                                <input
+                                  type="number"
+                                  value={item.value !== undefined ? item.value : 0}
+                                  onChange={(e) => handleValueChange(item.module, parseInt(e.target.value) || 0)}
+                                  className="w-16 h-5 px-1 text-center border border-slate-300 rounded text-[11px] focus:outline-none focus:border-cyan-500"
+                                />
+                              </td>
+                            </>
+                          )}
+
+                          {/* 2. TAMPILAN MENU TAB */}
+                          {activeTab === "Tampilan Menu" && (
+                            <td className="py-1.5 px-3 text-center">
                               <input
                                 type="checkbox"
                                 checked={item.can_open}
                                 onChange={() => handleToggle(item.module, "can_open")}
                                 className="w-3.5 h-3.5 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer"
                               />
-                            ) : null}
-                          </td>
+                            </td>
+                          )}
 
-                          {/* BARU, UBAH, HAPUS */}
-                          {!isOnlyOpenTab && (
+                          {/* 3. PENGATURAN LAINNYA TAB */}
+                          {activeTab === "Pengaturan Lainnya" && (
                             <>
+                              <td className="py-1.5 px-3 text-center border-r border-slate-200">
+                                <input
+                                  type="checkbox"
+                                  checked={item.can_open}
+                                  onChange={() => handleToggle(item.module, "can_open")}
+                                  className="w-3.5 h-3.5 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer"
+                                />
+                              </td>
+                              <td className="py-1.5 px-3 text-center">
+                                {schema.canDelete || item.module === "User Manajemen" || item.module === "Log Aktivitas User" || item.module === "Daftar Modul Terbuka" ? (
+                                  <input
+                                    type="checkbox"
+                                    checked={item.can_delete}
+                                    onChange={() => handleToggle(item.module, "can_delete")}
+                                    className="w-3.5 h-3.5 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer"
+                                  />
+                                ) : null}
+                              </td>
+                            </>
+                          )}
+
+                          {/* 4. PENGATURAN E-COMMERCE TAB */}
+                          {activeTab === "Pengaturan E-commerce" && (
+                            <td className="py-1.5 px-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={item.can_open}
+                                onChange={() => handleToggle(item.module, "can_open")}
+                                className="w-3.5 h-3.5 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer"
+                              />
+                            </td>
+                          )}
+
+                          {/* 5. LAPORAN TAB */}
+                          {activeTab === "Laporan" && (
+                            <td className="py-1.5 px-3 text-center">
+                              <input
+                                type="checkbox"
+                                checked={item.can_open}
+                                onChange={() => handleToggle(item.module, "can_open")}
+                                className="w-3.5 h-3.5 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer"
+                              />
+                            </td>
+                          )}
+
+                          {/* 6. TRANSAKSI & MASTER DATA */}
+                          {!isOnlyOpenTab && activeTab !== "Pengaturan Lainnya" && activeTab !== "Pengaturan E-commerce" && (
+                            <>
+                              <td className="py-1.5 px-3 text-center border-r border-slate-200">
+                                {schema.canOpen !== false ? (
+                                  <input
+                                    type="checkbox"
+                                    checked={item.can_open}
+                                    onChange={() => handleToggle(item.module, "can_open")}
+                                    className="w-3.5 h-3.5 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer"
+                                  />
+                                ) : null}
+                              </td>
+
                               <td className="py-1.5 px-3 text-center border-r border-slate-200">
                                 {schema.canCreate ? (
                                   <input
@@ -665,32 +791,31 @@ export default function RolesPage() {
                                   />
                                 ) : null}
                               </td>
-                            </>
-                          )}
 
-                          {/* KUNCI NO TRANSAKSI & KUNCI TANGGAL */}
-                          {isTransactionTab && (
-                            <>
-                              <td className="py-1.5 px-3 text-center border-r border-slate-200">
-                                {schema.lockTx ? (
-                                  <input
-                                    type="checkbox"
-                                    checked={item.lock_transaction_number}
-                                    onChange={() => handleToggle(item.module, "lock_transaction_number")}
-                                    className="w-3.5 h-3.5 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer"
-                                  />
-                                ) : null}
-                              </td>
-                              <td className="py-1.5 px-3 text-center">
-                                {schema.lockDate ? (
-                                  <input
-                                    type="checkbox"
-                                    checked={item.lock_date}
-                                    onChange={() => handleToggle(item.module, "lock_date")}
-                                    className="w-3.5 h-3.5 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer"
-                                  />
-                                ) : null}
-                              </td>
+                              {isTransactionTab && (
+                                <>
+                                  <td className="py-1.5 px-3 text-center border-r border-slate-200">
+                                    {schema.lockTx ? (
+                                      <input
+                                        type="checkbox"
+                                        checked={item.lock_transaction_number}
+                                        onChange={() => handleToggle(item.module, "lock_transaction_number")}
+                                        className="w-3.5 h-3.5 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer"
+                                      />
+                                    ) : null}
+                                  </td>
+                                  <td className="py-1.5 px-3 text-center">
+                                    {schema.lockDate ? (
+                                      <input
+                                        type="checkbox"
+                                        checked={item.lock_date}
+                                        onChange={() => handleToggle(item.module, "lock_date")}
+                                        className="w-3.5 h-3.5 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500 cursor-pointer"
+                                      />
+                                    ) : null}
+                                  </td>
+                                </>
+                              )}
                             </>
                           )}
                         </tr>

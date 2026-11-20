@@ -174,6 +174,7 @@ type CustomerPayment struct {
 	PaymentNo      string                  `gorm:"size:50;uniqueIndex;not null" json:"payment_no"`
 	Date           time.Time               `gorm:"not null" json:"date"`
 	BankID         *uuid.UUID              `gorm:"type:uuid;index" json:"bank_id"`
+	AccountID      *uuid.UUID              `gorm:"type:uuid;index" json:"account_id"`
 	PaymentMethod  string                  `gorm:"size:50;not null" json:"payment_method"`
 	BGCheckNo      string                  `gorm:"size:100" json:"bg_check_no"`
 	BGCheckDueDate *time.Time              `json:"bg_check_due_date"`

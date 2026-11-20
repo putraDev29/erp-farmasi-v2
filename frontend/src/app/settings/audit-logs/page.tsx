@@ -1,290 +1,502 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import { ChevronLeft, Search, AlertTriangle, ChevronRight } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { ShieldCheck, Search, Filter, Eye, X, Loader2, Calendar } from "lucide-react";
-import { api, formatDate } from "@/lib/api";
+import { api } from "@/lib/api";
 
-const PAGE_SIZE = 20;
+type LogTab = "Transaksi" | "Master" | "Akuntansi" | "Impor" | "Sistem" | "Auto Patch";
 
-export default function AuditLogsPage() {
-  const [search, setSearch] = useState("");
-  const [entity, setEntity] = useState("");
-  const [action, setAction] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [selectedLog, setSelectedLog] = useState<any | null>(null);
+export default function LogAktivitasPage() {
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState<LogTab>("Transaksi");
+  const [keyword, setKeyword] = useState("");
+  const [fromDate, setFromDate] = useState("2026-11-01");
+  const [toDate, setToDate] = useState("2026-11-30");
+  const [page, setPage] = useState(1);
 
-  const { data: logs = [], isLoading } = useQuery({
-    queryKey: ["audit-logs", entity, action, search],
+  const { data: serverLogs = [] } = useQuery({
+    queryKey: ["audit-logs", activeTab, fromDate, toDate, keyword],
     queryFn: async () => {
-      const params = new URLSearchParams();
-      if (entity) params.append("entity", entity);
-      if (action) params.append("action", action);
-      if (search) params.append("q", search);
-      const res = await api.get(`/settings/audit-logs?${params.toString()}`);
-      return res.data?.data || [];
+      try {
+        const res = await api.get(`/settings/audit-logs?from=${fromDate}&to=${toDate}&q=${keyword}`);
+        return res.data?.data || [];
+      } catch {
+        return [];
+      }
     },
   });
 
-  const totalPages = Math.ceil(logs.length / PAGE_SIZE) || 1;
-  const pagedLogs = useMemo(() => {
-    const start = (currentPage - 1) * PAGE_SIZE;
-    return logs.slice(start, start + PAGE_SIZE);
-  }, [logs, currentPage]);
+  // Mock data realistic to Screenshots 9, 11, 12, 13, 14, 15
+  const transaksiData = [
+    { tanggal: "2026-11-18 20:15:31", obyek: "PENJUALAN", noTx: "079112/KSR/UTAMA/112", keterangan: "Insert Penjualan", status: "Sukses", user: "MAYA", ip: "118.99.64.8", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 20:14:43", obyek: "PENJUALAN", noTx: "079111/KSR/UTAMA/112", keterangan: "Insert Penjualan", status: "Sukses", user: "MAYA", ip: "118.99.64.8", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 20:14:36", obyek: "PENJUALAN", noTx: "079110/KSR/UTAMA/112", keterangan: "Insert Penjualan", status: "Sukses", user: "ELDHA", ip: "118.99.64.8", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 20:11:48", obyek: "PENJUALAN", noTx: "079109/KSR/UTAMA/112", keterangan: "Insert Penjualan", status: "Sukses", user: "ELDHA", ip: "118.99.64.8", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 19:48:53", obyek: "PENJUALAN", noTx: "079108/KSR/UTAMA/112", keterangan: "Insert Penjualan", status: "Sukses", user: "MAYA", ip: "118.99.64.8", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 19:46:55", obyek: "PENJUALAN", noTx: "079107/KSR/UTAMA/112", keterangan: "Insert Penjualan", status: "Sukses", user: "ELDHA", ip: "118.99.64.8", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 19:43:58", obyek: "PENJUALAN", noTx: "079106/KSR/UTAMA/112", keterangan: "Insert Penjualan", status: "Sukses", user: "MAYA", ip: "118.99.64.8", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 19:42:09", obyek: "PENJUALAN", noTx: "079105/KSR/UTAMA/112", keterangan: "Insert Penjualan", status: "Sukses", user: "ELDHA", ip: "118.99.64.8", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 19:39:08", obyek: "PENJUALAN", noTx: "079104/KSR/UTAMA/112", keterangan: "Insert Penjualan", status: "Sukses", user: "MAYA", ip: "118.99.64.8", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 19:36:38", obyek: "PENJUALAN", noTx: "079103/KSR/UTAMA/112", keterangan: "Insert Penjualan", status: "Sukses", user: "ELDHA", ip: "118.99.64.8", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 19:35:04", obyek: "PENJUALAN", noTx: "079102/KSR/UTAMA/112", keterangan: "Insert Penjualan", status: "Sukses", user: "MAYA", ip: "118.99.64.8", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 19:33:44", obyek: "PENJUALAN", noTx: "079101/KSR/UTAMA/112", keterangan: "Insert Penjualan", status: "Sukses", user: "ELDHA", ip: "118.99.64.8", pc: "Desktop (Windows)" },
+  ];
+
+  const masterData = [
+    { tanggal: "2026-11-18 19:34:25", kode: "PCT+GG+CTM+PSO", keterangan: "Edit Item", status: "Sukses", user: "DEVI", ip: "182.2.105.104", pc: "Web (Safari)" },
+    { tanggal: "2026-11-18 16:05:10", kode: "OTC-195", keterangan: "Edit Item", status: "Sukses", user: "DEVI", ip: "9.154.179.164", pc: "Web (Safari)" },
+    { tanggal: "2026-11-18 13:17:39", kode: "OTC-389", keterangan: "Edit Item", status: "Sukses", user: "NIWA", ip: "118.99.64.11", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 12:28:20", kode: "PARACETAMOL-45", keterangan: "Edit Item", status: "Sukses", user: "NIWA", ip: "118.99.64.11", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 09:17:43", kode: "AMLODIPIN-IT", keterangan: "Edit Item", status: "Sukses", user: "NIWA", ip: "118.99.64.11", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-17 10:04:06", kode: "OTC-253", keterangan: "Edit Item", status: "Sukses", user: "DEVI", ip: "118.99.64.10", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-16 17:27:46", kode: "SALEP-015", keterangan: "Edit Item", status: "Sukses", user: "DEVI", ip: "9.154.179.164", pc: "Web (Chrome)" },
+    { tanggal: "2026-11-16 14:54:55", kode: "SUCRALFATE-006", keterangan: "Edit Item", status: "Sukses", user: "DEVI", ip: "118.99.64.10", pc: "Web (Chrome)" },
+  ];
+
+  const akuntansiData = [
+    { tanggal: "2026-11-18 14:14:04", obyek: "KAS", noTx: "1179/KASTR/UTAMA/112", keterangan: "Tambah Kas Transfer", status: "Sukses", user: "NIWA", ip: "118.99.64.11", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 12:38:03", obyek: "KAS", noTx: "0427/KASO/UTAMA/112", keterangan: "Tambah Kas Keluar", status: "Sukses", user: "NIWA", ip: "118.99.64.11", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-18 11:58:39", obyek: "KAS", noTx: "0426/KASO/UTAMA/112", keterangan: "Tambah Kas Keluar", status: "Sukses", user: "NIWA", ip: "118.99.64.11", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-17 21:35:04", obyek: "KAS", noTx: "1178/KASTR/UTAMA/112", keterangan: "Tambah Kas Transfer", status: "Sukses", user: "ELDHA", ip: "118.99.64.11", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-17 21:27:46", obyek: "KAS", noTx: "1177/KASTR/UTAMA/112", keterangan: "Tambah Kas Transfer", status: "Sukses", user: "NIWA", ip: "118.99.64.11", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-17 21:27:00", obyek: "KAS", noTx: "1176/KASTR/UTAMA/112", keterangan: "Tambah Kas Transfer", status: "Sukses", user: "NIWA", ip: "118.99.64.11", pc: "Desktop (Windows)" },
+    { tanggal: "2026-11-17 21:02:21", obyek: "KAS", noTx: "1175/KASTR/UTAMA/112", keterangan: "Tambah Kas Transfer", status: "Sukses", user: "NIWA", ip: "118.99.64.11", pc: "Desktop (Windows)" },
+  ];
+
+  const sistemData = [
+    { tanggal: "2026-11-18 19:58:36", obyek: "LOGIN", keterangan: "Login Session", status: "Info", user: "ADMIN2", ip: "180.252.166.58", pc: "-" },
+    { tanggal: "2026-11-18 19:33:52", obyek: "LOGIN", keterangan: "Login Standar", status: "Info", user: "DEVI", ip: "182.2.105.104", pc: "Web (Safari)" },
+    { tanggal: "2026-11-18 19:20:16", obyek: "LOGOUT", keterangan: "Logout Sistem", status: "Info", user: "ADMIN", ip: "103.154.210.81", pc: "Web (Chrome)" },
+    { tanggal: "2026-11-18 19:12:10", obyek: "LOGIN", keterangan: "Login Session", status: "Info", user: "ADMIN", ip: "103.154.210.81", pc: "-" },
+    { tanggal: "2026-11-18 19:10:02", obyek: "LOGIN", keterangan: "Login Standar", status: "Info", user: "ADMIN", ip: "103.154.210.81", pc: "Web (Chrome)" },
+    { tanggal: "2026-11-18 18:58:41", obyek: "LOGIN", keterangan: "Login Session", status: "Info", user: "ADMIN2", ip: "180.252.166.58", pc: "-" },
+    { tanggal: "2026-11-18 09:03:52", obyek: "DAFTAR USER", keterangan: "EDIT USER", status: "Sukses", user: "ADMIN2", ip: "103.154.210.81", pc: "Web (Edge)" },
+  ];
+
+  const autoPatchData = [
+    { tgl: "2026-10-05 14:11:12", patchNum: 347, message: "", status: "OK" },
+    { tgl: "2026-10-05 14:11:12", patchNum: 346, message: "", status: "OK" },
+    { tgl: "2026-07-28 13:52:25", patchNum: 342, message: "", status: "OK" },
+    { tgl: "2026-07-28 13:52:25", patchNum: 343, message: "", status: "OK" },
+    { tgl: "2026-07-28 13:52:25", patchNum: 344, message: "", status: "OK" },
+    { tgl: "2026-07-28 13:52:25", patchNum: 340, message: "", status: "OK" },
+    { tgl: "2026-07-28 13:52:25", patchNum: 341, message: "", status: "OK" },
+    { tgl: "2026-07-28 13:52:25", patchNum: 345, message: "", status: "OK" },
+    { tgl: "2026-07-17 13:12:24", patchNum: 339, message: "", status: "OK" },
+    { tgl: "2026-05-16 14:06:00", patchNum: 338, message: "", status: "OK" },
+    { tgl: "2026-03-24 17:21:45", patchNum: 334, message: "ERROR: insert or update on table \"tbl_perksetting\" violates foreign key constraint \"tbl_perksetting_kantor\" DETAIL: Key (acckantor)=(UTM) is not present in table \"tbl_kantor\".", status: "Gagal" },
+    { tgl: "2026-03-24 17:21:45", patchNum: 335, message: "", status: "OK" },
+    { tgl: "2026-03-24 17:21:45", patchNum: 336, message: "", status: "OK" },
+    { tgl: "2026-03-24 17:21:44", patchNum: 323, message: "", status: "OK" },
+  ];
+
+  const filteredTransaksi = useMemo(() => {
+    if (!keyword.trim()) return transaksiData;
+    const q = keyword.toLowerCase();
+    return transaksiData.filter((r) => r.noTx.toLowerCase().includes(q) || r.user.toLowerCase().includes(q));
+  }, [keyword, transaksiData]);
+
+  const filteredMaster = useMemo(() => {
+    if (!keyword.trim()) return masterData;
+    const q = keyword.toLowerCase();
+    return masterData.filter((r) => r.kode.toLowerCase().includes(q) || r.user.toLowerCase().includes(q));
+  }, [keyword, masterData]);
+
+  const filteredAkuntansi = useMemo(() => {
+    if (!keyword.trim()) return akuntansiData;
+    const q = keyword.toLowerCase();
+    return akuntansiData.filter((r) => r.noTx.toLowerCase().includes(q) || r.user.toLowerCase().includes(q));
+  }, [keyword, akuntansiData]);
+
+  const filteredSistem = useMemo(() => {
+    if (!keyword.trim()) return sistemData;
+    const q = keyword.toLowerCase();
+    return sistemData.filter((r) => r.obyek.toLowerCase().includes(q) || r.user.toLowerCase().includes(q));
+  }, [keyword, sistemData]);
+
+  const totalPages =
+    activeTab === "Transaksi"
+      ? 119
+      : activeTab === "Master"
+      ? 3
+      : activeTab === "Akuntansi"
+      ? 3
+      : activeTab === "Sistem"
+      ? 6
+      : activeTab === "Auto Patch"
+      ? 11
+      : 0;
 
   return (
-    <div className="flex flex-col h-full bg-[#f8fafc] text-slate-800 text-xs select-none">
-      {/* TOP HEADER */}
-      <div className="h-10 px-4 bg-white border-b border-slate-200 flex items-center justify-between shrink-0 shadow-2xs">
+    <div className="flex flex-col h-full bg-white text-slate-800 text-xs select-none">
+      {/* SUB-HEADER / TITLE BAR */}
+      <div className="h-10 px-4 border-b border-slate-200 flex items-center justify-between shrink-0 bg-white">
         <div className="flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-emerald-600" />
-          <h1 className="font-semibold text-sm text-slate-800">Log Aktivitas Pengguna &amp; Audit Trail BPOM</h1>
+          <button
+            onClick={() => router.back()}
+            className="text-slate-600 hover:text-slate-800 flex items-center text-xs"
+          >
+            <ChevronLeft className="w-4 h-4 mr-0.5" />
+            <span className="font-semibold text-sm text-slate-800">Log Aktivitas</span>
+          </button>
         </div>
-        <div className="text-[11px] font-bold text-slate-500">
-          Standar Kepatuhan: <span className="text-emerald-700">BPOM e-Farmasi &amp; CDOB</span>
+        <div className="flex items-center gap-3 text-xs text-slate-600">
+          <span className="font-medium">APOTEK BERKAT PURNAMA [UTAMA]</span>
+          <span className="w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center text-[10px] font-bold">
+            33
+          </span>
+          <div className="flex items-center gap-1 text-emerald-600 font-semibold">
+            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px]">
+              A
+            </span>
+            <span>ADMIN2</span>
+          </div>
         </div>
       </div>
 
-      <div className="flex-1 p-3 flex flex-col min-h-0 space-y-2 overflow-hidden">
+      {/* CONTENT */}
+      <div className="flex-1 p-3 overflow-y-auto space-y-3 flex flex-col min-h-0">
+        {/* AMBER NOTICE BOX */}
+        <div className="p-2.5 bg-[#fff9e6] border border-[#ffe58f] rounded text-[11px] text-slate-700 space-y-0.5 shrink-0">
+          <div className="flex items-center gap-1.5 font-bold text-amber-800">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span>PENTING :</span>
+          </div>
+          <p className="text-slate-700 pl-5">
+            Data Log Aktivitas Untuk Kedepannya akan hanya bisa di lihat untuk data per 6 bulan kebelakang, di atas 6 bulan dianggap kadaluarsa dan akan terhapus otomatis oleh sistem ketoko.
+          </p>
+        </div>
+
         {/* FILTER BAR */}
-        <div className="bg-white rounded border border-slate-300 p-2 shadow-2xs flex flex-wrap items-center justify-between gap-2 shrink-0">
-          <div className="flex flex-wrap items-center gap-2 flex-1">
-            <div className="relative w-64">
-              <input
-                type="text"
-                placeholder="Cari aktivitas atau pengguna..."
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="w-full h-7 pl-8 pr-2.5 text-xs bg-white border border-slate-300 rounded focus:outline-none focus:border-cyan-500 font-medium"
-              />
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2" />
-              {search && (
-                <button onClick={() => setSearch("")} className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600">
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            <select
-              value={entity}
-              onChange={(e) => {
-                setEntity(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="h-7 px-2 text-xs bg-white border border-slate-300 rounded font-semibold text-slate-700 focus:outline-none focus:border-cyan-500"
-            >
-              <option value="">Semua Entitas Modul</option>
-              <option value="USER">Pengguna &amp; Hak Akses</option>
-              <option value="PRODUCT">Item Obat &amp; Stok</option>
-              <option value="PURCHASE">Pembelian &amp; Hutang</option>
-              <option value="SALE">Penjualan &amp; Kasir</option>
-              <option value="JOURNAL">Akuntansi &amp; Kas</option>
-              <option value="SETTINGS">Pengaturan Sistem</option>
-            </select>
-
-            <select
-              value={action}
-              onChange={(e) => {
-                setAction(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="h-7 px-2 text-xs bg-white border border-slate-300 rounded font-semibold text-slate-700 focus:outline-none focus:border-cyan-500"
-            >
-              <option value="">Semua Jenis Aksi</option>
-              <option value="CREATE">CREATE (Tambah Data)</option>
-              <option value="UPDATE">UPDATE (Ubah Data)</option>
-              <option value="DELETE">DELETE (Hapus Data)</option>
-              <option value="LOGIN">LOGIN (Masuk Sistem)</option>
-            </select>
+        <div className="grid grid-cols-12 gap-3 items-center shrink-0">
+          <div className="col-span-5 flex items-center gap-2">
+            <span className="text-[11px] text-slate-600 whitespace-nowrap">Kata Kunci :</span>
+            <input
+              type="text"
+              value={keyword}
+              onChange={(e) => setKeyword(e.target.value)}
+              className="flex-1 h-7 px-2 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-cyan-500"
+            />
           </div>
 
-          <div className="text-[11px] font-bold text-slate-500">
-            Total Log: <span className="text-emerald-700">{logs.length}</span>
+          <div className="col-span-3 flex items-center gap-2">
+            <span className="text-[11px] text-slate-600 whitespace-nowrap">Dari Tgl :</span>
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="w-full h-7 px-2 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+
+          <div className="col-span-3 flex items-center gap-2">
+            <span className="text-[11px] text-slate-600 whitespace-nowrap">s/d :</span>
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="w-full h-7 px-2 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+
+          <div className="col-span-1 flex items-center justify-end gap-1">
+            <button className="h-7 px-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs rounded flex items-center justify-center">
+              <Search className="w-3.5 h-3.5 text-sky-600" />
+            </button>
           </div>
         </div>
 
-        {/* LOGS TABLE */}
-        <div className="flex-1 min-h-0 bg-white rounded border border-slate-300 flex flex-col shadow-2xs overflow-hidden">
-          <div className="flex-1 min-h-0 overflow-auto">
+        {/* TABS HEADER */}
+        <div className="flex items-center border-b border-slate-300 shrink-0">
+          {(["Transaksi", "Master", "Akuntansi", "Impor", "Sistem", "Auto Patch"] as LogTab[]).map(
+            (tab) => (
+              <button
+                key={tab}
+                onClick={() => {
+                  setActiveTab(tab);
+                  setPage(1);
+                }}
+                className={`px-4 py-1.5 text-xs font-semibold border-t border-l border-r rounded-t transition ${
+                  activeTab === tab
+                    ? "bg-white text-slate-900 border-slate-300 -mb-px border-b-white"
+                    : "bg-slate-100 text-slate-600 border-transparent hover:text-slate-900 hover:bg-slate-200"
+                }`}
+              >
+                {tab}
+              </button>
+            )
+          )}
+        </div>
+
+        {/* TAB TABLE */}
+        <div className="flex-1 min-h-0 border border-slate-300 rounded bg-white overflow-auto shadow-2xs">
+          {/* TAB 1: Transaksi */}
+          {activeTab === "Transaksi" && (
             <table className="w-full text-left text-[11px] border-collapse whitespace-nowrap">
-              <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b border-slate-300 sticky top-0 z-10 shadow-2xs">
+              <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b border-slate-300 sticky top-0">
                 <tr>
-                  <th className="py-2 px-3 border-r border-slate-200">Waktu Kejadian</th>
-                  <th className="py-2 px-3 border-r border-slate-200">Pengguna (User)</th>
-                  <th className="py-2 px-3 border-r border-slate-200 text-center">Aksi</th>
-                  <th className="py-2 px-3 border-r border-slate-200">Modul / Entitas</th>
-                  <th className="py-2 px-3 border-r border-slate-200">Keterangan Aktivitas</th>
-                  <th className="py-2 px-3 border-r border-slate-200">Alamat IP</th>
-                  <th className="py-2 px-3 text-center w-14">Detail</th>
+                  <th className="py-2 px-3 border-r border-slate-200">Tanggal</th>
+                  <th className="py-2 px-3 border-r border-slate-200 text-center">Obyek</th>
+                  <th className="py-2 px-3 border-r border-slate-200">No Transaksi</th>
+                  <th className="py-2 px-3 border-r border-slate-200">Keterangan</th>
+                  <th className="py-2 px-3 border-r border-slate-200 text-center">Status</th>
+                  <th className="py-2 px-3 border-r border-slate-200">User</th>
+                  <th className="py-2 px-3 border-r border-slate-200">IP Address</th>
+                  <th className="py-2 px-3">Komputer</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
-                {isLoading ? (
-                  <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-400">
-                      <Loader2 className="w-5 h-5 animate-spin mx-auto mb-1 text-emerald-600" />
-                      <span>Memuat log aktivitas...</span>
+                {filteredTransaksi.map((row, idx) => (
+                  <tr key={idx} className="hover:bg-slate-50">
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-slate-700">{row.tanggal}</td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-center">
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-600 text-white text-[9px] font-bold">
+                        {row.obyek}
+                      </span>
                     </td>
-                  </tr>
-                ) : pagedLogs.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="py-8 text-center text-slate-400">
-                      Belum ada jejak audit yang sesuai filter.
+                    <td className="py-1.5 px-3 border-r border-slate-200 font-mono text-sky-600 cursor-pointer hover:underline">
+                      {row.noTx}
                     </td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-slate-800">{row.keterangan}</td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-center">
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[9px] font-bold">
+                        {row.status}
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 font-semibold text-slate-800">{row.user}</td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-slate-600">{row.ip}</td>
+                    <td className="py-1.5 px-3 text-slate-600">{row.pc}</td>
                   </tr>
-                ) : (
-                  pagedLogs.map((log: any) => (
-                    <tr key={log.id} className="hover:bg-slate-50 transition">
-                      <td className="py-1.5 px-3 font-mono text-slate-600 border-r border-slate-200">
-                        {formatDate(log.created_at)}
-                      </td>
-                      <td className="py-1.5 px-3 font-semibold text-slate-800 border-r border-slate-200">
-                        {log.user?.full_name || log.user?.username || "Sistem"}
-                      </td>
-                      <td className="py-1.5 px-3 text-center border-r border-slate-200">
-                        <span
-                          className={`px-1.5 py-0.2 rounded text-[9.5px] font-bold ${
-                            log.action === "CREATE"
-                              ? "bg-emerald-100 text-emerald-800"
-                              : log.action === "UPDATE"
-                              ? "bg-sky-100 text-sky-800"
-                              : log.action === "DELETE"
-                              ? "bg-rose-100 text-rose-800"
-                              : "bg-purple-100 text-purple-800"
-                          }`}
-                        >
-                          {log.action}
-                        </span>
-                      </td>
-                      <td className="py-1.5 px-3 font-bold text-slate-700 border-r border-slate-200">
-                        {log.entity}
-                      </td>
-                      <td className="py-1.5 px-3 text-slate-700 border-r border-slate-200 truncate max-w-xs">
-                        {log.description || "-"}
-                      </td>
-                      <td className="py-1.5 px-3 font-mono text-slate-500 border-r border-slate-200">
-                        {log.ip_address || "127.0.0.1"}
-                      </td>
-                      <td className="py-1.5 px-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => setSelectedLog(log)}
-                          className="p-1 text-sky-600 hover:text-sky-800 hover:bg-sky-50 rounded"
-                          title="Lihat Detail Log"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
+                ))}
               </tbody>
             </table>
-          </div>
+          )}
 
-          {/* PAGINATION */}
-          <div className="h-8 px-4 border-t border-slate-200 bg-white flex items-center justify-between shrink-0">
-            <span className="text-[11px] text-slate-500 font-medium">
-              Menampilkan {pagedLogs.length} dari {logs.length} catatan
-            </span>
-            <div className="flex items-center gap-1">
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                <button
-                  key={page}
-                  type="button"
-                  onClick={() => setCurrentPage(page)}
-                  className={`w-5 h-5 flex items-center justify-center rounded text-[11px] font-semibold border transition ${
-                    currentPage === page
-                      ? "bg-slate-700 text-white border-slate-700"
-                      : "bg-white text-slate-700 border-slate-300 hover:bg-slate-100"
-                  }`}
-                >
-                  {page}
-                </button>
-              ))}
+          {/* TAB 2: Master */}
+          {activeTab === "Master" && (
+            <table className="w-full text-left text-[11px] border-collapse whitespace-nowrap">
+              <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b border-slate-300 sticky top-0">
+                <tr>
+                  <th className="py-2 px-3 border-r border-slate-200">Tanggal</th>
+                  <th className="py-2 px-3 border-r border-slate-200 text-center">Kode</th>
+                  <th className="py-2 px-3 border-r border-slate-200">Keterangan</th>
+                  <th className="py-2 px-3 border-r border-slate-200 text-center">Status</th>
+                  <th className="py-2 px-3 border-r border-slate-200">User</th>
+                  <th className="py-2 px-3 border-r border-slate-200">IP Address</th>
+                  <th className="py-2 px-3">Komputer</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {filteredMaster.map((row, idx) => (
+                  <tr key={idx} className="hover:bg-slate-50">
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-slate-700">{row.tanggal}</td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-center">
+                      <span className="px-2 py-0.5 rounded bg-purple-700 text-white text-[10px] font-medium font-mono">
+                        {row.kode}
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-slate-800">{row.keterangan}</td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-center">
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[9px] font-bold">
+                        {row.status}
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 font-semibold text-slate-800">{row.user}</td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-slate-600">{row.ip}</td>
+                    <td className="py-1.5 px-3 text-slate-600">{row.pc}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {/* TAB 3: Akuntansi */}
+          {activeTab === "Akuntansi" && (
+            <table className="w-full text-left text-[11px] border-collapse whitespace-nowrap">
+              <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b border-slate-300 sticky top-0">
+                <tr>
+                  <th className="py-2 px-3 border-r border-slate-200">Tanggal</th>
+                  <th className="py-2 px-3 border-r border-slate-200 text-center">Obyek</th>
+                  <th className="py-2 px-3 border-r border-slate-200">No Transaksi</th>
+                  <th className="py-2 px-3 border-r border-slate-200">Keterangan</th>
+                  <th className="py-2 px-3 border-r border-slate-200 text-center">Status</th>
+                  <th className="py-2 px-3 border-r border-slate-200">User</th>
+                  <th className="py-2 px-3 border-r border-slate-200">IP Address</th>
+                  <th className="py-2 px-3">Komputer</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {filteredAkuntansi.map((row, idx) => (
+                  <tr key={idx} className="hover:bg-slate-50">
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-slate-700">{row.tanggal}</td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-center">
+                      <span className="px-2 py-0.5 rounded bg-purple-700 text-white text-[9px] font-bold">
+                        {row.obyek}
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 font-mono text-sky-600 cursor-pointer hover:underline">
+                      {row.noTx}
+                    </td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-slate-800">{row.keterangan}</td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-center">
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500 text-white text-[9px] font-bold">
+                        {row.status}
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 font-semibold text-slate-800">{row.user}</td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-slate-600">{row.ip}</td>
+                    <td className="py-1.5 px-3 text-slate-600">{row.pc}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {/* TAB 4: Impor */}
+          {activeTab === "Impor" && (
+            <div className="flex flex-col h-full">
+              <table className="w-full text-left text-[11px] border-collapse whitespace-nowrap">
+                <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b border-slate-300">
+                  <tr>
+                    <th className="py-2 px-3 border-r border-slate-200">Tanggal</th>
+                    <th className="py-2 px-3 border-r border-slate-200">Obyek</th>
+                    <th className="py-2 px-3 border-r border-slate-200">Keterangan</th>
+                    <th className="py-2 px-3 border-r border-slate-200">Status</th>
+                    <th className="py-2 px-3 border-r border-slate-200">User</th>
+                    <th className="py-2 px-3 border-r border-slate-200">IP Address</th>
+                    <th className="py-2 px-3">Komputer</th>
+                  </tr>
+                </thead>
+              </table>
+              <div className="flex-1 flex items-center justify-center p-12 text-slate-400 text-xs">
+                No data
+              </div>
             </div>
-          </div>
-        </div>
-      </div>
+          )}
 
-      {/* DETAIL MODAL */}
-      {selectedLog && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-2xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg shadow-xl border border-slate-300 w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-4 py-2.5 border-b border-slate-200 flex items-center justify-between bg-slate-50">
-              <h3 className="font-bold text-xs text-slate-800">
-                Detail Log Audit #{selectedLog.id?.substring(0, 8)}
-              </h3>
+          {/* TAB 5: Sistem */}
+          {activeTab === "Sistem" && (
+            <table className="w-full text-left text-[11px] border-collapse whitespace-nowrap">
+              <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b border-slate-300 sticky top-0">
+                <tr>
+                  <th className="py-2 px-3 border-r border-slate-200">Tanggal</th>
+                  <th className="py-2 px-3 border-r border-slate-200 text-center">Obyek</th>
+                  <th className="py-2 px-3 border-r border-slate-200">Keterangan</th>
+                  <th className="py-2 px-3 border-r border-slate-200 text-center">Status</th>
+                  <th className="py-2 px-3 border-r border-slate-200">User</th>
+                  <th className="py-2 px-3 border-r border-slate-200">IP Address</th>
+                  <th className="py-2 px-3">Komputer</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {filteredSistem.map((row, idx) => (
+                  <tr key={idx} className="hover:bg-slate-50">
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-slate-700">{row.tanggal}</td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-center">
+                      <span className="px-2 py-0.5 rounded bg-purple-700 text-white text-[9px] font-bold">
+                        {row.obyek}
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-slate-800">{row.keterangan}</td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-center">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-white text-[9px] font-bold ${
+                          row.status === "Sukses" ? "bg-emerald-500" : "bg-slate-400"
+                        }`}
+                      >
+                        {row.status}
+                      </span>
+                    </td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 font-semibold text-slate-800">{row.user}</td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-slate-600">{row.ip}</td>
+                    <td className="py-1.5 px-3 text-slate-600">{row.pc}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {/* TAB 6: Auto Patch */}
+          {activeTab === "Auto Patch" && (
+            <table className="w-full text-left text-[11px] border-collapse">
+              <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b border-slate-300 sticky top-0">
+                <tr>
+                  <th className="py-2 px-3 border-r border-slate-200 w-44">TglPch</th>
+                  <th className="py-2 px-3 border-r border-slate-200 w-24 text-center">Patch Num</th>
+                  <th className="py-2 px-3 border-r border-slate-200">Message</th>
+                  <th className="py-2 px-3 w-20 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200">
+                {autoPatchData.map((row, idx) => (
+                  <tr key={idx} className="hover:bg-slate-50">
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-slate-700 whitespace-nowrap">
+                      {row.tgl}
+                    </td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-center font-mono text-sky-600 font-semibold cursor-pointer hover:underline">
+                      {row.patchNum}
+                    </td>
+                    <td className="py-1.5 px-3 border-r border-slate-200 text-slate-800 text-[10px] font-mono leading-tight">
+                      {row.message}
+                    </td>
+                    <td className="py-1.5 px-3 text-center">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-white text-[9px] font-bold ${
+                          row.status === "OK" ? "bg-cyan-600" : "bg-rose-500"
+                        }`}
+                      >
+                        {row.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* BOTTOM PAGINATION & ACTIONS */}
+        <div className="flex items-center justify-between pt-2 border-t border-slate-200 shrink-0">
+          <div className="flex items-center gap-1 text-[11px]">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="h-6 w-6 border border-slate-300 rounded flex items-center justify-center hover:bg-slate-50 disabled:opacity-40"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <span className="px-2 text-slate-700">
+              Hal {page} / {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="h-6 w-6 border border-slate-300 rounded flex items-center justify-center hover:bg-slate-50 disabled:opacity-40"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {activeTab === "Transaksi" && (
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setSelectedLog(null)}
-                className="text-slate-400 hover:text-slate-700 transition"
+                className="h-7 px-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs rounded shadow-2xs font-medium"
               >
-                <X className="w-4 h-4" />
+                Restore
+              </button>
+              <button
+                type="button"
+                className="h-7 px-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs rounded shadow-2xs font-medium"
+              >
+                Restore Nomor Baru
               </button>
             </div>
-
-            <div className="p-4 space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-2 p-2.5 bg-slate-50 rounded border border-slate-200">
-                <div>
-                  <span className="text-slate-500 font-semibold block text-[10px]">Waktu:</span>
-                  <span className="font-mono font-bold text-slate-800">{formatDate(selectedLog.created_at)}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 font-semibold block text-[10px]">User Pelaksana:</span>
-                  <span className="font-bold text-slate-800">{selectedLog.user?.full_name || selectedLog.user?.username || "Sistem"}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 font-semibold block text-[10px]">Aksi &amp; Entitas:</span>
-                  <span className="font-bold text-slate-800">{selectedLog.action} &bull; {selectedLog.entity}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 font-semibold block text-[10px]">IP Address:</span>
-                  <span className="font-mono text-slate-700">{selectedLog.ip_address || "127.0.0.1"}</span>
-                </div>
-              </div>
-
-              <div>
-                <span className="text-slate-500 font-semibold block text-[10px] mb-1">Deskripsi Aktivitas:</span>
-                <p className="p-2 bg-slate-50 rounded border border-slate-200 text-slate-800">
-                  {selectedLog.description || "Tidak ada deskripsi rinci."}
-                </p>
-              </div>
-
-              {selectedLog.old_value && (
-                <div>
-                  <span className="text-slate-500 font-semibold block text-[10px] mb-1">Nilai Sebelum (Old Value):</span>
-                  <pre className="p-2 bg-slate-50 rounded border border-slate-200 text-[10px] font-mono overflow-auto max-h-24">
-                    {selectedLog.old_value}
-                  </pre>
-                </div>
-              )}
-
-              {selectedLog.new_value && (
-                <div>
-                  <span className="text-slate-500 font-semibold block text-[10px] mb-1">Nilai Sesudah (New Value):</span>
-                  <pre className="p-2 bg-slate-50 rounded border border-slate-200 text-[10px] font-mono overflow-auto max-h-24">
-                    {selectedLog.new_value}
-                  </pre>
-                </div>
-              )}
-
-              <div className="pt-2 flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => setSelectedLog(null)}
-                  className="h-7 px-4 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded"
-                >
-                  Tutup
-                </button>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

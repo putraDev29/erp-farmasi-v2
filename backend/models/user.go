@@ -26,13 +26,14 @@ type RoleModulePermission struct {
 	BaseModel
 	RoleID                uuid.UUID `gorm:"type:uuid;index;not null" json:"role_id"`
 	Category              string    `gorm:"size:50;not null" json:"category"`
-	Module                string    `gorm:"size:150;not null" json:"module"`
+	Module                string    `gorm:"size:255;not null" json:"module"`
 	CanOpen               bool      `gorm:"default:false" json:"can_open"`
 	CanCreate             bool      `gorm:"default:false" json:"can_create"`
 	CanEdit               bool      `gorm:"default:false" json:"can_edit"`
 	CanDelete             bool      `gorm:"default:false" json:"can_delete"`
 	LockTransactionNumber bool      `gorm:"default:false" json:"lock_transaction_number"`
 	LockDate              bool      `gorm:"default:false" json:"lock_date"`
+	Value                 int       `gorm:"default:0" json:"value"`
 }
 
 type RolePermission struct {
@@ -42,15 +43,21 @@ type RolePermission struct {
 
 type User struct {
 	BaseModel
-	CompanyID    uuid.UUID  `gorm:"type:uuid;index" json:"company_id"`
-	BranchID     uuid.UUID  `gorm:"type:uuid;index" json:"branch_id"`
-	Username     string     `gorm:"size:50;uniqueIndex;not null" json:"username"`
-	Email        string     `gorm:"size:100;uniqueIndex;not null" json:"email"`
-	PasswordHash string     `gorm:"size:255;not null" json:"-"`
-	FullName     string     `gorm:"size:150;not null" json:"full_name"`
-	Phone        string     `gorm:"size:30" json:"phone"`
-	IsActive     bool       `gorm:"default:true" json:"is_active"`
-	LastLoginAt  *time.Time `json:"last_login_at"`
+	CompanyID           uuid.UUID  `gorm:"type:uuid;index" json:"company_id"`
+	BranchID            uuid.UUID  `gorm:"type:uuid;index" json:"branch_id"`
+	Username            string     `gorm:"size:50;uniqueIndex;not null" json:"username"`
+	Email               string     `gorm:"size:100;uniqueIndex;not null" json:"email"`
+	PasswordHash        string     `gorm:"size:255;not null" json:"-"`
+	FullName            string     `gorm:"size:150;not null" json:"full_name"`
+	Phone               string     `gorm:"size:30" json:"phone"`
+	IsActive            bool       `gorm:"default:true" json:"is_active"`
+	LastLoginAt         *time.Time `json:"last_login_at"`
+	LoginPeriodActive   bool       `gorm:"default:false" json:"login_period_active"`
+	LoginPeriodFrom     string     `gorm:"size:10;default:'08:00'" json:"login_period_from"`
+	LoginPeriodTo       string     `gorm:"size:10;default:'21:00'" json:"login_period_to"`
+	LoginWithShift      bool       `gorm:"default:false" json:"login_with_shift"`
+	WaDeviceID          string     `gorm:"size:100" json:"wa_device_id"`
+	WarehouseAccessType string     `gorm:"size:50;default:'ALL'" json:"warehouse_access_type"`
 
 	Company         *Company          `gorm:"foreignKey:CompanyID" json:"company,omitempty"`
 	Branch          *Branch           `gorm:"foreignKey:BranchID" json:"branch,omitempty"`

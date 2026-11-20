@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type SalesHandler struct{}
@@ -291,6 +292,14 @@ func (h *SalesHandler) GetSales(c *gin.Context) {
 
 	if warehouseID := c.Query("warehouse_id"); warehouseID != "" && warehouseID != "all" {
 		query = query.Where("sales.warehouse_id = ?", warehouseID)
+	}
+
+	if customerID := c.Query("customer_id"); customerID != "" && customerID != "all" {
+		query = query.Where("sales.customer_id = ?", customerID)
+	}
+
+	if hasDebt := c.Query("has_debt"); hasDebt == "true" {
+		query = query.Where("sales.remaining_amount > 0")
 	}
 
 	if startDate := c.Query("start_date"); startDate != "" {
@@ -610,7 +619,7 @@ func (h *SalesHandler) CreateSale(c *gin.Context) {
 
 	if remainingAmount > 0 {
 		journalEntries = append(journalEntries, services.JournalEntryParam{
-			AccountCode: "1-1200", // Piutang Usaha
+			AccountCode: "1-1210", // Piutang Usaha
 			Debit:       remainingAmount,
 			Credit:      0,
 			Description: fmt.Sprintf("Piutang Penjualan Faktur %s", sale.InvoiceNo),
@@ -628,7 +637,7 @@ func (h *SalesHandler) CreateSale(c *gin.Context) {
 
 	if taxAmount > 0 {
 		journalEntries = append(journalEntries, services.JournalEntryParam{
-			AccountCode: "2-1100", // Utang PPN Keluaran
+			AccountCode: "2-4110", // Utang PPN Keluaran
 			Debit:       0,
 			Credit:      taxAmount,
 			Description: fmt.Sprintf("PPN Keluaran Faktur %s", sale.InvoiceNo),
@@ -656,6 +665,10 @@ func (h *SalesHandler) CreateSale(c *gin.Context) {
 		tx.Rollback()
 		utils.SendError(c, http.StatusInternalServerError, "Gagal membuat jurnal transaksi penjualan: "+err.Error(), nil)
 		return
+	}
+
+	if effectivePaid > 0 {
+		syncSaleCashTransaction(tx, &sale, companyID, branchID, userID, cashAccountCode, effectivePaid)
 	}
 
 	tx.Commit()
@@ -1158,6 +1171,7 @@ func (h *SalesHandler) CreateCustomerPayment(c *gin.Context) {
 
 	var req struct {
 		CustomerID    uuid.UUID  `json:"customer_id" binding:"required"`
+		AccountID     *uuid.UUID `json:"account_id"`
 		BankID        *uuid.UUID `json:"bank_id"`
 		PaymentMethod string     `json:"payment_method" binding:"required"`
 		BGCheckNo     string     `json:"bg_check_no"`
@@ -1194,6 +1208,7 @@ func (h *SalesHandler) CreateCustomerPayment(c *gin.Context) {
 		PaymentNo:     payNo,
 		Date:          time.Now(),
 		BankID:        req.BankID,
+		AccountID:     req.AccountID,
 		PaymentMethod: req.PaymentMethod,
 		BGCheckNo:     req.BGCheckNo,
 		TotalAmount:   totalAmount,
@@ -1234,7 +1249,19 @@ func (h *SalesHandler) CreateCustomerPayment(c *gin.Context) {
 	}
 
 	debitAccount := "1-1110"
-	if req.PaymentMethod != "CASH" {
+	var kasAcc models.Account
+	if req.AccountID != nil {
+		if errAcc := tx.First(&kasAcc, *req.AccountID).Error; errAcc == nil && kasAcc.Code != "" {
+			debitAccount = kasAcc.Code
+		}
+	} else if req.BankID != nil {
+		var bank models.Bank
+		if errBank := tx.First(&bank, *req.BankID).Error; errBank == nil && bank.AccountID != nil {
+			if errAcc := tx.First(&kasAcc, *bank.AccountID).Error; errAcc == nil && kasAcc.Code != "" {
+				debitAccount = kasAcc.Code
+			}
+		}
+	} else if req.PaymentMethod != "CASH" && req.PaymentMethod != "TUNAI" {
 		debitAccount = "1-1120"
 	}
 
@@ -1248,9 +1275,37 @@ func (h *SalesHandler) CreateCustomerPayment(c *gin.Context) {
 		CreatedBy:   userID,
 		Entries: []services.JournalEntryParam{
 			{AccountCode: debitAccount, Debit: totalAmount, Credit: 0, Description: "Penerimaan Kas/Bank dari Pelanggan"},
-			{AccountCode: "1-1200", Debit: 0, Credit: totalAmount, Description: "Pelunasan Piutang Usaha"},
+			{AccountCode: "1-1210", Debit: 0, Credit: totalAmount, Description: "Pelunasan Piutang Usaha"},
 		},
 	})
+
+	if kasAcc.ID != uuid.Nil {
+		trxNo, _ := services.GenerateDocNumber(tx, companyID, "BKM")
+		var cust models.Customer
+		custName := "Pelanggan"
+		if errCust := tx.First(&cust, payment.CustomerID).Error; errCust == nil && cust.Name != "" {
+			custName = cust.Name
+		}
+		var piutangAcc models.Account
+		_ = tx.Where("company_id = ? AND code = '1-1210'", companyID).First(&piutangAcc).Error
+
+		cashTrx := models.CashTransaction{
+			CompanyID:      companyID,
+			BranchID:       branchID,
+			TrxNo:          trxNo,
+			Date:           payment.Date,
+			Type:           "IN",
+			AccountID:      kasAcc.ID,
+			Amount:         payment.TotalAmount,
+			PayeeRecipient: custName,
+			Description:    fmt.Sprintf("Penerimaan Pelunasan Piutang %s (%s)", payment.PaymentNo, custName),
+			CreatedBy:      userID,
+		}
+		if piutangAcc.ID != uuid.Nil {
+			cashTrx.OppositeAccID = &piutangAcc.ID
+		}
+		tx.Create(&cashTrx)
+	}
 
 	tx.Commit()
 	utils.SendCreated(c, "Pelunasan piutang pelanggan berhasil diproses", payment)
@@ -1751,4 +1806,72 @@ func (h *SalesHandler) ProcessCustomerPointsFix(c *gin.Context) {
 	utils.SendSuccess(c, fmt.Sprintf("Berhasil melakukan perbaikan point untuk %d pelanggan", processedCount), gin.H{
 		"processed_count": processedCount,
 	})
+}
+
+func syncSaleCashTransaction(tx *gorm.DB, sale *models.Sale, companyID, branchID, userID uuid.UUID, cashCode string, effectivePaid float64) {
+	var existingCashTrx models.CashTransaction
+	descPattern := "%" + sale.InvoiceNo + "%"
+	err := tx.Where("company_id = ? AND type = 'IN' AND description LIKE ?", companyID, descPattern).First(&existingCashTrx).Error
+
+	if effectivePaid <= 0 {
+		if err == nil {
+			tx.Where("transaction_id = ?", existingCashTrx.ID).Delete(&models.CashTransactionItem{})
+			tx.Delete(&existingCashTrx)
+		}
+		return
+	}
+
+	if cashCode == "" {
+		cashCode = "1-1110"
+	}
+
+	var kasAcc models.Account
+	if errKas := tx.Where("company_id = ? AND code = ?", companyID, cashCode).First(&kasAcc).Error; errKas != nil {
+		if errK2 := tx.Where("company_id = ? AND code = '1-1110'", companyID).First(&kasAcc).Error; errK2 != nil {
+			tx.Where("company_id = ? AND subtype = 'CASH_BANK' AND is_header = false", companyID).First(&kasAcc)
+		}
+	}
+
+	var revenueAcc models.Account
+	_ = tx.Where("company_id = ? AND code = '4-1000'", companyID).First(&revenueAcc).Error
+
+	var customer models.Customer
+	customerName := "Pelanggan Umum"
+	if sale.CustomerID != uuid.Nil {
+		if errCust := tx.First(&customer, sale.CustomerID).Error; errCust == nil && customer.Name != "" {
+			customerName = customer.Name
+		}
+	}
+
+	desc := fmt.Sprintf("Penerimaan Kas/Bank Penjualan Faktur %s (%s)", sale.InvoiceNo, customerName)
+
+	if err == nil {
+		existingCashTrx.Amount = effectivePaid
+		existingCashTrx.Date = sale.Date
+		existingCashTrx.AccountID = kasAcc.ID
+		if revenueAcc.ID != uuid.Nil {
+			existingCashTrx.OppositeAccID = &revenueAcc.ID
+		}
+		existingCashTrx.PayeeRecipient = customerName
+		existingCashTrx.Description = desc
+		tx.Save(&existingCashTrx)
+	} else {
+		trxNo, _ := services.GenerateDocNumber(tx, companyID, "BKM")
+		cashTrx := models.CashTransaction{
+			CompanyID:      companyID,
+			BranchID:       branchID,
+			TrxNo:          trxNo,
+			Date:           sale.Date,
+			Type:           "IN",
+			AccountID:      kasAcc.ID,
+			Amount:         effectivePaid,
+			PayeeRecipient: customerName,
+			Description:    desc,
+			CreatedBy:      userID,
+		}
+		if revenueAcc.ID != uuid.Nil {
+			cashTrx.OppositeAccID = &revenueAcc.ID
+		}
+		tx.Create(&cashTrx)
+	}
 }

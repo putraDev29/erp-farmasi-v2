@@ -23,6 +23,8 @@ import {
   PackageCheck,
 } from "lucide-react";
 import { useAuthStore } from "@/lib/auth-store";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 
 interface NestedSubItem {
   title: string;
@@ -261,7 +263,9 @@ const menuItems: MenuItem[] = [
     title: "Laporan",
     icon: PieChart,
     iconColor: "text-violet-500",
+    href: "/reports",
     subItems: [
+      { title: "Menu Laporan", href: "/reports" },
       { title: "Laporan Penjualan (Excel)", href: "/reports/sales" },
       { title: "Laporan Persediaan (Excel)", href: "/reports/inventory" },
     ],
@@ -339,6 +343,22 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
   const [themeMode, setThemeMode] = useState<"light" | "dark">("light");
+
+  const { data: generalSettings } = useQuery({
+    queryKey: ["settings-general"],
+    queryFn: async () => {
+      try {
+        const res = await api.get("/settings/groups/GENERAL");
+        return res.data?.data || {};
+      } catch {
+        return {};
+      }
+    },
+    staleTime: 30000,
+  });
+
+  const brandName = generalSettings?.app_brand_name || "Ketoko.co.id";
+  const brandSubtitle = generalSettings?.app_brand_subtitle || "ERP & POS";
 
   useEffect(() => {
     const savedMode = localStorage.getItem("erp_theme_mode");
@@ -421,46 +441,52 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
   const userRole = user?.roles?.[0] || "SUPER ADMIN";
   const initialLetter = displayName.charAt(0).toUpperCase();
 
+  const handleLinkClick = () => {
+    if (typeof window !== "undefined" && window.innerWidth < 768 && onClose) {
+      onClose();
+    }
+  };
+
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-40 w-52 flex flex-col transition-transform duration-300 ease-in-out md:translate-x-0 select-none shadow-[2px_0_8px_rgba(0,0,0,0.03)] border-r ${
+      className={`fixed inset-y-0 left-0 z-40 w-52 flex flex-col transition-transform duration-300 ease-in-out select-none shadow-[2px_0_8px_rgba(0,0,0,0.03)] border-r ${
         themeMode === "dark"
           ? "bg-[#2d323f] text-slate-200 border-slate-700/80"
           : "bg-white text-slate-700 border-slate-200/90"
       } ${isOpen ? "translate-x-0" : "-translate-x-full"}`}
     >
       {/* 1. BRAND HEADER (Compact Width) */}
-      <div className={`h-13 px-3 flex items-center justify-between border-b shrink-0 ${
+      <div className={`h-13 sm:h-14 px-3 flex items-center justify-between border-b shrink-0 ${
         themeMode === "dark" ? "border-slate-700/60" : "border-slate-100"
       }`}>
-        <Link href="/dashboard" className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[#00c875] to-emerald-700 flex items-center justify-center text-white shadow-xs shadow-emerald-500/20 shrink-0">
+        <Link href="/dashboard" className="flex items-center gap-2 py-1">
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00c875] to-emerald-700 flex items-center justify-center text-white shadow-xs shadow-emerald-500/20 shrink-0">
             <Pill className="w-4 h-4 text-white" />
           </div>
-          <div className="min-w-0">
-            <span className={`font-extrabold text-[13px] tracking-tight leading-none block truncate ${
+          <div className="min-w-0 flex flex-col justify-center">
+            <span className={`font-extrabold text-[13px] tracking-tight leading-snug block truncate pt-0.5 ${
               themeMode === "dark" ? "text-white" : "text-slate-900"
             }`}>
-              Ketoko.co.id
+              {brandName}
             </span>
             <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200/60 uppercase tracking-wider block mt-0.5 w-fit leading-none">
-              ERP &amp; POS
+              {brandSubtitle}
             </span>
           </div>
         </Link>
       </div>
 
       {/* 2. HERO ACTION SHORTCUT (Quick Open POS Cashier) */}
-      <div className="px-2.5 pt-2 pb-1 shrink-0">
+      {/* <div className="px-2.5 pt-2 pb-1 shrink-0">
         <Link
           href="/pos"
-          onClick={onClose}
+          onClick={handleLinkClick}
           className="w-full py-1.5 px-2 bg-gradient-to-r from-[#00c875] to-emerald-600 hover:from-[#00b067] hover:to-emerald-700 active:scale-[0.98] text-white font-bold rounded-lg shadow-xs shadow-emerald-600/20 flex items-center justify-center gap-1.5 text-[11px] transition-all duration-150"
         >
           <Scale className="w-3.5 h-3.5 text-white" />
           <span>Buka Kasir POS</span>
         </Link>
-      </div>
+      </div> */}
 
       {/* 3. SCROLLABLE MENU HIERARCHY */}
       <div className="flex-1 overflow-y-auto px-2 py-1.5 space-y-0.5 text-xs scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
@@ -475,7 +501,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
               <Link
                 key={item.title}
                 href={item.href}
-                onClick={onClose}
+                onClick={handleLinkClick}
                 className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11.5px] transition-all duration-150 ${
                   isCurrentActive
                     ? "bg-[#00c875] text-white font-bold shadow-sm shadow-[#00c875]/30"
@@ -654,7 +680,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                                               <Link
                                                 key={gc.href}
                                                 href={gc.href}
-                                                onClick={onClose}
+                                                onClick={handleLinkClick}
                                                 className={`block px-2 py-0.5 rounded text-[10px] transition-all truncate ${
                                                   isGcActive
                                                     ? isSettings
@@ -680,7 +706,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                                   <Link
                                     key={child.href}
                                     href={child.href}
-                                    onClick={onClose}
+                                    onClick={handleLinkClick}
                                     className={`block px-2 py-1 rounded text-[10.5px] transition-all truncate ${
                                       isChildActive
                                         ? isSettings
@@ -706,7 +732,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                       <Link
                         key={sub.href}
                         href={sub.href}
-                        onClick={onClose}
+                        onClick={handleLinkClick}
                         className={`block px-2 py-1 rounded-md text-[11px] transition-all truncate ${
                           isSubActive
                             ? isSettings

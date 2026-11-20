@@ -681,10 +681,7 @@ func (h *AccountingHandler) CreateCashTransaction(c *gin.Context) {
 	}
 
 	if docNo == "" || docNo == "Auto" {
-		var count int64
-		database.DB.Model(&models.CashTransaction{}).Where("company_id = ? AND type = ?", companyID, req.Type).Count(&count)
-		mmyy := req.Date.Format("0106")
-		docNo = fmt.Sprintf("%04d/%s/UTAMA/%s", count+1, tag, mmyy)
+		docNo = services.GenerateCashTransactionNumber(tx, companyID, tag, req.Date)
 	}
 
 	// Create Journal

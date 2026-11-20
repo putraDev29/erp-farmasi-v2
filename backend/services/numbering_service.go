@@ -2,6 +2,8 @@ package services
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"farmasi/backend/models"
@@ -50,4 +52,40 @@ func GenerateDocNumber(tx *gorm.DB, companyID uuid.UUID, docType string) (string
 	)
 
 	return formattedNum, nil
+}
+
+// GenerateCashTransactionNumber safely generates a unique CashTransaction doc number (e.g. 0428/KASO/UTAMA/1126)
+func GenerateCashTransactionNumber(tx *gorm.DB, companyID uuid.UUID, tag string, date time.Time) string {
+	mmyy := date.Format("0106")
+	pattern := "%/" + tag + "/%/" + mmyy
+
+	var existing []string
+	tx.Model(&models.CashTransaction{}).
+		Where("company_id = ? AND trx_no LIKE ?", companyID, pattern).
+		Pluck("trx_no", &existing)
+
+	maxSeq := 0
+	for _, no := range existing {
+		parts := strings.Split(no, "/")
+		if len(parts) >= 1 {
+			if num, err := strconv.Atoi(parts[0]); err == nil {
+				if num > maxSeq {
+					maxSeq = num
+				}
+			}
+		}
+	}
+
+	nextSeq := maxSeq + 1
+	for {
+		candidate := fmt.Sprintf("%04d/%s/UTAMA/%s", nextSeq, tag, mmyy)
+		var exists int64
+		tx.Model(&models.CashTransaction{}).
+			Where("company_id = ? AND trx_no = ?", companyID, candidate).
+			Count(&exists)
+		if exists == 0 {
+			return candidate
+		}
+		nextSeq++
+	}
 }

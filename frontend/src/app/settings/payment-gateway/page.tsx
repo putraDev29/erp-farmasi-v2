@@ -1,26 +1,24 @@
 "use client";
 
 import React, { useState } from "react";
-import { CreditCard, Save, Check, QrCode, ShieldCheck, Key } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Plus, Edit2, Trash2, Save, ChevronLeft, Check, AlertTriangle, Send, PhoneCall } from "lucide-react";
 
 export default function PaymentGatewayPage() {
-  const [activeGateway, setActiveGateway] = useState<"midtrans" | "xendit">("midtrans");
-  const [environment, setEnvironment] = useState<"sandbox" | "production">("production");
-  const [serverKey, setServerKey] = useState("Mid-server-8921XyZ...");
-  const [clientKey, setClientKey] = useState("Mid-client-0912AbC...");
-  const [enableQris, setEnableQris] = useState(true);
-  const [enableVA, setEnableVA] = useState(true);
-  const [enableCC, setEnableCC] = useState(true);
+  const router = useRouter();
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault();
-    setToastMsg("Pengaturan Payment Gateway berhasil disimpan!");
+  const [paymentOption, setPaymentOption] = useState<"manual" | "online" | "semi_online">("manual");
+  const [enableEcommerce, setEnableEcommerce] = useState(false);
+  const [isQrisActive, setIsQrisActive] = useState(false);
+
+  const handleSave = () => {
+    setToastMsg("Pengaturan integrasi Payment Gateway berhasil disimpan!");
     setTimeout(() => setToastMsg(null), 3000);
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#f8fafc] text-slate-800 text-xs select-none">
+    <div className="flex flex-col h-full bg-white text-slate-800 text-xs select-none">
       {toastMsg && (
         <div className="fixed top-12 right-6 z-50 px-4 py-2 rounded shadow-md bg-emerald-600 text-white text-xs font-semibold flex items-center gap-2">
           <Check className="w-4 h-4" />
@@ -28,142 +26,183 @@ export default function PaymentGatewayPage() {
         </div>
       )}
 
-      {/* TOP HEADER */}
-      <div className="h-10 px-4 bg-white border-b border-slate-200 flex items-center justify-between shrink-0 shadow-2xs">
+      {/* SUB-HEADER / TITLE BAR */}
+      <div className="h-10 px-4 border-b border-slate-200 flex items-center justify-between shrink-0 bg-white">
         <div className="flex items-center gap-2">
-          <CreditCard className="w-4 h-4 text-emerald-600" />
-          <h1 className="font-semibold text-sm text-slate-800">Integrasi Payment Gateway (QRIS &amp; Otomasi Bank)</h1>
+          <button
+            onClick={() => router.back()}
+            className="text-slate-600 hover:text-slate-800 flex items-center text-xs"
+          >
+            <ChevronLeft className="w-4 h-4 mr-0.5" />
+            <span className="font-semibold text-sm text-slate-800">Pengaturan Integrasi Payment Gateway</span>
+          </button>
         </div>
-        <button
-          onClick={handleSave}
-          className="h-7 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold rounded flex items-center gap-1.5 shadow-2xs transition"
-        >
-          <Save className="w-3.5 h-3.5" />
-          <span>Simpan Konfigurasi</span>
-        </button>
+        <div className="flex items-center gap-3 text-xs text-slate-600">
+          <span className="font-medium">APOTEK BERKAT PURNAMA [UTAMA]</span>
+          <span className="w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center text-[10px] font-bold">
+            33
+          </span>
+          <div className="flex items-center gap-1 text-emerald-600 font-semibold">
+            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px]">
+              A
+            </span>
+            <span>ADMIN2</span>
+          </div>
+        </div>
       </div>
 
-      <div className="flex-1 p-4 max-w-3xl space-y-4 overflow-y-auto">
-        <form onSubmit={handleSave} className="space-y-4">
-          <div className="bg-white rounded border border-slate-300 p-4 shadow-2xs space-y-3">
-            <h2 className="font-bold text-xs text-slate-800 border-b border-slate-100 pb-2">
-              Pilihan Gerbang Pembayaran Elektronik (Gateway)
-            </h2>
+      {/* CONTENT */}
+      <div className="flex-1 p-6 overflow-y-auto space-y-6">
+        {/* CARDS LIST AT TOP */}
+        <div className="flex items-start gap-4">
+          {/* Add Provider Card */}
+          <button
+            type="button"
+            className="w-32 h-36 border border-slate-300 rounded bg-white hover:bg-slate-50 flex items-center justify-center transition shadow-2xs group"
+          >
+            <div className="w-8 h-8 rounded border border-emerald-500 text-emerald-600 flex items-center justify-center font-bold text-lg group-hover:bg-emerald-50">
+              <Plus className="w-5 h-5" />
+            </div>
+          </button>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div
-                onClick={() => setActiveGateway("midtrans")}
-                className={`p-3 rounded-lg border cursor-pointer transition flex items-center justify-between ${
-                  activeGateway === "midtrans"
-                    ? "border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-500/20"
-                    : "border-slate-200 hover:bg-slate-50"
-                }`}
-              >
-                <div>
-                  <div className="font-bold text-slate-800 text-xs">Midtrans Payment (GoTo)</div>
-                  <div className="text-[10px] text-slate-500">Mendukung Snap &amp; QRIS Dinamis Terintegrasi POS Kasir</div>
-                </div>
-                {activeGateway === "midtrans" && <Check className="w-4 h-4 text-emerald-600" />}
-              </div>
-
-              <div
-                onClick={() => setActiveGateway("xendit")}
-                className={`p-3 rounded-lg border cursor-pointer transition flex items-center justify-between ${
-                  activeGateway === "xendit"
-                    ? "border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-500/20"
-                    : "border-slate-200 hover:bg-slate-50"
-                }`}
-              >
-                <div>
-                  <div className="font-bold text-slate-800 text-xs">Xendit Indonesia</div>
-                  <div className="text-[10px] text-slate-500">Mendukung Invoice Otomatis &amp; Virtual Account Multibank</div>
-                </div>
-                {activeGateway === "xendit" && <Check className="w-4 h-4 text-emerald-600" />}
-              </div>
+          {/* Ketoko QRIS MidTrans Card */}
+          <div className="w-64 border border-slate-300 rounded bg-white p-3 shadow-2xs flex flex-col items-center justify-between space-y-3">
+            <div className="text-[11px] font-semibold text-slate-700 text-center">
+              Ketoko QRIS (Power By MidTrans)
             </div>
 
-            <div className="pt-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                  Lingkungan Operasional (Environment)
-                </label>
-                <select
-                  value={environment}
-                  onChange={(e) => setEnvironment(e.target.value as any)}
-                  className="w-full h-8 px-2.5 text-xs border border-slate-300 rounded font-semibold text-slate-800 focus:outline-none focus:border-cyan-500"
-                >
-                  <option value="production">Production (Live - Transaksi Riil Pembeli)</option>
-                  <option value="sandbox">Sandbox (Pengujian - Simulator)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                  Server Key (Kunci Rahasia API)
-                </label>
-                <input
-                  type="password"
-                  value={serverKey}
-                  onChange={(e) => setServerKey(e.target.value)}
-                  className="w-full h-8 px-2.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-cyan-500 font-mono"
-                />
-              </div>
+            {/* QRIS Logo badge */}
+            <div className="flex items-center justify-center py-2">
+              <span className="font-black text-2xl tracking-tighter text-slate-800 italic">
+                QRIS
+              </span>
             </div>
 
+            {/* Action buttons */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="h-6 px-3 bg-sky-500 hover:bg-sky-600 text-white text-[11px] rounded flex items-center gap-1 font-medium shadow-2xs"
+              >
+                <Edit2 className="w-3 h-3" />
+                <span>Edit</span>
+              </button>
+              <button
+                type="button"
+                className="h-6 w-6 bg-rose-500 hover:bg-rose-600 text-white rounded flex items-center justify-center shadow-2xs"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </div>
+
+            {/* Status indicator */}
+            <div className="text-[11px] text-slate-500">
+              Status : <span className={isQrisActive ? "text-emerald-600 font-semibold" : "text-slate-600"}>
+                {isQrisActive ? "Aktif" : "Non Aktif"}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* BOTTOM TWO COLUMNS */}
+        <div className="grid grid-cols-12 gap-6 items-start pt-4">
+          {/* Left Column: Radio Options & Ecommerce Checkbox */}
+          <div className="col-span-5 space-y-4">
             <div>
-              <label className="block text-[11px] font-semibold text-slate-700 mb-1">
-                Client Key (Kunci Publik Frontend)
+              <label className="block text-[11px] font-semibold text-slate-800 mb-2">
+                Opsi Pembayaran :
+              </label>
+              <div className="space-y-1.5 pl-1">
+                <label className="flex items-center gap-2 cursor-pointer text-slate-700 text-[11px]">
+                  <input
+                    type="radio"
+                    name="payment_option"
+                    checked={paymentOption === "manual"}
+                    onChange={() => setPaymentOption("manual")}
+                    className="text-emerald-600 focus:ring-0"
+                  />
+                  <span>Pembayaran Manual</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer text-slate-700 text-[11px]">
+                  <input
+                    type="radio"
+                    name="payment_option"
+                    checked={paymentOption === "online"}
+                    onChange={() => setPaymentOption("online")}
+                    className="text-emerald-600 focus:ring-0"
+                  />
+                  <span>Pembayaran Online</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer text-slate-700 text-[11px]">
+                  <input
+                    type="radio"
+                    name="payment_option"
+                    checked={paymentOption === "semi_online"}
+                    onChange={() => setPaymentOption("semi_online")}
+                    className="text-emerald-600 focus:ring-0"
+                  />
+                  <span>Pembayaran Semi Online</span>
+                </label>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <label className="block text-[11px] font-semibold text-slate-800 mb-2">
+                Aktifkan Payment gateway untuk pembayaran ecommerce :
               </label>
               <input
-                type="text"
-                value={clientKey}
-                onChange={(e) => setClientKey(e.target.value)}
-                className="w-full h-8 px-2.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-cyan-500 font-mono"
+                type="checkbox"
+                checked={enableEcommerce}
+                onChange={(e) => setEnableEcommerce(e.target.checked)}
+                className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-0 cursor-pointer"
               />
             </div>
           </div>
 
-          <div className="bg-white rounded border border-slate-300 p-4 shadow-2xs space-y-3">
-            <h2 className="font-bold text-xs text-slate-800 border-b border-slate-100 pb-2">
-              Metode Pembayaran yang Diaktifkan di Kasir POS
-            </h2>
+          {/* Right Column: Warning box & Support Contact Buttons */}
+          <div className="col-span-7 space-y-3">
+            <div className="p-3.5 bg-[#fff9e6] border border-[#ffe58f] rounded text-[11px] text-slate-700 space-y-1.5 leading-relaxed">
+              <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <span>PENTING :</span>
+              </div>
+              <ol className="list-decimal list-inside space-y-1 text-slate-700 pl-1">
+                <li>Untuk mendapatkan Client Key dan Server Key, silahkan mendaftar ke Penyedia Payment Gateway pilihan anda.</li>
+                <li>Payment Gateway tidak dapat memproses transaksi dengan decimal, pastikan sebelum anda mengaktifkan fitur ini.</li>
+                <li>[Khusus QRIS] Untuk integrasi silakan request ke tim support kami Email: support@ketoko.co.id, WA atau telegram</li>
+                <li>[MIDTRANS &amp; QRIS] Format Nomor Transaksi Penjualan dan Kasir yang di perbolehkan : Huruf, Angka dan beberapa simbol berikut: Dash(-), Underscore(_), Dot(.)</li>
+              </ol>
+            </div>
 
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 cursor-pointer font-semibold text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={enableQris}
-                  onChange={(e) => setEnableQris(e.target.checked)}
-                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
-                />
-                <span className="flex items-center gap-1.5">
-                  <QrCode className="w-3.5 h-3.5 text-slate-500" />
-                  <span>QRIS Dinamis (Muncul barcode di layar kasir &amp; struk bayar)</span>
-                </span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer font-semibold text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={enableVA}
-                  onChange={(e) => setEnableVA(e.target.checked)}
-                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
-                />
-                <span>Virtual Account Transfer Bank Otomatis (BCA, Mandiri, BRI, BNI)</span>
-              </label>
-
-              <label className="flex items-center gap-2 cursor-pointer font-semibold text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={enableCC}
-                  onChange={(e) => setEnableCC(e.target.checked)}
-                  className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
-                />
-                <span>Kartu Kredit &amp; Debit Online (Visa, MasterCard, JCB)</span>
-              </label>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="h-7 px-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs rounded flex items-center gap-1.5 shadow-2xs"
+              >
+                <Send className="w-3 h-3 text-sky-500" />
+                <span>Kontak Telegram</span>
+              </button>
+              <button
+                type="button"
+                className="h-7 px-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs rounded flex items-center gap-1.5 shadow-2xs"
+              >
+                <PhoneCall className="w-3 h-3 text-emerald-600" />
+                <span>Kontak WA</span>
+              </button>
             </div>
           </div>
-        </form>
+        </div>
+
+        {/* BOTTOM ACTION */}
+        <div className="pt-4 border-t border-slate-200">
+          <button
+            onClick={handleSave}
+            className="h-8 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-medium rounded flex items-center gap-1.5 shadow-2xs transition"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span>Simpan</span>
+          </button>
+        </div>
       </div>
     </div>
   );

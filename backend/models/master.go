@@ -220,13 +220,25 @@ type Customer struct {
 	IsActive          bool       `gorm:"default:true" json:"is_active"`
 
 	// PBF / Farmasi Compliance
-	IsPharmacyFacility bool       `gorm:"default:false" json:"is_pharmacy_facility"`
-	PharmacyType       string     `gorm:"size:50;default:'UMUM'" json:"pharmacy_type"` // APOTEK, RUMAH_SAKIT, KLINIK, PBF, TOKO_OBAT, UMUM
-	SIANumber          string     `gorm:"size:100" json:"sia_number"`
-	SIAExpiryDate      *time.Time `json:"sia_expiry_date"`
-	APJName            string     `gorm:"size:150" json:"apj_name"`
-	APJSIPANumber      string     `gorm:"size:100" json:"apj_sipa_number"`
-	APJSIPAExpiryDate  *time.Time `json:"apj_sipa_expiry_date"`
+	IsPharmacyFacility       bool       `gorm:"default:false" json:"is_pharmacy_facility"`
+	PharmacyType             string     `gorm:"size:50;default:'UMUM'" json:"pharmacy_type"` // APOTEK, RUMAH_SAKIT, KLINIK, PBF, TOKO_OBAT, UMUM
+	CustomerStatus           string     `gorm:"size:50;default:'Terdaftar'" json:"customer_status"`
+	NIB                      string     `gorm:"size:100" json:"nib"`
+	OperationalLicenseNumber string     `gorm:"size:100" json:"operational_license_number"`
+	NPWP                     string     `gorm:"size:50" json:"npwp"`
+	SIANumber                string     `gorm:"size:100" json:"sia_number"`
+	SIAExpiryDate            *time.Time `json:"sia_expiry_date"`
+	APJName                  string     `gorm:"size:150" json:"apj_name"`
+	APJSTRANumber            string     `gorm:"size:100" json:"apj_stra_number"`
+	APJSIPANumber            string     `gorm:"size:100" json:"apj_sipa_number"`
+	APJSIPAExpiryDate        *time.Time `json:"apj_sipa_expiry_date"`
+	APJPhone                 string     `gorm:"size:30" json:"apj_phone"`
+	APJEmail                 string     `gorm:"size:100" json:"apj_email"`
+
+	// Verification Status (CDOB BPOM Compliance)
+	IsVerified    bool       `gorm:"default:false" json:"is_verified"`
+	VerifiedAt    *time.Time `json:"verified_at"`
+	VerifiedNotes string     `gorm:"size:255" json:"verified_notes"`
 
 	CustomerGroup *CustomerGroup `gorm:"foreignKey:CustomerGroupID" json:"customer_group,omitempty"`
 	Territory     *Territory     `gorm:"foreignKey:TerritoryID" json:"territory,omitempty"`

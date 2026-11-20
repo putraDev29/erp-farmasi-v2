@@ -204,9 +204,9 @@ func SeedInitialData(db *gorm.DB) error {
 		{"1-2100", "Peralatan & Chiller Medis", "ASSET", "FIXED_ASSET", "DEBIT", false},
 		{"1-2199", "Akumulasi Penyusutan Peralatan", "ASSET", "FIXED_ASSET", "CREDIT", false},
 
-		{"2-0000", "KEWAJIBAN / UTANG", "LIABILITY", "HEADER", "CREDIT", true},
-		{"2-1000", "Utang Usaha (AP)", "LIABILITY", "PAYABLE", "CREDIT", false},
-		{"2-1100", "Utang PPN Keluaran", "LIABILITY", "PAYABLE", "CREDIT", false},
+		{"2-0000", "KEWAJIBAN", "LIABILITY", "HEADER", "CREDIT", true},
+		{"2-1000", "KEWAJIBAN LANCAR", "LIABILITY", "HEADER", "CREDIT", true},
+		{"2-1100", "HUTANG USAHA", "LIABILITY", "PAYABLE", "CREDIT", false},
 		{"2-1200", "Deposit / Uang Muka Pelanggan", "LIABILITY", "PAYABLE", "CREDIT", false},
 
 		{"3-0000", "EKUITAS / MODAL", "EQUITY", "HEADER", "CREDIT", true},
@@ -915,7 +915,7 @@ func SyncExistingPurchasesToCashTransactions(db *gorm.DB) {
 				}
 
 				var utangAcc models.Account
-				_ = db.Where("company_id = ? AND code = '2-1000'", pay.CompanyID).First(&utangAcc).Error
+				_ = db.Where("company_id = ? AND code = '2-1100'", pay.CompanyID).First(&utangAcc).Error
 
 				var supplier models.Supplier
 				supplierName := ""

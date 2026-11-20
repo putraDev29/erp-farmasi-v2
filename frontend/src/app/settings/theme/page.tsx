@@ -1,40 +1,76 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Palette, Check, Sun, Moon, Layout, Eye, Save } from "lucide-react";
+import { Palette, Check, Save } from "lucide-react";
+
+const SIDEBAR_COLORS = [
+  { id: "purple", color: "#7e22ce", name: "Purple", ring: "ring-[#7e22ce]" },
+  { id: "emerald", color: "#10b981", name: "Emerald", ring: "ring-[#10b981]" },
+  { id: "blue", color: "#0284c7", name: "Blue", ring: "ring-[#0284c7]" },
+  { id: "dark", color: "#1e293b", name: "Dark Slate", ring: "ring-[#1e293b]" },
+  { id: "red", color: "#dc2626", name: "Crimson Red", ring: "ring-[#dc2626]" },
+];
+
+const SIDEBAR_IMAGES = [
+  {
+    id: "img-1",
+    name: "Pattern 1",
+    bgClass: "from-slate-900 via-indigo-950 to-slate-900",
+    previewUrl: "https://images.unsplash.com/photo-1519501025264-65ba15a82390?auto=format&fit=crop&w=300&q=80",
+  },
+  {
+    id: "img-2",
+    name: "Pattern 2",
+    bgClass: "from-blue-950 via-slate-900 to-cyan-950",
+    previewUrl: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=300&q=80",
+  },
+  {
+    id: "img-3",
+    name: "Pattern 3",
+    bgClass: "from-emerald-950 via-teal-950 to-slate-900",
+    previewUrl: "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=300&q=80",
+  },
+  {
+    id: "img-4",
+    name: "Pattern 4",
+    bgClass: "from-purple-950 via-slate-900 to-violet-950",
+    previewUrl: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=300&q=80",
+  },
+  {
+    id: "img-5",
+    name: "Pattern 5",
+    bgClass: "from-rose-950 via-slate-900 to-amber-950",
+    previewUrl: "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=300&q=80",
+  },
+];
 
 export default function ThemePage() {
-  const [themeColor, setThemeColor] = useState("emerald");
-  const [themeMode, setThemeMode] = useState<"light" | "dark">("light");
-  const [tableDensity, setTableDensity] = useState<"compact" | "normal" | "comfortable">("compact");
-  const [fontSize, setFontSize] = useState<"small" | "normal" | "large">("small");
+  const [selectedColor, setSelectedColor] = useState("purple");
+  const [enableSidebarImage, setEnableSidebarImage] = useState(true);
+  const [selectedImage, setSelectedImage] = useState("img-1");
   const [savedToast, setSavedToast] = useState(false);
 
   useEffect(() => {
-    const savedColor = localStorage.getItem("erp_theme_color");
-    const savedMode = localStorage.getItem("erp_theme_mode");
-    const savedDensity = localStorage.getItem("erp_table_density");
-    if (savedColor) setThemeColor(savedColor);
-    if (savedMode) setThemeMode(savedMode as any);
-    if (savedDensity) setTableDensity(savedDensity as any);
+    const savedColor = localStorage.getItem("erp_sidebar_color");
+    const savedImgEnabled = localStorage.getItem("erp_sidebar_img_enabled");
+    const savedImg = localStorage.getItem("erp_sidebar_image");
+
+    if (savedColor) setSelectedColor(savedColor);
+    if (savedImgEnabled !== null) setEnableSidebarImage(savedImgEnabled === "true");
+    if (savedImg) setSelectedImage(savedImg);
   }, []);
 
   const handleSave = () => {
-    localStorage.setItem("erp_theme_color", themeColor);
-    localStorage.setItem("erp_theme_mode", themeMode);
-    localStorage.setItem("erp_table_density", tableDensity);
-    localStorage.setItem("erp_font_size", fontSize);
+    localStorage.setItem("erp_sidebar_color", selectedColor);
+    localStorage.setItem("erp_sidebar_img_enabled", String(enableSidebarImage));
+    localStorage.setItem("erp_sidebar_image", selectedImage);
+
+    // Apply color to body or css variables if needed
+    document.documentElement.setAttribute("data-sidebar-color", selectedColor);
+
     setSavedToast(true);
     setTimeout(() => setSavedToast(false), 3000);
   };
-
-  const colors = [
-    { id: "emerald", name: "Ketoko Green (Standar Apotek)", bg: "bg-[#00c875]", ring: "ring-[#00c875]" },
-    { id: "cyan", name: "Cyan Biru Medika", bg: "bg-cyan-500", ring: "ring-cyan-500" },
-    { id: "indigo", name: "Royal Indigo", bg: "bg-indigo-600", ring: "ring-indigo-600" },
-    { id: "rose", name: "Rose Pharmacy", bg: "bg-rose-500", ring: "ring-rose-500" },
-    { id: "amber", name: "Warm Amber", bg: "bg-amber-500", ring: "ring-amber-500" },
-  ];
 
   return (
     <div className="flex flex-col h-full bg-[#f8fafc] text-slate-800 text-xs select-none">
@@ -48,126 +84,113 @@ export default function ThemePage() {
       {/* TOP HEADER */}
       <div className="h-10 px-4 bg-white border-b border-slate-200 flex items-center justify-between shrink-0 shadow-2xs">
         <div className="flex items-center gap-2">
-          <Palette className="w-4 h-4 text-emerald-600" />
-          <h1 className="font-semibold text-sm text-slate-800">Pengaturan Tema & Tampilan UI</h1>
+          <Palette className="w-4 h-4 text-purple-600" />
+          <h1 className="font-semibold text-sm text-slate-800">Pengaturan Tema Website</h1>
         </div>
-        <button
-          onClick={handleSave}
-          className="h-7 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold rounded flex items-center gap-1.5 shadow-2xs transition"
-        >
-          <Save className="w-3.5 h-3.5" />
-          <span>Simpan Preferensi</span>
-        </button>
       </div>
 
-      <div className="flex-1 p-4 max-w-4xl space-y-4 overflow-y-auto">
-        {/* 1. Color Palette */}
-        <div className="bg-white rounded border border-slate-300 p-4 shadow-2xs space-y-3">
-          <h2 className="font-bold text-xs text-slate-800 border-b border-slate-100 pb-2 flex items-center gap-2">
-            <Palette className="w-3.5 h-3.5 text-slate-500" />
-            <span>Skema Warna Utama Aplikasi (Brand Accent)</span>
-          </h2>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            {colors.map((c) => (
-              <div
-                key={c.id}
-                onClick={() => setThemeColor(c.id)}
-                className={`p-3 rounded-lg border cursor-pointer transition flex items-center justify-between ${
-                  themeColor === c.id
-                    ? "border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-500/20"
-                    : "border-slate-200 hover:bg-slate-50"
-                }`}
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-5 h-5 rounded-full ${c.bg} shadow-xs shrink-0`} />
-                  <span className="font-semibold text-slate-700 text-[11px]">{c.name}</span>
-                </div>
-                {themeColor === c.id && <Check className="w-4 h-4 text-emerald-600" />}
-              </div>
-            ))}
+      <div className="flex-1 p-6 max-w-3xl space-y-6 overflow-y-auto">
+        <div className="bg-white rounded-lg border border-slate-300 p-6 shadow-2xs space-y-6">
+          {/* Header Title & Subtitle */}
+          <div>
+            <h2 className="text-base font-bold text-slate-900">Pengaturan Tema Website</h2>
+            <p className="text-slate-500 text-xs mt-0.5">Ubah tampilan tema website Anda</p>
           </div>
-        </div>
 
-        {/* 2. Light / Dark Mode */}
-        <div className="bg-white rounded border border-slate-300 p-4 shadow-2xs space-y-3">
-          <h2 className="font-bold text-xs text-slate-800 border-b border-slate-100 pb-2 flex items-center gap-2">
-            <Sun className="w-3.5 h-3.5 text-slate-500" />
-            <span>Mode Tampilan Gelap / Terang</span>
-          </h2>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div
-              onClick={() => setThemeMode("light")}
-              className={`p-3 rounded-lg border cursor-pointer transition flex items-center justify-between ${
-                themeMode === "light"
-                  ? "border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-500/20"
-                  : "border-slate-200 hover:bg-slate-50"
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <Sun className="w-5 h-5 text-amber-500" />
-                <div>
-                  <div className="font-bold text-slate-800 text-[11px]">Mode Terang (Light Mode - Rekomendasi)</div>
-                  <div className="text-[10px] text-slate-500">Tampilan standar jernih dan nyaman untuk kasir & administrasi apotek</div>
-                </div>
-              </div>
-              {themeMode === "light" && <Check className="w-4 h-4 text-emerald-600" />}
-            </div>
-
-            <div
-              onClick={() => setThemeMode("dark")}
-              className={`p-3 rounded-lg border cursor-pointer transition flex items-center justify-between ${
-                themeMode === "dark"
-                  ? "border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-500/20"
-                  : "border-slate-200 hover:bg-slate-50"
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <Moon className="w-5 h-5 text-indigo-500" />
-                <div>
-                  <div className="font-bold text-slate-800 text-[11px]">Mode Gelap (Dark Mode)</div>
-                  <div className="text-[10px] text-slate-500">Kontras rendah untuk operasional apotek 24 jam di pencahayaan redup</div>
-                </div>
-              </div>
-              {themeMode === "dark" && <Check className="w-4 h-4 text-emerald-600" />}
+          {/* Section 1: WARNA SIDEBAR */}
+          <div className="space-y-3 pt-2">
+            <h3 className="font-bold text-xs text-slate-800 tracking-wide uppercase text-[11px]">
+              WARNA SIDEBAR
+            </h3>
+            <div className="flex items-center gap-3">
+              {SIDEBAR_COLORS.map((c) => {
+                const isSelected = selectedColor === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setSelectedColor(c.id)}
+                    className={`w-7 h-7 rounded-full transition-transform active:scale-95 flex items-center justify-center shadow-xs ${
+                      isSelected ? "ring-2 ring-offset-2 " + c.ring : "hover:scale-105"
+                    }`}
+                    style={{ backgroundColor: c.color }}
+                    title={c.name}
+                  >
+                    {isSelected && <Check className="w-3.5 h-3.5 text-white stroke-[3]" />}
+                  </button>
+                );
+              })}
             </div>
           </div>
-        </div>
 
-        {/* 3. Table Density & Font Size */}
-        <div className="bg-white rounded border border-slate-300 p-4 shadow-2xs space-y-3">
-          <h2 className="font-bold text-xs text-slate-800 border-b border-slate-100 pb-2 flex items-center gap-2">
-            <Layout className="w-3.5 h-3.5 text-slate-500" />
-            <span>Kerapatan Tabel &amp; Ukuran Huruf</span>
-          </h2>
+          {/* Section 2: AKTIFKAN GAMBAR SIDEBAR */}
+          <div className="space-y-2 pt-2 border-t border-slate-100">
+            <h3 className="font-bold text-xs text-slate-800 tracking-wide uppercase text-[11px]">
+              AKTIFKAN GAMBAR SIDEBAR
+            </h3>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={enableSidebarImage}
+                onChange={(e) => setEnableSidebarImage(e.target.checked)}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+            </label>
+          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {[
-              { id: "compact", title: "Sangat Ringkas (Ketoko Standard)", desc: "Tinggi baris 24px - muat banyak baris sekaligus" },
-              { id: "normal", title: "Sedang (Standard)", desc: "Tinggi baris 32px - lebih leluasa membaca data" },
-              { id: "comfortable", title: "Lapang (Comfortable)", desc: "Tinggi baris 40px - ramah layar sentuh (touchscreen)" },
-            ].map((d) => (
-              <div
-                key={d.id}
-                onClick={() => setTableDensity(d.id as any)}
-                className={`p-3 rounded-lg border cursor-pointer transition flex flex-col justify-between ${
-                  tableDensity === d.id
-                    ? "border-emerald-500 bg-emerald-50/50 ring-2 ring-emerald-500/20"
-                    : "border-slate-200 hover:bg-slate-50"
-                }`}
-              >
-                <div>
-                  <div className="font-bold text-slate-800 text-[11px]">{d.title}</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">{d.desc}</div>
-                </div>
-                {tableDensity === d.id && (
-                  <div className="mt-2 text-emerald-600 flex items-center gap-1 font-bold text-[10px]">
-                    <Check className="w-3.5 h-3.5" /> Terpilih
+          {/* Section 3: SIDEBAR IMAGE */}
+          <div className="space-y-3 pt-2 border-t border-slate-100">
+            <h3 className="font-bold text-xs text-slate-800 tracking-wide uppercase text-[11px]">
+              SIDEBAR IMAGE
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              {SIDEBAR_IMAGES.map((img) => {
+                const isSelected = selectedImage === img.id;
+                return (
+                  <div
+                    key={img.id}
+                    onClick={() => setSelectedImage(img.id)}
+                    className={`relative rounded-lg overflow-hidden border-2 cursor-pointer transition h-28 bg-slate-900 group shadow-xs ${
+                      isSelected
+                        ? "border-purple-600 ring-2 ring-purple-500/20 shadow-md"
+                        : "border-slate-200 hover:border-slate-400 opacity-80 hover:opacity-100"
+                    }`}
+                  >
+                    <div
+                      className="absolute inset-0 bg-cover bg-center transition duration-200 group-hover:scale-105"
+                      style={{ backgroundImage: `url(${img.previewUrl})` }}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
+
+                    {isSelected && (
+                      <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-purple-600 text-white flex items-center justify-center shadow">
+                        <Check className="w-3 h-3 stroke-[3]" />
+                      </div>
+                    )}
+
+                    <div className="absolute bottom-1.5 left-2 right-2 text-[10px] font-bold text-white truncate drop-shadow">
+                      {img.name}
+                    </div>
                   </div>
-                )}
-              </div>
-            ))}
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-slate-500">
+              Gambar sidebar akan ditampilkan jika toggle <span className="font-semibold text-slate-700">Aktifkan Gambar Sidebar</span> dinyalakan.
+            </p>
+          </div>
+
+          {/* Submit Button */}
+          <div className="pt-4 border-t border-slate-200">
+            <button
+              type="button"
+              onClick={handleSave}
+              className="h-8 px-6 bg-purple-600 hover:bg-purple-700 active:scale-[0.98] text-white font-bold rounded shadow-2xs transition flex items-center gap-1.5 text-xs"
+            >
+              <Save className="w-4 h-4" />
+              <span>Simpan Tema</span>
+            </button>
           </div>
         </div>
       </div>

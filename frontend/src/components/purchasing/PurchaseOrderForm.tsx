@@ -21,6 +21,8 @@ import {
   X,
   Bell,
   User,
+  Calculator,
+  Undo2,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
 import { CariSupplierModal } from "./CariSupplierModal";
@@ -118,12 +120,40 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
   // Row Edit state
   const [editingRow, setEditingRow] = useState<POItemRow | null>(null);
 
-  // Bayar DP State
+  // Bayar State (Sesuai Modal Pembayaran Faktur Pembelian)
   const [dpAmount, setDpAmount] = useState<number>(0);
-  const [dpBankId, setDpBankId] = useState("");
-  const [dpMethod, setDpMethod] = useState("KAS");
+  const [cashAccountId, setCashAccountId] = useState("");
+  const [bayarTunai, setBayarTunai] = useState<number>(0);
+  const [bayarDeposit, setBayarDeposit] = useState<number>(0);
+  const [bayarKredit, setBayarKredit] = useState<number>(0);
+  const [isPrintAfterSave, setIsPrintAfterSave] = useState(false);
 
   // Queries
+  const { data: accountsList = [] } = useQuery({
+    queryKey: ["cash-accounts-list"],
+    queryFn: async () => {
+      try {
+        const res = await api.get("/accounting/accounts");
+        return (
+          res.data?.data?.filter(
+            (a: any) =>
+              !a.is_header &&
+              (a.subtype === "CASH_BANK" || (a.code && a.code.startsWith("1-11")))
+          ) || []
+        );
+      } catch {
+        return [];
+      }
+    },
+  });
+
+  useEffect(() => {
+    if (accountsList.length > 0 && !cashAccountId) {
+      const defaultCash =
+        accountsList.find((a: any) => a.code === "1-1121") || accountsList[0];
+      setCashAccountId(defaultCash?.id || "");
+    }
+  }, [accountsList, cashAccountId]);
   const { data: warehouses = [] } = useQuery({
     queryKey: ["warehouses"],
     queryFn: async () => {
@@ -497,11 +527,15 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      setIsBayarModalOpen(false);
       alert(
         isEdit
           ? "Pesanan Pembelian berhasil diperbarui!"
           : "Pesanan Pembelian baru berhasil disimpan!"
       );
+      if (isPrintAfterSave) {
+        window.print();
+      }
       router.push("/purchasing/orders");
     },
     onError: (err: any) => {
@@ -651,14 +685,14 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         {/* ROW 2: Masuk Ke | PPN */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-1.5 items-end">
           {/* Masuk Ke */}
-          <div className="md:col-span-5">
+          <div className="md:col-span-6">
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
               Masuk Ke :
             </label>
             <select
               value={warehouseId}
               onChange={(e) => setWarehouseId(e.target.value)}
-              className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500"
+              className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 cursor-pointer"
             >
               {warehouses.map((w: any) => (
                 <option key={w.id} value={w.id}>
@@ -669,36 +703,18 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
           </div>
 
           {/* PPN */}
-          <div className="md:col-span-3">
+          <div className="md:col-span-6">
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
               PPN :
             </label>
             <select
               value={ppnType}
               onChange={(e) => setPpnType(e.target.value as any)}
-              className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500"
+              className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 cursor-pointer"
             >
               <option value="Non">Non</option>
               <option value="Include">Include</option>
               <option value="Exclude">Exclude</option>
-            </select>
-          </div>
-
-          {/* Jenis SP Farmasi */}
-          <div className="md:col-span-4">
-            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
-              Jenis SP Farmasi (BPOM) :
-            </label>
-            <select
-              value={spType}
-              onChange={(e) => setSpType(e.target.value)}
-              className="w-full h-6 px-1.5 py-0 border border-emerald-300 rounded text-[11px] font-semibold text-emerald-800 bg-emerald-50/40 focus:outline-none focus:border-emerald-500"
-            >
-              <option value="REGULER">SP REGULER (Obat Bebas & Keras)</option>
-              <option value="NARKOTIKA">SP NARKOTIKA (Formulir Khusus)</option>
-              <option value="PSIKOTROPIKA">SP PSIKOTROPIKA</option>
-              <option value="PREKURSOR">SP PREKURSOR FARMASI</option>
-              <option value="OOT">SP OBAT-OBAT TERTENTU (OOT)</option>
             </select>
           </div>
         </div>
@@ -1227,7 +1243,21 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
 
         <button
           type="button"
-          onClick={() => saveMutation.mutate()}
+          onClick={() => {
+            if (!selectedSupplier?.id) {
+              alert("Pilih Supplier terlebih dahulu.");
+              return;
+            }
+            if (items.length === 0) {
+              alert("Tabel item pesanan masih kosong. Silakan klik [+ Item].");
+              return;
+            }
+            if (bayarTunai === 0 && bayarKredit === 0 && grandTotal > 0) {
+              setBayarTunai(grandTotal);
+              setBayarKredit(0);
+            }
+            setIsBayarModalOpen(true);
+          }}
           disabled={saveMutation.isPending}
           className="h-6 px-3 bg-[#009b62] hover:bg-[#008754] text-white font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-50"
           title="Simpan Pesanan Pembelian"
@@ -1259,13 +1289,23 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
 
         <button
           type="button"
-          onClick={() => setIsBayarModalOpen(true)}
-          className="h-6 px-2.5 bg-white hover:bg-amber-50 border border-slate-300 text-amber-700 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95"
+          onClick={() => {
+            if (bayarTunai === 0 && bayarKredit === 0 && grandTotal > 0) {
+              setBayarTunai(grandTotal);
+              setBayarKredit(0);
+            }
+            setIsBayarModalOpen(true);
+          }}
+          className="h-6 px-2.5 bg-white hover:bg-amber-50 border border-amber-400 text-amber-700 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95"
           title="Bayar DP / Pembayaran PO"
         >
           <CreditCard className="w-3 h-3 text-amber-600" />
           <span>Bayar</span>
         </button>
+      </div>
+
+      <div className="px-3 pb-1 text-[10px] text-slate-400">
+        Status Pembayaran PO: <strong className={((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0)) >= grandTotal && grandTotal > 0 ? "text-emerald-600 font-bold" : ((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0)) > 0 ? "text-amber-600 font-bold" : "text-slate-600 font-bold"}>{((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0)) >= grandTotal && grandTotal > 0 ? "LUNAS" : ((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0)) > 0 ? "DP / SEBAGIAN" : "BELUM LUNAS"}</strong>
       </div>
 
       {/* MODAL 1: CARI SUPPLIER */}
@@ -1427,91 +1467,302 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         </div>
       )}
 
-      {/* MODAL 6: BAYAR / UANG MUKA (DP) */}
+      {/* MODAL 6: BAYAR / PEMBAYARAN PO (Matching Pembayaran Pembelian) */}
       {isBayarModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-2xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-200 p-4 max-w-sm w-full space-y-3">
-            <div className="flex items-center justify-between border-b pb-2">
-              <h3 className="font-bold text-slate-800 text-sm">Pembayaran Uang Muka (DP)</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-3">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-lg overflow-hidden text-xs flex flex-col animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="px-4 py-2 bg-slate-100 border-b border-slate-200 flex justify-between items-center">
+              <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+                <CreditCard className="w-4 h-4 text-emerald-600" />
+                Pembayaran
+              </span>
               <button
                 type="button"
                 onClick={() => setIsBayarModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600"
+                className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded transition"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="space-y-2.5 text-xs">
-              <div>
-                <label className="block text-slate-600 font-medium mb-1">Total Nilai PO:</label>
-                <div className="p-2 bg-slate-50 rounded border border-slate-200 font-mono font-bold text-emerald-700">
-                  {formatCurrency(grandTotal)}
+
+            {/* Modal Body */}
+            <div className="p-4 space-y-2.5">
+              {/* 1. TOTAL TAGIHAN (Pink Box matching Image) */}
+              <div className="bg-[#fce7f3] border-2 border-dashed border-pink-300 rounded-lg px-4 py-3 flex items-center justify-between shadow-2xs">
+                <span className="text-base font-bold text-slate-800 tracking-wide">Total :</span>
+                <span className="text-3xl font-black font-mono text-slate-900 tracking-tight">
+                  {Number(grandTotal).toLocaleString("en-US", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+
+              {/* 2. FORM FIELDS */}
+              <div className="space-y-1.5 pt-1">
+                {/* DP PO / Pesanan */}
+                <div className="flex items-center gap-2">
+                  <label className="w-32 text-right font-medium text-slate-700 shrink-0">
+                    DP PO/Pesanan :
+                  </label>
+                  <div className="flex-1 relative flex items-center">
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={dpAmount === 0 ? "" : dpAmount}
+                      placeholder="0.00"
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setDpAmount(val);
+                        setBayarKredit(Math.max(0, grandTotal - (val + bayarTunai + bayarDeposit)));
+                      }}
+                      className="w-full h-7 px-2.5 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => {
+                        const poDp = Number(grandTotal) * 0.3;
+                        setDpAmount(poDp);
+                        setBayarKredit(Math.max(0, grandTotal - (poDp + bayarTunai + bayarDeposit)));
+                      }}
+                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50"
+                      title="Hitung DP PO (30%)"
+                    >
+                      <Calculator className="w-3 h-3" />
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div>
-                <label className="block text-slate-600 font-medium mb-1">Nominal Uang Muka (DP):</label>
-                <input
-                  type="number"
-                  step="1000"
-                  min="0"
-                  max={grandTotal}
-                  value={dpAmount}
-                  onChange={(e) => setDpAmount(Number(e.target.value) || 0)}
-                  placeholder="Rp 0"
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono font-bold text-slate-900 focus:border-sky-500"
-                />
-              </div>
-              <div>
-                <label className="block text-slate-600 font-medium mb-1">Metode Bayar:</label>
-                <select
-                  value={dpMethod}
-                  onChange={(e) => setDpMethod(e.target.value)}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white text-xs"
-                >
-                  <option value="KAS">KAS TUNAI</option>
-                  <option value="TRANSFER">TRANSFER BANK</option>
-                  <option value="BG_CEK">BG / CEK</option>
-                </select>
-              </div>
-              {dpMethod === "TRANSFER" && (
-                <div>
-                  <label className="block text-slate-600 font-medium mb-1">Akun Bank:</label>
+
+                {/* Akun Kas / Bank Sumber Pembayaran */}
+                <div className="flex items-center gap-2">
+                  <label className="w-32 text-right font-medium text-slate-700 shrink-0">
+                    Kas / Bank :
+                  </label>
                   <select
-                    value={dpBankId}
-                    onChange={(e) => setDpBankId(e.target.value)}
-                    className="w-full px-2.5 py-1.5 border border-slate-300 rounded bg-white text-xs"
+                    value={cashAccountId}
+                    onChange={(e) => setCashAccountId(e.target.value)}
+                    className="flex-1 h-7 px-2 border border-slate-300 rounded text-xs font-semibold focus:border-sky-500 focus:outline-none bg-white font-mono"
                   >
-                    <option value="">Pilih Bank...</option>
-                    {banks.map((b: any) => (
-                      <option key={b.id} value={b.id}>
-                        {b.bank_name} - {b.account_number} ({b.account_name})
+                    {accountsList.map((a: any) => (
+                      <option key={a.id} value={a.id}>
+                        {a.code} - {a.name}
                       </option>
                     ))}
                   </select>
                 </div>
-              )}
+
+                {/* Bayar Tunai */}
+                <div>
+                  <div className="flex items-center gap-2">
+                    <label className="w-32 text-right font-medium text-slate-700 shrink-0">
+                      Bayar Tunai :
+                    </label>
+                    <div className="flex-1 relative flex items-center">
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        autoFocus
+                        value={bayarTunai === 0 ? "" : bayarTunai}
+                        placeholder="0.00"
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value) || 0;
+                          setBayarTunai(val);
+                          setBayarKredit(Math.max(0, grandTotal - (dpAmount + val + bayarDeposit)));
+                        }}
+                        className="w-full h-7 px-2.5 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                      />
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() => {
+                          const fullCash = Math.max(0, grandTotal - dpAmount - bayarDeposit);
+                          setBayarTunai(fullCash);
+                          setBayarKredit(0);
+                        }}
+                        className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50"
+                        title="Isi Tunai Penuh"
+                      >
+                        <Calculator className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Preset Quick Buttons */}
+                  <div className="flex items-center justify-end gap-1.5 pt-0.5 pr-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const fullCash = Math.max(0, grandTotal - dpAmount - bayarDeposit);
+                        setBayarTunai(fullCash);
+                        setBayarKredit(0);
+                      }}
+                      className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded text-[10px] font-semibold transition cursor-pointer"
+                    >
+                      Uang Pas (Lunas)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const net = Math.max(0, grandTotal - dpAmount - bayarDeposit);
+                        const half = Math.round(net * 0.5 * 100) / 100;
+                        setBayarTunai(half);
+                        setBayarKredit(Math.max(0, net - half));
+                      }}
+                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded text-[10px] font-medium transition cursor-pointer"
+                    >
+                      50% Tunai
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBayarTunai(0);
+                        setBayarKredit(Math.max(0, grandTotal - dpAmount - bayarDeposit));
+                      }}
+                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded text-[10px] font-medium transition cursor-pointer"
+                    >
+                      Kredit / Tempo (Rp 0)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Bayar Deposit */}
+                <div className="flex items-center gap-2">
+                  <label className="w-32 text-right font-medium text-slate-700 shrink-0">
+                    Bayar Deposit :
+                  </label>
+                  <div className="flex-1 relative flex items-center">
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={bayarDeposit === 0 ? "" : bayarDeposit}
+                      placeholder="0.00"
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setBayarDeposit(val);
+                        setBayarKredit(Math.max(0, grandTotal - (dpAmount + bayarTunai + val)));
+                      }}
+                      className="w-full h-7 px-2.5 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => {
+                        setBayarDeposit(0);
+                        setBayarKredit(Math.max(0, grandTotal - (dpAmount + bayarTunai)));
+                      }}
+                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50"
+                      title="Reset Deposit"
+                    >
+                      <Calculator className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Bayar Kredit */}
+                <div className="flex items-center gap-2">
+                  <label className="w-32 text-right font-medium text-slate-700 shrink-0">
+                    Bayar Kredit :
+                  </label>
+                  <div className="flex-1 relative flex items-center">
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={bayarKredit === 0 ? "" : bayarKredit}
+                      placeholder="0.00"
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setBayarKredit(val);
+                        setBayarTunai(Math.max(0, grandTotal - (dpAmount + bayarDeposit + val)));
+                      }}
+                      className="w-full h-7 px-2.5 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => {
+                        const fullKredit = Math.max(0, grandTotal - dpAmount - bayarDeposit);
+                        setBayarTunai(0);
+                        setBayarKredit(fullKredit);
+                      }}
+                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50"
+                      title="Jadikan Hutang Penuh"
+                    >
+                      <Calculator className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. TOTAL BAYAR (Green Box matching Image) */}
+              <div className="bg-[#22c55e] text-white rounded-lg px-4 py-2 flex items-center justify-between shadow-2xs">
+                <span className="text-sm font-bold tracking-wide">Total :</span>
+                <span className="text-2xl font-black font-mono tracking-tight">
+                  {((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0)).toLocaleString("en-US", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+
+              {/* 4. SISA (Orange Box matching Image) */}
+              <div className="bg-[#f97316] text-white rounded-lg px-4 py-2 flex items-center justify-between shadow-2xs">
+                <span className="text-sm font-bold tracking-wide">Sisa :</span>
+                <span className="text-2xl font-black font-mono tracking-tight">
+                  {Math.max(
+                    0,
+                    grandTotal - ((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0))
+                  ).toLocaleString("en-US", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
             </div>
-            <div className="pt-2 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setIsBayarModalOpen(false)}
-                className="px-3.5 py-1.5 border border-slate-300 rounded text-slate-700 hover:bg-slate-50 font-medium text-xs"
-              >
-                Batal
-              </button>
+
+            {/* 5. ACTION BUTTONS matching Image */}
+            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex justify-end items-center gap-2">
+              {/* [💾 Simpan] */}
               <button
                 type="button"
                 onClick={() => {
-                  alert(
-                    `Uang Muka (DP) sebesar ${formatCurrency(
-                      dpAmount
-                    )} telah dicatat untuk Pesanan Pembelian ini.`
-                  );
-                  setIsBayarModalOpen(false);
+                  setIsPrintAfterSave(false);
+                  saveMutation.mutate();
                 }}
-                className="px-4 py-1.5 bg-[#009b62] hover:bg-[#008754] text-white rounded font-bold text-xs shadow-xs"
+                disabled={saveMutation.isPending}
+                className="h-7 px-3.5 bg-white hover:bg-emerald-50 border border-slate-300 text-slate-700 font-semibold rounded text-xs inline-flex items-center gap-1.5 shadow-2xs transition active:scale-95 disabled:opacity-50"
               >
-                Simpan DP
+                <Save className="w-3.5 h-3.5 text-sky-600" />
+                <span>Simpan</span>
+              </button>
+
+              {/* [🖨️ Simpan + Cetak] */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsPrintAfterSave(true);
+                  saveMutation.mutate();
+                }}
+                disabled={saveMutation.isPending}
+                className="h-7 px-3.5 bg-white hover:bg-sky-50 border border-slate-300 text-slate-700 font-semibold rounded text-xs inline-flex items-center gap-1.5 shadow-2xs transition active:scale-95 disabled:opacity-50"
+              >
+                <Printer className="w-3.5 h-3.5 text-blue-600" />
+                <span>Simpan + Cetak</span>
+              </button>
+
+              {/* [↩ Kembali] */}
+              <button
+                type="button"
+                onClick={() => setIsBayarModalOpen(false)}
+                className="h-7 px-3.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold rounded text-xs inline-flex items-center gap-1.5 shadow-2xs transition active:scale-95"
+              >
+                <Undo2 className="w-3.5 h-3.5 text-amber-600" />
+                <span>Kembali</span>
               </button>
             </div>
           </div>

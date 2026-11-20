@@ -41,6 +41,7 @@ export default function CustomersPage() {
 
   // Modals
   const [modalOpen, setModalOpen] = useState(false);
+  const [customerTab, setCustomerTab] = useState<"UMUM" | "PBF">("UMUM");
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
@@ -59,12 +60,19 @@ export default function CustomersPage() {
     credit_limit: 0,
     term_of_payment_days: 0,
     is_pharmacy_facility: false,
-    pharmacy_type: "APOTEK",
+    pharmacy_type: "KLINIK",
+    customer_status: "Terdaftar",
+    nib: "",
+    operational_license_number: "",
+    npwp: "",
     sia_number: "",
     sia_expiry_date: "",
     apj_name: "",
+    apj_stra_number: "",
     apj_sipa_number: "",
     apj_sipa_expiry_date: "",
+    apj_phone: "",
+    apj_email: "",
   });
 
   // Fetch Customers
@@ -97,10 +105,18 @@ export default function CustomersPage() {
   // Create / Update Customer
   const saveMutation = useMutation({
     mutationFn: async (payload: typeof formData) => {
-      if (isEditing && payload.id) {
-        return await api.put(`/customers/${payload.id}`, payload);
+      const cleanPayload: any = {
+        ...payload,
+        credit_limit: Number(payload.credit_limit) || 0,
+        term_of_payment_days: Number(payload.term_of_payment_days) || 0,
+        sia_expiry_date: payload.sia_expiry_date ? payload.sia_expiry_date : null,
+        apj_sipa_expiry_date: payload.apj_sipa_expiry_date ? payload.apj_sipa_expiry_date : null,
+      };
+
+      if (isEditing && cleanPayload.id) {
+        return await api.put(`/customers/${cleanPayload.id}`, cleanPayload);
       }
-      return await api.post("/customers", payload);
+      return await api.post("/customers", cleanPayload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["customers"] });
@@ -127,8 +143,9 @@ export default function CustomersPage() {
   });
 
   const resetForm = () => {
+    const newId = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : "";
     setFormData({
-      id: "",
+      id: newId,
       code: "",
       name: "",
       address: "",
@@ -141,13 +158,21 @@ export default function CustomersPage() {
       credit_limit: 0,
       term_of_payment_days: 0,
       is_pharmacy_facility: false,
-      pharmacy_type: "APOTEK",
+      pharmacy_type: "KLINIK",
+      customer_status: "Terdaftar",
+      nib: "",
+      operational_license_number: "",
+      npwp: "",
       sia_number: "",
       sia_expiry_date: "",
       apj_name: "",
+      apj_stra_number: "",
       apj_sipa_number: "",
       apj_sipa_expiry_date: "",
+      apj_phone: "",
+      apj_email: "",
     });
+    setCustomerTab("UMUM");
     setIsEditing(false);
   };
 
@@ -157,12 +182,22 @@ export default function CustomersPage() {
     setModalOpen(true);
   };
 
+  const handleTabChange = (tab: "UMUM" | "PBF") => {
+    setCustomerTab(tab);
+    setFormData((prev) => ({
+      ...prev,
+      is_pharmacy_facility: tab === "PBF",
+    }));
+  };
+
   const handleOpenEdit = (cust?: any) => {
     const target = cust || selectedCustomer;
     if (!target) {
       alert("Silakan pilih data pelanggan terlebih dahulu.");
       return;
     }
+    const isPbf = Boolean(target.is_pharmacy_facility);
+    setCustomerTab(isPbf ? "PBF" : "UMUM");
     setFormData({
       id: target.id,
       code: target.code || "",
@@ -176,13 +211,20 @@ export default function CustomersPage() {
       notes: target.notes || "",
       credit_limit: target.credit_limit || 0,
       term_of_payment_days: target.term_of_payment_days || 0,
-      is_pharmacy_facility: Boolean(target.is_pharmacy_facility),
-      pharmacy_type: target.pharmacy_type || "APOTEK",
-      sia_number: target.sia_number || "",
+      is_pharmacy_facility: isPbf,
+      pharmacy_type: target.pharmacy_type || "KLINIK",
+      customer_status: target.customer_status || "Terdaftar",
+      nib: target.nib || "",
+      operational_license_number: target.operational_license_number || target.sia_number || "",
+      npwp: target.npwp || "",
+      sia_number: target.sia_number || target.operational_license_number || "",
       sia_expiry_date: target.sia_expiry_date ? target.sia_expiry_date.split("T")[0] : "",
       apj_name: target.apj_name || "",
+      apj_stra_number: target.apj_stra_number || "",
       apj_sipa_number: target.apj_sipa_number || "",
       apj_sipa_expiry_date: target.apj_sipa_expiry_date ? target.apj_sipa_expiry_date.split("T")[0] : "",
+      apj_phone: target.apj_phone || target.phone || "",
+      apj_email: target.apj_email || target.email || "",
     });
     setSelectedId(target.id);
     setIsEditing(true);
@@ -207,12 +249,30 @@ export default function CustomersPage() {
     setHistoryModalOpen(true);
   };
 
+  const verifyMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await api.post(`/customers/${id}/verify`);
+      return res.data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
+      alert(data?.message || "Status verifikasi pelanggan berhasil diperbarui.");
+    },
+    onError: (err: any) => {
+      alert("Gagal memverifikasi pelanggan: " + (err.response?.data?.message || err.message));
+    },
+  });
+
   const handleVerifyCustomer = () => {
     if (!selectedId) {
       alert("Silakan pilih pelanggan terlebih dahulu untuk diverifikasi.");
       return;
     }
-    alert(`Pelanggan "${selectedCustomer?.name}" berhasil diverifikasi.`);
+    const isCurrentlyVerified = Boolean(selectedCustomer?.is_verified);
+    const actionText = isCurrentlyVerified ? "membatalkan verifikasi" : "memverifikasi legalitas sarana";
+    if (confirm(`Apakah Anda yakin ingin ${actionText} untuk pelanggan "${selectedCustomer?.name}"?`)) {
+      verifyMutation.mutate(selectedId);
+    }
   };
 
   const handleSearch = () => {
@@ -279,11 +339,32 @@ export default function CustomersPage() {
 
                 <button
                   onClick={handleVerifyCustomer}
-                  disabled={!selectedId}
-                  className="h-6 px-3 border border-emerald-300 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold text-xs flex items-center gap-1.5 shadow-xs transition disabled:opacity-40"
+                  disabled={!selectedId || !selectedCustomer?.is_pharmacy_facility || verifyMutation.isPending}
+                  className={`h-6 px-3 border rounded font-semibold text-xs flex items-center gap-1.5 shadow-xs transition ${
+                    !selectedId || !selectedCustomer?.is_pharmacy_facility
+                      ? "border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed opacity-50"
+                      : selectedCustomer?.is_verified
+                      ? "border-emerald-500 bg-emerald-600 hover:bg-emerald-700 text-white"
+                      : "border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-700"
+                  }`}
+                  title={
+                    !selectedId
+                      ? "Silakan pilih pelanggan terlebih dahulu"
+                      : !selectedCustomer?.is_pharmacy_facility
+                      ? "Verifikasi CDOB hanya berlaku untuk Pelanggan PBF"
+                      : selectedCustomer?.is_verified
+                      ? "Klik untuk membatalkan verifikasi pelanggan"
+                      : "Klik untuk memverifikasi legalitas sarana pelanggan (CDOB)"
+                  }
                 >
-                  <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Verifikasi Pelanggan</span>
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  <span>
+                    {verifyMutation.isPending
+                      ? "Memproses..."
+                      : selectedCustomer?.is_verified
+                      ? "🛡️ Terverifikasi"
+                      : "✓ Verifikasi Pelanggan"}
+                  </span>
                 </button>
 
                 <button
@@ -293,12 +374,26 @@ export default function CustomersPage() {
                       alert("Silakan pilih data pelanggan terlebih dahulu.");
                       return;
                     }
+                    if (!selectedCustomer?.is_pharmacy_facility) {
+                      alert("Dokumen Izin Sarana hanya berlaku untuk Pelanggan PBF / Sarana Farmasi.");
+                      return;
+                    }
                     setDocModalTargetId(selectedId);
                     setIsDocModalOpen(true);
                   }}
-                  disabled={!selectedId}
-                  className="h-6 px-3 border border-emerald-300 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-semibold text-xs flex items-center gap-1.5 shadow-xs transition disabled:opacity-40"
-                  title="Upload / Kelola Izin Sarana Farmasi (SIA / Izin RS / SIPA APJ)"
+                  disabled={!selectedId || !selectedCustomer?.is_pharmacy_facility}
+                  className={`h-6 px-3 border rounded font-semibold text-xs flex items-center gap-1.5 shadow-xs transition ${
+                    !selectedId || !selectedCustomer?.is_pharmacy_facility
+                      ? "border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed opacity-50"
+                      : "border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800"
+                  }`}
+                  title={
+                    !selectedId
+                      ? "Silakan pilih pelanggan terlebih dahulu"
+                      : !selectedCustomer?.is_pharmacy_facility
+                      ? "Dokumen Izin Sarana hanya berlaku untuk Pelanggan PBF"
+                      : "Upload / Kelola Izin Sarana Farmasi (SIA / Izin RS / SIPA APJ)"
+                  }
                 >
                   <span>📎</span>
                   <span>Dokumen Izin Sarana</span>
@@ -439,7 +534,23 @@ export default function CustomersPage() {
                         {c.code}
                       </td>
                       <td className="py-1.5 px-3 border-r border-slate-100 font-semibold text-slate-800 whitespace-nowrap">
-                        {c.name}
+                        <div className="flex items-center gap-1.5">
+                          <span>{c.name}</span>
+                          {c.is_verified ? (
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-0.5">
+                              <span>✓</span>
+                              <span>Terverifikasi</span>
+                            </span>
+                          ) : c.is_pharmacy_facility ? (
+                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-50 text-amber-700 border border-amber-300">
+                              {c.pharmacy_type || "Sarana Farmasi"} (Belum Verif)
+                            </span>
+                          ) : (
+                            <span className="text-[9px] font-normal px-1.5 py-0.2 rounded bg-slate-100 text-slate-500">
+                              Umum
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="py-1.5 px-3 border-r border-slate-100 text-slate-600 text-[11px]">
                         {c.address || "-"}
@@ -488,8 +599,13 @@ export default function CustomersPage() {
       {/* Add / Edit Customer Modal */}
       {modalOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-xl w-full border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-center justify-between px-5 py-3.5 bg-slate-50 border-b border-slate-200">
+          <div
+            className={`bg-white rounded-xl shadow-2xl w-full border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col ${
+              customerTab === "PBF" ? "max-w-4xl max-h-[92vh]" : "max-w-xl max-h-[90vh]"
+            }`}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-5 py-3 bg-slate-50 border-b border-slate-200 shrink-0">
               <div className="flex items-center gap-2">
                 <Users className="w-5 h-5 text-sky-600" />
                 <h2 className="text-sm font-bold text-slate-800">
@@ -504,234 +620,508 @@ export default function CustomersPage() {
               </button>
             </div>
 
+            {/* TAB SELECTOR: Pelanggan Umum vs Pelanggan PBF */}
+            <div className="flex items-center border-b border-slate-200 bg-slate-100/70 px-5 pt-2 gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => handleTabChange("UMUM")}
+                className={`flex items-center gap-2 px-4 py-2 font-bold text-xs rounded-t-lg border-t border-x transition-all ${
+                  customerTab === "UMUM"
+                    ? "bg-white text-sky-700 border-slate-200 shadow-2xs -mb-px"
+                    : "text-slate-600 hover:text-slate-900 border-transparent hover:bg-slate-200/50"
+                }`}
+              >
+                <Users className="w-4 h-4 text-sky-600" />
+                <span>Pelanggan Umum</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTabChange("PBF")}
+                className={`flex items-center gap-2 px-4 py-2 font-bold text-xs rounded-t-lg border-t border-x transition-all ${
+                  customerTab === "PBF"
+                    ? "bg-white text-emerald-700 border-slate-200 shadow-2xs -mb-px"
+                    : "text-slate-600 hover:text-slate-900 border-transparent hover:bg-slate-200/50"
+                }`}
+              >
+                <Building className="w-4 h-4 text-emerald-600" />
+                <span>Pelanggan PBF (Sarana Farmasi / Medis)</span>
+              </button>
+            </div>
+
+            {/* Modal Body / Form */}
             <form
               onSubmit={(e) => {
                 e.preventDefault();
                 saveMutation.mutate(formData);
               }}
-              className="p-5 space-y-3.5 text-xs"
+              className="p-5 overflow-y-auto space-y-4 text-xs flex-1"
             >
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">
-                    Kode Pelanggan <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.code}
-                    onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                    placeholder="Contoh: PL-001"
-                    className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">
-                    Nama Pelanggan <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="Contoh: DR. ISMAWAN"
-                    className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                  />
-                </div>
-              </div>
+              {customerTab === "UMUM" ? (
+                /* TAB 1: FORM DATA PELANGGAN UMUM (IMAGE 1) */
+                <div className="space-y-3.5">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">
+                        Kode Pelanggan <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.code}
+                        onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                        placeholder="Contoh: PL-001"
+                        className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500 font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">
+                        Nama Pelanggan <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        placeholder="Contoh: DR. ISMAWAN"
+                        className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                      />
+                    </div>
+                  </div>
 
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">Alamat</label>
-                <textarea
-                  rows={2}
-                  value={formData.address}
-                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  placeholder="Jl. Raya..."
-                  className="w-full p-2.5 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500 text-xs"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Kota</label>
-                  <input
-                    type="text"
-                    value={formData.city}
-                    onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                    placeholder="Pontianak"
-                    className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Provinsi</label>
-                  <input
-                    type="text"
-                    value={formData.province}
-                    onChange={(e) => setFormData({ ...formData, province: e.target.value })}
-                    placeholder="Kalimantan Barat"
-                    className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Telepon</label>
-                  <input
-                    type="text"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    placeholder="08xxxxxxxxxx"
-                    className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Kontak Person</label>
-                  <input
-                    type="text"
-                    value={formData.contact_person}
-                    onChange={(e) => setFormData({ ...formData, contact_person: e.target.value })}
-                    placeholder="Nama PIC"
-                    className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Plafon Kredit (Limit)</label>
-                  <input
-                    type="number"
-                    value={formData.credit_limit}
-                    onChange={(e) => setFormData({ ...formData, credit_limit: Number(e.target.value) })}
-                    className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Jatuh Tempo (Hari)</label>
-                  <input
-                    type="number"
-                    value={formData.term_of_payment_days}
-                    onChange={(e) => setFormData({ ...formData, term_of_payment_days: Number(e.target.value) })}
-                    className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">Keterangan Tambahan</label>
-                <input
-                  type="text"
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  placeholder="Catatan khusus..."
-                  className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
-                />
-              </div>
-
-              {/* Sarana Farmasi Compliance Section */}
-              <div className="bg-emerald-50/40 border border-emerald-200 rounded-lg p-3 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 text-xs">
-                    <input
-                      type="checkbox"
-                      checked={formData.is_pharmacy_facility}
-                      onChange={(e) => setFormData({ ...formData, is_pharmacy_facility: e.target.checked })}
-                      className="w-4 h-4 text-[#00c875] rounded focus:ring-emerald-500"
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-1">Alamat</label>
+                    <textarea
+                      rows={2}
+                      value={formData.address}
+                      onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                      placeholder="Jl. Raya..."
+                      className="w-full p-2.5 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500 text-xs"
                     />
-                    <span>Pelanggan ini adalah Sarana Farmasi / Medis Resmi (CDOB Clear)</span>
-                  </label>
-                  {formData.is_pharmacy_facility && isEditing && formData.id && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDocModalTargetId(formData.id);
-                        setIsDocModalOpen(true);
-                      }}
-                      className="px-2.5 py-1 bg-white hover:bg-emerald-50 border border-emerald-300 text-emerald-800 font-semibold rounded text-[11px] shadow-2xs"
-                    >
-                      📎 Upload Izin Sarana & SIPA
-                    </button>
-                  )}
-                </div>
+                  </div>
 
-                {formData.is_pharmacy_facility && (
-                  <div className="space-y-2 pt-1 border-t border-emerald-200/60">
-                    <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Kota</label>
+                      <input
+                        type="text"
+                        value={formData.city}
+                        onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                        placeholder="Pontianak"
+                        className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Provinsi</label>
+                      <input
+                        type="text"
+                        value={formData.province}
+                        onChange={(e) => setFormData({ ...formData, province: e.target.value })}
+                        placeholder="Kalimantan Barat"
+                        className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Telepon</label>
+                      <input
+                        type="text"
+                        value={formData.phone}
+                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                        placeholder="08xxxxxxxxxx"
+                        className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Kontak Person</label>
+                      <input
+                        type="text"
+                        value={formData.contact_person}
+                        onChange={(e) => setFormData({ ...formData, contact_person: e.target.value })}
+                        placeholder="Nama PIC"
+                        className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Plafon Kredit (Limit)</label>
+                      <input
+                        type="number"
+                        value={formData.credit_limit}
+                        onChange={(e) => setFormData({ ...formData, credit_limit: Number(e.target.value) })}
+                        className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1">Jatuh Tempo (Hari)</label>
+                      <input
+                        type="number"
+                        value={formData.term_of_payment_days}
+                        onChange={(e) => setFormData({ ...formData, term_of_payment_days: Number(e.target.value) })}
+                        className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 font-semibold mb-1">Keterangan Tambahan</label>
+                    <input
+                      type="text"
+                      value={formData.notes}
+                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                      placeholder="Catatan khusus..."
+                      className="w-full h-8 px-3 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                    />
+                  </div>
+
+                  {/* Switcher to Sarana Farmasi */}
+                  <div className="p-3 bg-emerald-50/50 border border-emerald-200 rounded-lg">
+                    <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={formData.is_pharmacy_facility}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setFormData({ ...formData, is_pharmacy_facility: checked });
+                          if (checked) {
+                            setCustomerTab("PBF");
+                          }
+                        }}
+                        className="w-4 h-4 text-[#00c875] rounded focus:ring-emerald-500"
+                      />
+                      <span>Pelanggan ini adalah Sarana Farmasi / Medis Resmi (CDOB Clear)</span>
+                    </label>
+                  </div>
+                </div>
+              ) : (
+                /* TAB 2: FORM DATA PELANGGAN PBF (IMAGES 2, 3, 4) */
+                <div className="space-y-5">
+                  {/* 1. Form data pelanggan (Image 2) */}
+                  <div className="bg-slate-50/80 p-4 rounded-xl border border-slate-200 space-y-3">
+                    <div className="border-b border-slate-200 pb-2">
+                      <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold">
+                          1
+                        </span>
+                        <span>Form data pelanggan (Informasi pelanggan)</span>
+                      </h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Jenis Sarana :</label>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">
+                          Jenis fasilitas <span className="text-rose-500">*</span>
+                        </label>
                         <select
                           value={formData.pharmacy_type}
                           onChange={(e) => setFormData({ ...formData, pharmacy_type: e.target.value })}
-                          className="w-full h-8 px-2 rounded border border-slate-300 bg-white text-xs font-semibold text-emerald-800"
+                          className="w-full h-8 px-2.5 rounded border border-slate-300 bg-white font-medium text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         >
-                          <option value="APOTEK">Apotek</option>
+                          <option value="KLINIK">Klinik / RS</option>
                           <option value="RUMAH_SAKIT">Rumah Sakit (RS)</option>
-                          <option value="KLINIK">Klinik Berizin</option>
-                          <option value="PBF">PBF Lain (Pedagang Besar Farmasi)</option>
+                          <option value="APOTEK">Apotek</option>
+                          <option value="PBF">PBF (Pedagang Besar Farmasi)</option>
                           <option value="TOKO_OBAT">Toko Obat Berizin</option>
-                          <option value="UMUM">Umum / Lainnya</option>
+                          <option value="PUSKESMAS">Puskesmas / Faskes Pemda</option>
+                          <option value="PRAKTEK_MANDIRI">Dokter Praktek Mandiri</option>
+                          <option value="LAINNYA">Lainnya</option>
                         </select>
                       </div>
                       <div>
-                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Nama APJ / Penanggung Jawab :</label>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">
+                          Status pelanggan
+                        </label>
+                        <select
+                          value={formData.customer_status}
+                          onChange={(e) => setFormData({ ...formData, customer_status: e.target.value })}
+                          className="w-full h-8 px-2.5 rounded border border-slate-300 bg-white font-medium text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        >
+                          <option value="Terdaftar">Terdaftar</option>
+                          <option value="Aktif">Aktif</option>
+                          <option value="Menunggu Verifikasi">Menunggu Verifikasi</option>
+                          <option value="Nonaktif">Nonaktif</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">
+                          Kode Pelanggan <span className="text-rose-500">*</span>
+                        </label>
                         <input
                           type="text"
-                          value={formData.apj_name}
-                          onChange={(e) => setFormData({ ...formData, apj_name: e.target.value })}
-                          placeholder="apt. ..."
-                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs"
+                          required
+                          value={formData.code}
+                          onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                          placeholder="Contoh: PL-001"
+                          className="w-full h-8 px-3 rounded border border-slate-300 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">
+                          Nama Klinik / Rumah Sakit <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={formData.name}
+                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                          placeholder="Nama fasilitas kesehatan"
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">No. Izin Sarana (SIA/Izin RS/Klinik) :</label>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">
+                          NIB <span className="text-rose-500">*</span>
+                        </label>
                         <input
                           type="text"
-                          value={formData.sia_number}
-                          onChange={(e) => setFormData({ ...formData, sia_number: e.target.value })}
-                          placeholder="No. SIA Dinkes / PTSP"
-                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs font-mono"
+                          value={formData.nib}
+                          onChange={(e) => setFormData({ ...formData, nib: e.target.value })}
+                          placeholder="Nomor Induk Berusaha"
+                          className="w-full h-8 px-3 rounded border border-slate-300 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Masa Berlaku Izin Sarana :</label>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">
+                          Nomor izin operasional <span className="text-rose-500">*</span>
+                        </label>
                         <input
-                          type="date"
-                          value={formData.sia_expiry_date}
-                          onChange={(e) => setFormData({ ...formData, sia_expiry_date: e.target.value })}
-                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs"
+                          type="text"
+                          value={formData.operational_license_number}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              operational_license_number: e.target.value,
+                              sia_number: e.target.value,
+                            })
+                          }
+                          placeholder="Nomor izin operasional"
+                          className="w-full h-8 px-3 rounded border border-slate-300 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-slate-700 font-semibold mb-1 text-[11px]">
+                        Alamat lengkap <span className="text-rose-500">*</span>
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={formData.address}
+                        onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                        placeholder="Alamat fasilitas"
+                        className="w-full p-2.5 rounded border border-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       <div>
-                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">No. SIPA APJ :</label>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">NPWP</label>
                         <input
                           type="text"
-                          value={formData.apj_sipa_number}
-                          onChange={(e) => setFormData({ ...formData, apj_sipa_number: e.target.value })}
-                          placeholder="No. SIPA / SIPTTK APJ"
-                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs font-mono"
+                          value={formData.npwp}
+                          onChange={(e) => setFormData({ ...formData, npwp: e.target.value })}
+                          placeholder="Nomor NPWP"
+                          className="w-full h-8 px-3 rounded border border-slate-300 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>
                       <div>
-                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Masa Berlaku SIPA APJ :</label>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Kota</label>
                         <input
-                          type="date"
-                          value={formData.apj_sipa_expiry_date}
-                          onChange={(e) => setFormData({ ...formData, apj_sipa_expiry_date: e.target.value })}
-                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs"
+                          type="text"
+                          value={formData.city}
+                          onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+                          placeholder="Pontianak"
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Provinsi</label>
+                        <input
+                          type="text"
+                          value={formData.province}
+                          onChange={(e) => setFormData({ ...formData, province: e.target.value })}
+                          placeholder="Kalimantan Barat"
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Telepon Fasilitas</label>
+                        <input
+                          type="text"
+                          value={formData.phone}
+                          onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                          placeholder="08xxxxxxxxxx"
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Kontak Person (PIC)</label>
+                        <input
+                          type="text"
+                          value={formData.contact_person}
+                          onChange={(e) => setFormData({ ...formData, contact_person: e.target.value })}
+                          placeholder="Nama PIC"
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Plafon Kredit (Limit)</label>
+                        <input
+                          type="number"
+                          value={formData.credit_limit}
+                          onChange={(e) => setFormData({ ...formData, credit_limit: Number(e.target.value) })}
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">Jatuh Tempo (Hari)</label>
+                        <input
+                          type="number"
+                          value={formData.term_of_payment_days}
+                          onChange={(e) => setFormData({ ...formData, term_of_payment_days: Number(e.target.value) })}
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>
                     </div>
                   </div>
-                )}
-              </div>
 
+                  {/* 2. Form penanggung jawab kefarmasian (Image 3) */}
+                  <div className="bg-emerald-50/40 p-4 rounded-xl border border-emerald-200 space-y-3">
+                    <div className="border-b border-emerald-200 pb-2">
+                      <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold">
+                          2
+                        </span>
+                        <span>Form penanggung jawab kefarmasian (Data Apoteker Penanggung Jawab)</span>
+                      </h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">
+                          Nama Apoteker <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.apj_name}
+                          onChange={(e) => setFormData({ ...formData, apj_name: e.target.value })}
+                          placeholder="Nama lengkap"
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">
+                          Nomor STRA / STR <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.apj_stra_number}
+                          onChange={(e) => setFormData({ ...formData, apj_stra_number: e.target.value })}
+                          placeholder="Nomor registrasi"
+                          className="w-full h-8 px-3 rounded border border-slate-300 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">
+                          Nomor SIPA <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.apj_sipa_number}
+                          onChange={(e) => setFormData({ ...formData, apj_sipa_number: e.target.value })}
+                          placeholder="Nomor SIPA"
+                          className="w-full h-8 px-3 rounded border border-slate-300 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">
+                          Masa Berlaku SIPA
+                        </label>
+                        <input
+                          type="date"
+                          value={formData.apj_sipa_expiry_date}
+                          onChange={(e) => setFormData({ ...formData, apj_sipa_expiry_date: e.target.value })}
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">
+                          Nomor telepon
+                        </label>
+                        <input
+                          type="text"
+                          value={formData.apj_phone}
+                          onChange={(e) => setFormData({ ...formData, apj_phone: e.target.value })}
+                          placeholder="08xxxxxxxxxx"
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-700 font-semibold mb-1 text-[11px]">
+                          Email
+                        </label>
+                        <input
+                          type="email"
+                          value={formData.apj_email}
+                          onChange={(e) => setFormData({ ...formData, apj_email: e.target.value })}
+                          placeholder="email@klinik.com"
+                          className="w-full h-8 px-3 rounded border border-slate-300 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 3. Form upload dokumen legalitas (Image 4) */}
+                  <div className="bg-sky-50/40 p-4 rounded-xl border border-sky-200 space-y-3">
+                    <div className="border-b border-sky-200 pb-2 flex items-center justify-between">
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-sky-600 text-white flex items-center justify-center text-xs font-bold">
+                            3
+                          </span>
+                          <span>Form upload dokumen legalitas</span>
+                        </h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Dokumen bersifat opsional. Dokumen dapat diunggah satu per satu atau jadi satu file bundle.
+                        </p>
+                      </div>
+                      <span className="px-2.5 py-0.5 bg-sky-100 text-sky-800 rounded font-bold text-[10px] border border-sky-300">
+                        Opsional
+                      </span>
+                    </div>
+
+                    {/* Embedded PbfDocumentUpload */}
+                    <div className="bg-white rounded-lg border border-slate-200 p-2">
+                      <PbfDocumentUpload
+                        entityType="customer"
+                        entityId={formData.id}
+                        title="Upload Dokumen Legalitas Sarana & APJ"
+                        subtitle="Unggah dokumen legalitas satu per satu atau jadi satu file bundle (PDF / JPG)"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Form Actions Footer */}
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
                 <button
                   type="button"
@@ -743,7 +1133,7 @@ export default function CustomersPage() {
                 <button
                   type="submit"
                   disabled={saveMutation.isPending}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg shadow-sm transition disabled:opacity-50"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg shadow-sm transition disabled:opacity-50"
                 >
                   {saveMutation.isPending ? "Menyimpan..." : "Simpan Data"}
                 </button>

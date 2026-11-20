@@ -7,7 +7,7 @@ import { Header } from "./Header";
 import { useAuthStore } from "@/lib/auth-store";
 
 export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const pathname = usePathname();
   const router = useRouter();
   const { isAuthenticated, isLoading, initialize } = useAuthStore();
@@ -15,6 +15,13 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
   useEffect(() => {
     initialize();
   }, [initialize]);
+
+  // Default to closed only on small mobile viewports
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      setSidebarOpen(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated && pathname !== "/login") {
@@ -52,7 +59,7 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       {/* Main content body */}
-      <div className="flex-1 md:pl-52 flex flex-col h-full min-w-0 transition-all duration-300 overflow-hidden">
+      <div className={`flex-1 ${sidebarOpen ? "md:pl-52" : "pl-0"} flex flex-col h-full min-w-0 transition-all duration-300 overflow-hidden`}>
         <Header onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
         <main className="p-1 sm:p-2 flex-1 w-full flex flex-col min-h-0 mx-auto overflow-hidden">
           {children}

@@ -1,250 +1,287 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { Save, ChevronLeft, Check, Calendar } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Building2, Save, Check, AlertCircle, Loader2, MapPin, Phone, Mail, FileText } from "lucide-react";
 import { api } from "@/lib/api";
 
 export default function CompanySettingsPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
 
-  const [name, setName] = useState("");
-  const [code, setCode] = useState("");
-  const [taxNumber, setTaxNumber] = useState("");
-  const [address, setAddress] = useState("");
+  // Form fields matching Screenshot 3
+  const [companyName, setCompanyName] = useState("APOTEK BERKAT PURNAMA");
+  const [address1, setAddress1] = useState("JL.PURNAMA 1");
+  const [address2, setAddress2] = useState("");
   const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [siaNumber, setSiaNumber] = useState("SIA-440/123-DINKES/2024");
-  const [sipaNumber, setSipaNumber] = useState("SIPA-503/456-APJ/2024");
-  const [apjName, setApjName] = useState("apt. Rahmat Hidayat, S.Farm.");
-  const [receiptFooter, setReceiptFooter] = useState("Semoga Lekas Sembuh & Terima Kasih Atas Kunjungan Anda");
-  const [toastMsg, setToastMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [fax, setFax] = useState("-");
+  const [whatsapp, setWhatsapp] = useState("085158018858");
+  const [email, setEmail] = useState("apotekberkat6699@gmail.com");
+  const [npwp, setNpwp] = useState("-");
+  const [nitku, setNitku] = useState("");
+  const [pkpDate, setPkpDate] = useState("2024-04-23");
+  const [maxMonthlyOmset, setMaxMonthlyOmset] = useState("Rp. 0");
+  const [maxUser, setMaxUser] = useState("15");
+  const [maxItem, setMaxItem] = useState("8000");
 
-  const { data: companies, isLoading } = useQuery({
+  const { data: companies = [] } = useQuery({
     queryKey: ["companies"],
     queryFn: async () => {
-      const res = await api.get("/companies");
-      return res.data?.data || [];
+      try {
+        const res = await api.get("/companies");
+        return res.data?.data || [];
+      } catch {
+        return [];
+      }
     },
   });
 
-  const company = companies?.[0];
+  const company = companies[0];
 
   useEffect(() => {
     if (company) {
-      setName(company.name || "Apotek Berkat Purnama");
-      setCode(company.code || "ABP");
-      setTaxNumber(company.tax_number || "01.234.567.8-901.000");
-      setAddress(company.address || "Jl. Farmasi Raya No. 10, Jakarta");
-      setPhone(company.phone || "021-5550192");
-      setEmail(company.email || "info@apotekberkatpurnama.co.id");
+      if (company.name) setCompanyName(company.name);
+      if (company.address) setAddress1(company.address);
+      if (company.phone) setPhone(company.phone);
+      if (company.email) setEmail(company.email);
+      if (company.tax_number) setNpwp(company.tax_number);
     }
   }, [company]);
 
   const saveMutation = useMutation({
-    mutationFn: async (payload: any) => {
+    mutationFn: async () => {
       if (company?.id) {
-        return await api.put(`/companies/${company.id}`, payload);
+        await api.put(`/companies/${company.id}`, {
+          name: companyName,
+          address: address1,
+          phone,
+          email,
+          tax_number: npwp,
+        });
       }
-      return Promise.resolve();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
-      showToast("success", "Profil apotek & perusahaan berhasil diperbarui!");
+      setToastMsg("Pengaturan perusahaan berhasil disimpan!");
+      setTimeout(() => setToastMsg(null), 3000);
     },
-    onError: (err: any) => {
-      showToast("error", err.response?.data?.message || "Gagal memperbarui profil perusahaan");
+    onError: () => {
+      setToastMsg("Gagal menyimpan profil perusahaan.");
+      setTimeout(() => setToastMsg(null), 3000);
     },
   });
 
-  const showToast = (type: "success" | "error", text: string) => {
-    setToastMsg({ type, text });
-    setTimeout(() => setToastMsg(null), 3500);
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    saveMutation.mutate({
-      name,
-      code,
-      tax_number: taxNumber,
-      address,
-      phone,
-      email,
-    });
-  };
-
   return (
-    <div className="flex flex-col h-full bg-[#f8fafc] text-slate-800 text-xs select-none">
+    <div className="flex flex-col h-full bg-white text-slate-800 text-xs select-none">
       {toastMsg && (
-        <div
-          className={`fixed top-12 right-6 z-50 px-4 py-2 rounded shadow-md text-xs font-semibold flex items-center gap-2 ${
-            toastMsg.type === "success" ? "bg-emerald-600 text-white" : "bg-rose-600 text-white"
-          }`}
-        >
-          {toastMsg.type === "success" ? <Check className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-          <span>{toastMsg.text}</span>
+        <div className="fixed top-12 right-6 z-50 px-4 py-2 rounded shadow-md bg-emerald-600 text-white text-xs font-semibold flex items-center gap-2">
+          <Check className="w-4 h-4" />
+          <span>{toastMsg}</span>
         </div>
       )}
 
-      {/* TOP HEADER */}
-      <div className="h-10 px-4 bg-white border-b border-slate-200 flex items-center justify-between shrink-0 shadow-2xs">
+      {/* SUB-HEADER / TITLE BAR */}
+      <div className="h-10 px-4 border-b border-slate-200 flex items-center justify-between shrink-0 bg-white">
         <div className="flex items-center gap-2">
-          <Building2 className="w-4 h-4 text-emerald-600" />
-          <h1 className="font-semibold text-sm text-slate-800">Pengaturan Profil Perusahaan &amp; Legalitas Apotek</h1>
+          <button
+            onClick={() => router.back()}
+            className="text-slate-600 hover:text-slate-800 flex items-center text-xs"
+          >
+            <ChevronLeft className="w-4 h-4 mr-0.5" />
+            <span className="font-semibold text-sm text-slate-800">Pengaturan Perusahaan</span>
+          </button>
         </div>
-        <button
-          onClick={handleSubmit}
-          disabled={saveMutation.isPending || isLoading}
-          className="h-7 px-3 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-bold rounded flex items-center gap-1.5 shadow-2xs transition disabled:opacity-50"
-        >
-          {saveMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-          <span>Simpan Perubahan</span>
-        </button>
+        <div className="flex items-center gap-3 text-xs text-slate-600">
+          <span className="font-medium">APOTEK BERKAT PURNAMA [UTAMA]</span>
+          <span className="w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center text-[10px] font-bold">
+            33
+          </span>
+          <div className="flex items-center gap-1 text-emerald-600 font-semibold">
+            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px]">
+              A
+            </span>
+            <span>ADMIN2</span>
+          </div>
+        </div>
       </div>
 
-      <div className="flex-1 p-4 max-w-4xl space-y-4 overflow-y-auto">
-        {isLoading ? (
-          <div className="p-8 text-center text-slate-400 flex items-center justify-center gap-2">
-            <Loader2 className="w-5 h-5 animate-spin text-emerald-600" />
-            <span>Memuat data apotek...</span>
+      {/* CONTENT FORM */}
+      <div className="flex-1 p-6 overflow-y-auto space-y-3.5 max-w-4xl">
+        {/* Nama Perusahaan */}
+        <div>
+          <input
+            type="text"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded font-medium text-slate-800 focus:outline-none focus:border-cyan-500"
+          />
+        </div>
+
+        {/* Alamat 1 */}
+        <div>
+          <label className="block text-[11px] text-slate-600 mb-0.5">Alamat 1 :</label>
+          <input
+            type="text"
+            value={address1}
+            onChange={(e) => setAddress1(e.target.value)}
+            className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-cyan-500"
+          />
+        </div>
+
+        {/* Alamat 2 */}
+        <div>
+          <label className="block text-[11px] text-slate-600 mb-0.5">Alamat 2 :</label>
+          <input
+            type="text"
+            value={address2}
+            onChange={(e) => setAddress2(e.target.value)}
+            className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-cyan-500"
+          />
+        </div>
+
+        {/* Telephone */}
+        <div>
+          <label className="block text-[11px] text-slate-600 mb-0.5">Telephone :</label>
+          <input
+            type="text"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-cyan-500"
+          />
+        </div>
+
+        {/* Fax */}
+        <div>
+          <label className="block text-[11px] text-slate-600 mb-0.5">Fax :</label>
+          <input
+            type="text"
+            value={fax}
+            onChange={(e) => setFax(e.target.value)}
+            className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-cyan-500"
+          />
+        </div>
+
+        {/* Whatsapp */}
+        <div>
+          <label className="block text-[11px] text-slate-600 mb-0.5">Whatsapp :</label>
+          <input
+            type="text"
+            value={whatsapp}
+            onChange={(e) => setWhatsapp(e.target.value)}
+            className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-cyan-500"
+          />
+        </div>
+
+        {/* Email */}
+        <div>
+          <label className="block text-[11px] text-slate-600 mb-0.5">Email :</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-cyan-500"
+          />
+        </div>
+
+        {/* NPWP */}
+        <div>
+          <label className="block text-[11px] text-slate-600 mb-0.5">NPWP :</label>
+          <input
+            type="text"
+            value={npwp}
+            onChange={(e) => setNpwp(e.target.value)}
+            className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-cyan-500"
+          />
+        </div>
+
+        {/* NITKU */}
+        <div>
+          <label className="block text-[11px] text-slate-600 mb-0.5">NITKU (Nomor Identitas Tempat Kegiatan Usaha) :</label>
+          <input
+            type="text"
+            value={nitku}
+            onChange={(e) => setNitku(e.target.value)}
+            className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-cyan-500"
+          />
+        </div>
+
+        {/* Tanggal PKP */}
+        <div>
+          <label className="block text-[11px] text-slate-600 mb-0.5">Tanggal PKP :</label>
+          <div className="relative">
+            <input
+              type="date"
+              value={pkpDate}
+              onChange={(e) => setPkpDate(e.target.value)}
+              className="w-full h-8 px-2.5 text-xs bg-white border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-cyan-500"
+            />
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* 1. Legalitas Entitas & Izin Apotek */}
-            <div className="bg-white rounded border border-slate-300 p-4 shadow-2xs space-y-3">
-              <h2 className="font-bold text-xs text-slate-800 border-b border-slate-100 pb-2 flex items-center gap-2">
-                <FileText className="w-3.5 h-3.5 text-slate-500" />
-                <span>1. Identitas &amp; Legalitas Apotek (Standar BPOM &amp; Kemenkes)</span>
-              </h2>
+        </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Nama Resmi Apotek / Perusahaan *</label>
-                  <input
-                    type="text"
-                    required
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full h-8 px-2.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-cyan-500 font-bold"
-                  />
-                </div>
+        {/* Max Omset Perbulan */}
+        <div>
+          <label className="block text-[11px] text-slate-600 mb-0.5">Max Omset Perbulan :</label>
+          <input
+            type="text"
+            value={maxMonthlyOmset}
+            readOnly
+            className="w-full h-8 px-2.5 text-xs bg-slate-50 border border-slate-300 border-dashed rounded text-slate-500 cursor-not-allowed"
+          />
+        </div>
 
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Kode Perusahaan (Singkatan)</label>
-                  <input
-                    type="text"
-                    required
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    className="w-full h-8 px-2.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-cyan-500 font-mono"
-                  />
-                </div>
-              </div>
+        {/* Max User */}
+        <div>
+          <label className="block text-[11px] text-slate-600 mb-0.5">Max User :</label>
+          <input
+            type="text"
+            value={maxUser}
+            readOnly
+            className="w-full h-8 px-2.5 text-xs bg-slate-50 border border-slate-300 border-dashed rounded text-slate-500 cursor-not-allowed"
+          />
+        </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Apoteker Penanggung Jawab (APJ)</label>
-                  <input
-                    type="text"
-                    value={apjName}
-                    onChange={(e) => setApjName(e.target.value)}
-                    placeholder="apt. Nama, S.Farm."
-                    className="w-full h-8 px-2.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-cyan-500 font-medium"
-                  />
-                </div>
+        {/* Max Item */}
+        <div>
+          <label className="block text-[11px] text-slate-600 mb-0.5">Max Item :</label>
+          <input
+            type="text"
+            value={maxItem}
+            readOnly
+            className="w-full h-8 px-2.5 text-xs bg-slate-50 border border-slate-300 border-dashed rounded text-slate-500 cursor-not-allowed"
+          />
+        </div>
 
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Nomor Izin Apotek (SIA)</label>
-                  <input
-                    type="text"
-                    value={siaNumber}
-                    onChange={(e) => setSiaNumber(e.target.value)}
-                    placeholder="SIA-..."
-                    className="w-full h-8 px-2.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-cyan-500 font-mono"
-                  />
-                </div>
+        {/* Logo upload and preview */}
+        <div className="space-y-2 pt-1">
+          <button
+            type="button"
+            className="h-7 px-3 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs rounded shadow-2xs"
+          >
+            Pilih File Image Logo
+          </button>
 
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Nomor SIPA APJ</label>
-                  <input
-                    type="text"
-                    value={sipaNumber}
-                    onChange={(e) => setSipaNumber(e.target.value)}
-                    placeholder="SIPA-..."
-                    className="w-full h-8 px-2.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-cyan-500 font-mono"
-                  />
-                </div>
-              </div>
+          {/* Logo preview matching red Apotek Berkat box in screenshot */}
+          <div className="w-32 h-32 bg-red-600 rounded flex flex-col items-center justify-center p-2 text-white shadow-sm">
+            <div className="text-3xl mb-1">💊</div>
+            <div className="font-black text-xs tracking-wider text-center leading-tight uppercase">
+              Apotek Berkat
             </div>
+          </div>
+        </div>
 
-            {/* 2. Kontak & Alamat */}
-            <div className="bg-white rounded border border-slate-300 p-4 shadow-2xs space-y-3">
-              <h2 className="font-bold text-xs text-slate-800 border-b border-slate-100 pb-2 flex items-center gap-2">
-                <MapPin className="w-3.5 h-3.5 text-slate-500" />
-                <span>2. Kontak &amp; Alamat Operasional</span>
-              </h2>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-700 mb-1">Alamat Lengkap Apotek</label>
-                <textarea
-                  rows={2}
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  className="w-full p-2 text-xs border border-slate-300 rounded focus:outline-none focus:border-cyan-500"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Nomor Telepon</label>
-                  <input
-                    type="text"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="w-full h-8 px-2.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">Email Resmi</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full h-8 px-2.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-cyan-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-700 mb-1">NPWP Perusahaan</label>
-                  <input
-                    type="text"
-                    value={taxNumber}
-                    onChange={(e) => setTaxNumber(e.target.value)}
-                    className="w-full h-8 px-2.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-cyan-500 font-mono"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* 3. Catatan Kaki Struk Kasir */}
-            <div className="bg-white rounded border border-slate-300 p-4 shadow-2xs space-y-3">
-              <h2 className="font-bold text-xs text-slate-800 border-b border-slate-100 pb-2">
-                3. Footer / Catatan Kaki Nota Struk Kasir
-              </h2>
-              <div>
-                <input
-                  type="text"
-                  value={receiptFooter}
-                  onChange={(e) => setReceiptFooter(e.target.value)}
-                  className="w-full h-8 px-2.5 text-xs border border-slate-300 rounded focus:outline-none focus:border-cyan-500 font-medium"
-                />
-                <p className="text-[10px] text-slate-500 mt-1">Teks ini akan tercetak otomatis di bagian paling bawah struk thermal kasir POS.</p>
-              </div>
-            </div>
-          </form>
-        )}
+        {/* BOTTOM ACTION */}
+        <div className="pt-4 border-t border-slate-200">
+          <button
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending}
+            className="h-8 px-4 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-medium rounded flex items-center gap-1.5 shadow-2xs transition disabled:opacity-50"
+          >
+            <Save className="w-3.5 h-3.5" />
+            <span>Simpan</span>
+          </button>
+        </div>
       </div>
     </div>
   );

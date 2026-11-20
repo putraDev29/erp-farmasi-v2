@@ -63,13 +63,19 @@ func (h *UserHandler) GetUsers(c *gin.Context) {
 }
 
 type CreateUserRequest struct {
-	Username string    `json:"username" binding:"required"`
-	Email    string    `json:"email" binding:"required"`
-	Password string    `json:"password" binding:"required"`
-	FullName string    `json:"full_name" binding:"required"`
-	Phone    string    `json:"phone"`
-	BranchID uuid.UUID `json:"branch_id" binding:"required"`
-	RoleIDs  []string  `json:"role_ids"`
+	Username            string    `json:"username" binding:"required"`
+	Email               string    `json:"email" binding:"required"`
+	Password            string    `json:"password" binding:"required"`
+	FullName            string    `json:"full_name" binding:"required"`
+	Phone               string    `json:"phone"`
+	BranchID            uuid.UUID `json:"branch_id" binding:"required"`
+	RoleIDs             []string  `json:"role_ids"`
+	LoginPeriodActive   bool      `json:"login_period_active"`
+	LoginPeriodFrom     string    `json:"login_period_from"`
+	LoginPeriodTo       string    `json:"login_period_to"`
+	LoginWithShift      bool      `json:"login_with_shift"`
+	WaDeviceID          string    `json:"wa_device_id"`
+	WarehouseAccessType string    `json:"warehouse_access_type"`
 }
 
 func (h *UserHandler) CreateUser(c *gin.Context) {
@@ -87,14 +93,20 @@ func (h *UserHandler) CreateUser(c *gin.Context) {
 	}
 
 	user := models.User{
-		CompanyID:    companyID,
-		BranchID:     req.BranchID,
-		Username:     req.Username,
-		Email:        req.Email,
-		PasswordHash: hashedPwd,
-		FullName:     req.FullName,
-		Phone:        req.Phone,
-		IsActive:     true,
+		CompanyID:           companyID,
+		BranchID:            req.BranchID,
+		Username:            req.Username,
+		Email:               req.Email,
+		PasswordHash:        hashedPwd,
+		FullName:            req.FullName,
+		Phone:               req.Phone,
+		IsActive:            true,
+		LoginPeriodActive:   req.LoginPeriodActive,
+		LoginPeriodFrom:     req.LoginPeriodFrom,
+		LoginPeriodTo:       req.LoginPeriodTo,
+		LoginWithShift:      req.LoginWithShift,
+		WaDeviceID:          req.WaDeviceID,
+		WarehouseAccessType: req.WarehouseAccessType,
 	}
 
 	tx := database.DB.Begin()
@@ -135,12 +147,18 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 	}
 
 	var updateData struct {
-		FullName string   `json:"full_name"`
-		Phone    string   `json:"phone"`
-		IsActive *bool    `json:"is_active"`
-		Password string   `json:"password"`
-		BranchID *string  `json:"branch_id"`
-		RoleIDs  []string `json:"role_ids"`
+		FullName            string   `json:"full_name"`
+		Phone               string   `json:"phone"`
+		IsActive            *bool    `json:"is_active"`
+		Password            string   `json:"password"`
+		BranchID            *string  `json:"branch_id"`
+		RoleIDs             []string `json:"role_ids"`
+		LoginPeriodActive   *bool    `json:"login_period_active"`
+		LoginPeriodFrom     string   `json:"login_period_from"`
+		LoginPeriodTo       string   `json:"login_period_to"`
+		LoginWithShift      *bool    `json:"login_with_shift"`
+		WaDeviceID          string   `json:"wa_device_id"`
+		WarehouseAccessType string   `json:"warehouse_access_type"`
 	}
 
 	if err := c.ShouldBindJSON(&updateData); err != nil {
@@ -165,6 +183,24 @@ func (h *UserHandler) UpdateUser(c *gin.Context) {
 		if bID, err := uuid.Parse(*updateData.BranchID); err == nil {
 			user.BranchID = bID
 		}
+	}
+	if updateData.LoginPeriodActive != nil {
+		user.LoginPeriodActive = *updateData.LoginPeriodActive
+	}
+	if updateData.LoginPeriodFrom != "" {
+		user.LoginPeriodFrom = updateData.LoginPeriodFrom
+	}
+	if updateData.LoginPeriodTo != "" {
+		user.LoginPeriodTo = updateData.LoginPeriodTo
+	}
+	if updateData.LoginWithShift != nil {
+		user.LoginWithShift = *updateData.LoginWithShift
+	}
+	if updateData.WaDeviceID != "" {
+		user.WaDeviceID = updateData.WaDeviceID
+	}
+	if updateData.WarehouseAccessType != "" {
+		user.WarehouseAccessType = updateData.WarehouseAccessType
 	}
 
 	tx := database.DB.Begin()
@@ -399,6 +435,7 @@ type UpdatePermissionItem struct {
 	CanDelete             bool       `json:"can_delete"`
 	LockTransactionNumber bool       `json:"lock_transaction_number"`
 	LockDate              bool       `json:"lock_date"`
+	Value                 int        `json:"value"`
 }
 
 func (h *UserHandler) UpdateRolePermissions(c *gin.Context) {
@@ -433,6 +470,7 @@ func (h *UserHandler) UpdateRolePermissions(c *gin.Context) {
 					"can_delete":              item.CanDelete,
 					"lock_transaction_number": item.LockTransactionNumber,
 					"lock_date":               item.LockDate,
+					"value":                   item.Value,
 				})
 		} else {
 			// Find by role_id + category + module
@@ -446,6 +484,7 @@ func (h *UserHandler) UpdateRolePermissions(c *gin.Context) {
 					"can_delete":              item.CanDelete,
 					"lock_transaction_number": item.LockTransactionNumber,
 					"lock_date":               item.LockDate,
+					"value":                   item.Value,
 				})
 			} else {
 				p := models.RoleModulePermission{
@@ -458,6 +497,7 @@ func (h *UserHandler) UpdateRolePermissions(c *gin.Context) {
 					CanDelete:             item.CanDelete,
 					LockTransactionNumber: item.LockTransactionNumber,
 					LockDate:              item.LockDate,
+					Value:                 item.Value,
 				}
 				tx.Create(&p)
 			}

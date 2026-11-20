@@ -208,16 +208,46 @@ export default function PbfDocumentUpload({
       case "customer":
         return [
           {
-            document_type: "IZIN_SARANA",
-            title: "Izin Sarana (SIA / Izin RS / Izin Klinik)",
-            description: "Legalitas sarana pemesan obat/alkes.",
-            isRequired: true,
+            document_type: "NIB",
+            title: "NIB (Nomor Induk Berusaha)",
+            description: "Dokumen Nomor Induk Berusaha fasilitas (Format: PDF)",
+            isRequired: false,
+          },
+          {
+            document_type: "IZIN_OPERASIONAL",
+            title: "Izin Operasional Fasilitas",
+            description: "Izin Operasional Fasilitas / SIA / Izin RS / Klinik (Format: PDF)",
+            isRequired: false,
+          },
+          {
+            document_type: "NPWP",
+            title: "NPWP",
+            description: "Nomor Pokok Wajib Pajak fasilitas (Format: PDF / JPG)",
+            isRequired: false,
           },
           {
             document_type: "SIPA_APJ",
-            title: "SIPA Apoteker Penanggung Jawab Pemesan",
-            description: "SIPA / SIPTTK penanggung jawab yang berwenang menandatangani SP.",
-            isRequired: true,
+            title: "SIPA Apoteker",
+            description: "Surat Izin Praktik Apoteker Penanggung Jawab (Format: PDF / JPG)",
+            isRequired: false,
+          },
+          {
+            document_type: "STR_APJ",
+            title: "STR Apoteker",
+            description: "Surat Tanda Registrasi Apoteker / STRA (Format: PDF / JPG)",
+            isRequired: false,
+          },
+          {
+            document_type: "SURAT_PENUNJUKAN_APJ",
+            title: "Surat Penunjukan Apoteker",
+            description: "Surat penunjukan / SK penugasan APJ (Format: PDF)",
+            isRequired: false,
+          },
+          {
+            document_type: "DOKUMEN_TAMBAHAN",
+            title: "Dokumen Tambahan",
+            description: "Denah sarana atau dokumen pendukung lain (Format: PDF / JPG / PNG)",
+            isRequired: false,
           },
         ];
       default:

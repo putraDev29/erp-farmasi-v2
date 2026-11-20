@@ -254,6 +254,14 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
     },
   });
 
+  const { data: generalSettings = {} } = useQuery<Record<string, string>>({
+    queryKey: ["settings-general"],
+    queryFn: async () => {
+      const res = await api.get("/settings/groups/GENERAL");
+      return res.data?.data || {};
+    },
+  });
+
   // Auto set default accounts if not set
   useEffect(() => {
     if (accounts.length > 0 && !isEdit) {
@@ -945,8 +953,31 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
                   step="0.01"
                   value={sellingPrice}
                   onChange={(e) => handleSellingPriceChange(parseFloat(e.target.value) || 0)}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 text-right focus:outline-none focus:border-sky-500 bg-white"
+                  className={`w-full px-2.5 py-1.5 border rounded text-slate-800 text-right focus:outline-none bg-white ${
+                    purchasePrice > 0 && sellingPrice < purchasePrice
+                      ? "border-rose-500 text-rose-700 bg-rose-50/40"
+                      : "border-slate-300 focus:border-sky-500"
+                  }`}
                 />
+                {/* Min. Profit Alert / Guideline from General Settings */}
+                {generalSettings?.min_profit_percent && parseFloat(generalSettings.min_profit_percent) > 0 && (
+                  <div className="mt-1 text-[10px]">
+                    {markupPercent < parseFloat(generalSettings.min_profit_percent) ? (
+                      <span className="text-amber-600 font-semibold flex items-center gap-1">
+                        ⚠️ Margin ({markupPercent.toFixed(1)}%) &lt; Min Profit ({generalSettings.min_profit_percent}%)
+                      </span>
+                    ) : (
+                      <span className="text-emerald-600 font-medium">
+                        ✓ Memenuhi Min Profit ({generalSettings.min_profit_percent}%)
+                      </span>
+                    )}
+                  </div>
+                )}
+                {purchasePrice > 0 && sellingPrice < purchasePrice && (
+                  <div className="mt-0.5 text-[10px] text-rose-600 font-bold">
+                    ⚠️ Harga jual di bawah harga pokok!
+                  </div>
+                )}
               </div>
             </div>
 

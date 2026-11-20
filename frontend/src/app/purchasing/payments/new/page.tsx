@@ -30,6 +30,9 @@ interface DebtRow {
   pay_amount: number;
 }
 
+const EMPTY_ACCOUNTS: any[] = [];
+const EMPTY_BANKS: any[] = [];
+
 export default function NewSupplierPaymentPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -50,7 +53,7 @@ export default function NewSupplierPaymentPage() {
   const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
   const [checkNo, setCheckNo] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("TUNAI");
-  const [bankId, setBankId] = useState("");
+  const [selectedAccountId, setSelectedAccountId] = useState("");
   const [notes, setNotes] = useState("");
   const [isLunas, setIsLunas] = useState(true);
 
@@ -58,8 +61,21 @@ export default function NewSupplierPaymentPage() {
   const [rows, setRows] = useState<DebtRow[]>([]);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
 
-  // Queries
-  const { data: banks = [] } = useQuery({
+  // Queries: Cash & Bank Accounts (Real Operational Accounts)
+  const { data: cashAccounts = EMPTY_ACCOUNTS } = useQuery({
+    queryKey: ["cash-bank-accounts"],
+    queryFn: async () => {
+      const res = await api.get("/accounting/accounts");
+      const list = res.data?.data || [];
+      return list.filter(
+        (a: any) =>
+          !a.is_header &&
+          (a.subtype === "CASH_BANK" || (a.code && a.code.startsWith("1-11")))
+      );
+    },
+  });
+
+  const { data: banks = EMPTY_BANKS } = useQuery({
     queryKey: ["banks"],
     queryFn: async () => {
       const res = await api.get("/banks");
@@ -68,27 +84,52 @@ export default function NewSupplierPaymentPage() {
   });
 
   useEffect(() => {
-    if (banks.length > 0 && !bankId) {
-      setBankId(banks[0].id);
+    if (cashAccounts.length > 0 && !selectedAccountId) {
+      // Default to BCA account if present, else first cash/bank account
+      const bca = cashAccounts.find(
+        (a: any) =>
+          a.code === "1-1131" ||
+          a.code === "1-1120" ||
+          a.name?.toUpperCase().includes("BCA")
+      );
+      setSelectedAccountId(bca ? bca.id : cashAccounts[0].id);
     }
-  }, [banks, bankId]);
+  }, [cashAccounts, selectedAccountId]);
 
   // Fetch Unpaid Invoices when supplier changes
-  const { data: unpaidInvoices = [], isLoading: isLoadingInvoices } = useQuery({
+  const { data: unpaidInvoices, isLoading: isLoadingInvoices } = useQuery({
     queryKey: ["unpaid-invoices", selectedSupplier?.id],
     enabled: !!selectedSupplier?.id,
     queryFn: async () => {
-      const res = await api.get(`/purchases?supplier_id=${selectedSupplier.id}`);
+      const res = await api.get(
+        `/purchases?supplier_id=${selectedSupplier.id}&has_debt=true`
+      );
       const list = res.data?.data || [];
-      return list.filter((p: any) => (p.remaining_amount || p.total_amount) > 0);
+      return list.filter(
+        (p: any) =>
+          String(p.supplier_id) === String(selectedSupplier.id) &&
+          Number(p.remaining_amount) > 0
+      );
     },
   });
 
-  // Populate rows from unpaid invoices
+  // Populate rows from unpaid invoices safely without infinite render cycles
   useEffect(() => {
-    if (selectedSupplier && unpaidInvoices.length > 0) {
-      const initialRows: DebtRow[] = unpaidInvoices.map((inv: any) => {
-        const sisa = Number(inv.remaining_amount ?? inv.total_amount) || 0;
+    if (!selectedSupplier?.id) {
+      setRows((prev) => (prev.length > 0 ? [] : prev));
+      setSelectedRowIndex((prev) => (prev !== null ? null : prev));
+      return;
+    }
+
+    if (unpaidInvoices && unpaidInvoices.length > 0) {
+      const filtered = unpaidInvoices.filter(
+        (inv: any) =>
+          String(inv.supplier_id) === String(selectedSupplier.id) &&
+          Number(inv.remaining_amount) > 0
+      );
+
+      const initialRows: DebtRow[] = filtered.map((inv: any) => {
+        const sisa = Number(inv.remaining_amount) || 0;
         return {
           purchase_id: inv.id,
           invoice_no: inv.invoice_no,
@@ -103,18 +144,28 @@ export default function NewSupplierPaymentPage() {
       });
       setRows(initialRows);
       setSelectedRowIndex(initialRows.length > 0 ? 0 : null);
-    } else if (!selectedSupplier) {
-      setRows([]);
-      setSelectedRowIndex(null);
+    } else {
+      setRows((prev) => (prev.length > 0 ? [] : prev));
+      setSelectedRowIndex((prev) => (prev !== null ? null : prev));
     }
-  }, [selectedSupplier, unpaidInvoices]);
+  }, [selectedSupplier?.id, unpaidInvoices]);
 
-  // Handle Pay All or Pay Row
+  // Handle Pay All or Pay Row (Fill Full Payment)
   const handleAutoPaySelectedRow = () => {
-    if (selectedRowIndex === null || !rows[selectedRowIndex]) {
-      // If none selected, pay all rows
-      setRows((prev) =>
-        prev.map((r) => {
+    setRows((prev) => {
+      if (prev.length === 0) return prev;
+      const copy = [...prev];
+      if (selectedRowIndex !== null && copy[selectedRowIndex]) {
+        const target = copy[selectedRowIndex];
+        const maxPay = Math.max(0, target.remaining_amount - target.discount);
+        copy[selectedRowIndex] = {
+          ...target,
+          is_pay: true,
+          pay_amount: maxPay,
+          total: maxPay,
+        };
+      } else {
+        return copy.map((r) => {
           const maxPay = Math.max(0, r.remaining_amount - r.discount);
           return {
             ...r,
@@ -122,21 +173,8 @@ export default function NewSupplierPaymentPage() {
             pay_amount: maxPay,
             total: maxPay,
           };
-        })
-      );
-      return;
-    }
-
-    setRows((prev) => {
-      const copy = [...prev];
-      const target = copy[selectedRowIndex];
-      const maxPay = Math.max(0, target.remaining_amount - target.discount);
-      copy[selectedRowIndex] = {
-        ...target,
-        is_pay: !target.is_pay,
-        pay_amount: !target.is_pay ? maxPay : 0,
-        total: maxPay,
-      };
+        });
+      }
       return copy;
     });
   };
@@ -227,12 +265,19 @@ export default function NewSupplierPaymentPage() {
         throw new Error("Pilih setidaknya satu faktur hutang yang akan dibayar.");
       }
 
+      const linkedBank = banks.find((b: any) => b.account_id === selectedAccountId);
+
       const payload = {
         supplier_id: selectedSupplier.id,
-        bank_id: bankId || undefined,
+        account_id: selectedAccountId || undefined,
+        bank_id: linkedBank?.id || undefined,
         payment_method: paymentMethod,
         check_no: checkNo,
         notes: notes || "Pembayaran Utang Usaha",
+        allocations: activeRows.map((r) => ({
+          purchase_id: r.purchase_id,
+          amount_paid: r.pay_amount,
+        })),
         items: activeRows.map((r) => ({
           purchase_id: r.purchase_id,
           amount: r.pay_amount,
@@ -266,12 +311,16 @@ export default function NewSupplierPaymentPage() {
           <button
             type="button"
             onClick={() => router.push("/purchasing/payments")}
-            className="p-1 hover:bg-slate-100 rounded text-slate-600 transition"
+            className="p-1 hover:bg-slate-100 rounded text-slate-600 transition flex items-center gap-1"
             title="Kembali ke Daftar Pembayaran"
           >
-            <ChevronLeft className="w-4 h-4" />
+            <ChevronLeft className="w-4 h-4 text-emerald-600" />
+            <span className="text-[11px] font-semibold text-emerald-700 hover:underline">
+              Daftar Pembayaran
+            </span>
           </button>
-          <h1 className="text-xs sm:text-sm font-semibold text-slate-800 tracking-tight">
+          <span className="text-slate-300">/</span>
+          <h1 className="text-xs sm:text-sm font-bold text-slate-800 tracking-tight">
             Bayar Hutang Baru
           </h1>
         </div>
@@ -368,16 +417,22 @@ export default function NewSupplierPaymentPage() {
             Kode Akun :
           </label>
           <select
-            value={bankId}
-            onChange={(e) => setBankId(e.target.value)}
-            className="w-full h-6 px-1.5 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500 cursor-pointer truncate"
+            value={selectedAccountId}
+            onChange={(e) => setSelectedAccountId(e.target.value)}
+            className="w-full h-6 px-1.5 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500 cursor-pointer truncate font-medium text-slate-800"
           >
-            {banks.map((b: any) => (
-              <option key={b.id} value={b.id}>
-                {b.code ? `${b.code} - ` : ""}
-                {b.name} ({b.account_number || "-"})
-              </option>
-            ))}
+            {cashAccounts.map((acc: any) => {
+              const linkedBank = banks.find((b: any) => b.account_id === acc.id);
+              const extraInfo = linkedBank?.account_number
+                ? ` (${linkedBank.account_number})`
+                : "";
+              return (
+                <option key={acc.id} value={acc.id}>
+                  {acc.code} - {acc.name}
+                  {extraInfo}
+                </option>
+              );
+            })}
           </select>
         </div>
       </div>
@@ -494,11 +549,11 @@ export default function NewSupplierPaymentPage() {
           type="button"
           onClick={handleAutoPaySelectedRow}
           disabled={rows.length === 0}
-          className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded text-[11px] font-medium flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-40"
-          title="Bayar Penuh Baris Terpilih / Semua Baris"
+          className="h-6 px-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded text-[11px] font-semibold flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-40"
+          title="Isi Bayar Lunas Baris Terpilih / Semua Baris"
         >
           <Banknote className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Bayar</span>
+          <span>Bayar Penuh</span>
         </button>
 
         <button
@@ -594,8 +649,18 @@ export default function NewSupplierPaymentPage() {
 
           <button
             type="button"
-            onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending || totalPayment <= 0}
+            onClick={() => {
+              if (totalPayment <= 0) {
+                if (rows.length > 0) {
+                  handleAutoPaySelectedRow();
+                } else {
+                  alert("Pilih supplier dan faktur yang akan dibayar terlebih dahulu.");
+                }
+                return;
+              }
+              saveMutation.mutate();
+            }}
+            disabled={saveMutation.isPending}
             className="h-6 px-3 bg-[#009b62] hover:bg-[#008754] text-white font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-50"
             title="Simpan Pembayaran Hutang"
           >

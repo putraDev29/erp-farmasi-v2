@@ -28,6 +28,7 @@ export default function PurchaseInvoicesPage() {
   const [selectedWarehouse, setSelectedWarehouse] = useState("all");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [paymentStatus, setPaymentStatus] = useState("all");
   const [sortBy, setSortBy] = useState("Tanggal");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -49,6 +50,7 @@ export default function PurchaseInvoicesPage() {
       selectedWarehouse,
       startDate,
       endDate,
+      paymentStatus,
       sortBy,
       sortDir,
     ],
@@ -59,6 +61,8 @@ export default function PurchaseInvoicesPage() {
         params.append("warehouse_id", selectedWarehouse);
       if (startDate) params.append("start_date", startDate);
       if (endDate) params.append("end_date", endDate);
+      if (paymentStatus && paymentStatus !== "all")
+        params.append("payment_status", paymentStatus);
       params.append("sort_by", sortBy);
       params.append("sort_dir", sortDir);
 
@@ -197,7 +201,7 @@ export default function PurchaseInvoicesPage() {
 
       {/* 2. FILTER SECTION matching Screenshot 1 */}
       <div className="shrink-0 bg-white p-2 rounded border border-slate-200 space-y-1.5 shadow-2xs">
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2 text-[11px]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-2 text-[11px]">
           <div>
             <label className="block text-slate-600 font-semibold mb-0.5">Kata Kunci :</label>
             <input
@@ -221,6 +225,19 @@ export default function PurchaseInvoicesPage() {
                   {w.name}
                 </option>
               ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-slate-600 font-semibold mb-0.5">Status Bayar :</label>
+            <select
+              value={paymentStatus}
+              onChange={(e) => setPaymentStatus(e.target.value)}
+              className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-emerald-500 font-medium"
+            >
+              <option value="all">Semua Status</option>
+              <option value="UNPAID">Belum Lunas (Kredit)</option>
+              <option value="PARTIAL">Sebagian</option>
+              <option value="PAID">Lunas</option>
             </select>
           </div>
           <div>
@@ -290,6 +307,7 @@ export default function PurchaseInvoicesPage() {
               <th className="py-1 px-2.5 border-r border-slate-200 text-right">Total</th>
               <th className="py-1 px-2.5 border-r border-slate-200 text-right">Terbayar</th>
               <th className="py-1 px-2.5 border-r border-slate-200 text-right">Sisa Utang</th>
+              <th className="py-1 px-2.5 border-r border-slate-200 text-center">Status Bayar</th>
               <th className="py-1 px-2.5 border-r border-slate-200">Keterangan</th>
               <th className="py-1 px-2.5 border-r border-slate-200">User Buat</th>
               <th className="py-1 px-2.5 border-r border-slate-200">User Ubah</th>
@@ -299,13 +317,13 @@ export default function PurchaseInvoicesPage() {
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={14} className="py-12 text-center text-slate-400">
+                <td colSpan={15} className="py-12 text-center text-slate-400">
                   Memuat data pembelian...
                 </td>
               </tr>
             ) : paginatedPurchases.length === 0 ? (
               <tr>
-                <td colSpan={14} className="py-24 text-center text-slate-400">
+                <td colSpan={15} className="py-24 text-center text-slate-400">
                   No data
                 </td>
               </tr>
@@ -359,6 +377,21 @@ export default function PurchaseInvoicesPage() {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
+                    </td>
+                    <td className="py-1 px-2.5 border-r border-slate-200 text-center">
+                      {p.remaining_amount <= 0 && p.total_amount > 0 ? (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          Lunas
+                        </span>
+                      ) : p.paid_amount > 0 ? (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                          Sebagian
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                          Belum Lunas
+                        </span>
+                      )}
                     </td>
                     <td className="py-1 px-2.5 border-r border-slate-200 text-slate-600 max-w-xs truncate">
                       {p.notes || "-"}

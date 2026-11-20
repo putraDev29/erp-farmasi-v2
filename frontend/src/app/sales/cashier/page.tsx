@@ -124,14 +124,14 @@ export default function CashierListPage() {
       </button>
 
       {/* + Tambah button (Opens POS Kasir) */}
-      <Link
+      {/* <Link
         href="/pos"
         className="h-6 px-2.5 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95"
         title="Buka Kasir POS"
       >
         <Plus className="w-3.5 h-3.5 stroke-[3]" />
         <span>Tambah</span>
-      </Link>
+      </Link> */}
 
       {/* ✏️ Ubah button */}
       <button

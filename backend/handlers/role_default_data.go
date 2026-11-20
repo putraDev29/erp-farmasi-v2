@@ -63,11 +63,11 @@ var DefaultModules = []DefaultModuleDef{
 	{"Penjualan", "Aktif Harga pada Pesanan Jual, Penjualan & Kasir", false, false, false, false, false},
 	{"Penjualan", "History Harga Jual", false, false, false, false, false},
 	{"Penjualan", "Modul Kasir : Bisa Cetak Laporan Kasir", false, false, false, false, false},
-	{"Penjualan", "Modul Penjualan & Kasir : Bisa Jual di bawah Keuntungan Minimal (Aktif sesuai Pengaturan Umum : Tampil Konfirmasi Harga Jual lebih Kecil dari Harga Pokok)", false, false, false, false, false},
-	{"Penjualan", "Modul Penjualan & Kasir : Bisa Jual di bawah Harga Pokok (Aktif sesuai Pengaturan Umum : Tampil Konfirmasi Harga Jual lebih Kecil dari Harga Pokok)", false, false, false, false, false},
+	{"Penjualan", "Bisa Jual di bawah Keuntungan Minimal (Sesuai Pengaturan Umum)", false, false, false, false, false},
+	{"Penjualan", "Bisa Jual di bawah Harga Pokok (Sesuai Pengaturan Umum)", false, false, false, false, false},
 	{"Penjualan", "Modul Kasir : Aktif Pending Kasir", false, false, false, false, false},
 	{"Penjualan", "Kas Laci", false, false, true, false, false},
-	{"Penjualan", "Kunci Tgl Modul Daftar Penjualan, Kasir & Tombol Laporan Daftar Kasir : Tanggal hanya bisa 1 hari", false, false, false, false, false},
+	{"Penjualan", "Kunci Tanggal Penjualan & Kasir (Hanya 1 Hari)", false, false, false, false, false},
 	{"Penjualan", "Modul Kasir : Aktif Pembayaran Kredit", false, false, false, false, false},
 	{"Penjualan", "Bisa batal, menghapus detail item & transaksi pada Penjualan & Kasir", false, false, false, false, false},
 	{"Penjualan", "Pesanan Marketplace", false, true, false, false, false},
@@ -113,160 +113,152 @@ var DefaultModules = []DefaultModuleDef{
 	{"Akuntansi", "Modul Kas : Tidak dapat mengeluarkan Kas jika saldo kurang/minus", false, false, false, false, false},
 	{"Akuntansi", "Catatan Transaksi", true, true, true, false, false},
 
-	// 7. Laporan
-	{"Laporan", "Daftar Item", false, false, false, false, false},
-	{"Laporan", "Daftar Suplier", false, false, false, false, false},
-	{"Laporan", "Daftar Pelanggan", false, false, false, false, false},
-	{"Laporan", "Daftar Sales", false, false, false, false, false},
-	{"Laporan", "Laporan Pesanan Pembelian", false, false, false, false, false},
-	{"Laporan", "Laporan Pembelian", false, false, false, false, false},
-	{"Laporan", "Laporan Retur Pembelian", false, false, false, false, false},
-	{"Laporan", "Laporan Pembelian per Item", false, false, false, false, false},
-	{"Laporan", "Laporan Pesanan Penjualan", false, false, false, false, false},
-	{"Laporan", "Laporan Pesanan Penjualan Per Item", false, false, false, false, false},
-	{"Laporan", "Laporan Penjualan", false, false, false, false, false},
-	{"Laporan", "Laporan Retur Penjualan", false, false, false, false, false},
-	{"Laporan", "Laporan Penjualan per Item", false, false, false, false, false},
-	{"Laporan", "Laporan Retur Penjualan per Item", false, false, false, false, false},
-	{"Laporan", "Laporan Penjualan per Supplier", false, false, false, false, false},
-	{"Laporan", "Laporan Komisi Sales", false, false, false, false, false},
-	{"Laporan", "Laporan Pembayaran Kartu Bayar", false, false, false, false, false},
-	{"Laporan", "Laporan Grafik Penjualan Item Terbaik", false, false, false, false, false},
-	{"Laporan", "Laporan Grafik Penjualan Harian", false, false, false, false, false},
-	{"Laporan", "Laporan Grafik Penjualan Bulanan", false, false, false, false, false},
-	{"Laporan", "Laporan Grafik Kedatangan Pelanggan", false, false, false, false, false},
-	{"Laporan", "Laporan Penjualan Per Wilayah Pelanggan", false, false, false, false, false},
-	{"Laporan", "Laporan Point Pelanggan", false, false, false, false, false},
-	{"Laporan", "Laporan Pesanan Perakitan", false, false, false, false, false},
-	{"Laporan", "Laporan Proses Perakitan", false, false, false, false, false},
-	{"Laporan", "Laporan Proses Jadi", false, false, false, false, false},
-	{"Laporan", "Laporan Proses Perakitan Per Item", false, false, false, false, false},
-	{"Laporan", "Laporan Proses Jadi Perakitan Per Item", false, false, false, false, false},
-	{"Laporan", "Laporan Hutang Beredar", false, false, false, false, false},
-	{"Laporan", "Laporan Umur Hutang", false, false, false, false, false},
-	{"Laporan", "Laporan Buku Bantu Hutang", false, false, false, false, false},
-	{"Laporan", "Laporan Mutasi Hutang", false, false, false, false, false},
-	{"Laporan", "Laporan Buku Hutang Per Transaksi", false, false, false, false, false},
-	{"Laporan", "Laporan Pembayaran Hutang", false, false, false, false, false},
-	{"Laporan", "Laporan Piutang Beredar", false, false, false, false, false},
-	{"Laporan", "Laporan Piutang Per Sales", false, false, false, false, false},
-	{"Laporan", "Laporan Piutang Per Wilayah", false, false, false, false, false},
-	{"Laporan", "Laporan Umur Piutang", false, false, false, false, false},
-	{"Laporan", "Laporan Buku Pembantu Piutang", false, false, false, false, false},
-	{"Laporan", "Laporan Mutasi Piutang", false, false, false, false, false},
+	// 7. Laporan (Screenshots 1 & 3)
+	{"Laporan", "Laporan Buku Piutang Per Transaksi", false, false, false, false, false},
 	{"Laporan", "Laporan Pembayaran Piutang", false, false, false, false, false},
-	{"Laporan", "Laporan Kartu Stok", false, false, false, false, false},
 	{"Laporan", "Laporan Item Masuk", false, false, false, false, false},
 	{"Laporan", "Laporan Item Keluar", false, false, false, false, false},
-	{"Laporan", "Laporan Transfer Item", false, false, false, false, false},
-	{"Laporan", "Laporan Penyesuaian / Opname", false, false, false, false, false},
-	{"Laporan", "Laporan Nilai Persediaan", false, false, false, false, false},
-	{"Laporan", "Laporan Obat Kadaluarsa (ED)", false, false, false, false, false},
+	{"Laporan", "Laporan Item Opname", false, false, false, false, false},
+	{"Laporan", "Laporan Item Transfer", false, false, false, false, false},
+	{"Laporan", "Laporan Mutasi Item", false, false, false, false, false},
+	{"Laporan", "Laporan Item Tidak Laku", false, false, false, false, false},
+	{"Laporan", "Laporan Pesanan Item Transfer", false, false, false, false, false},
+	{"Laporan", "Laporan Item Serial", false, false, false, false, false},
+	{"Laporan", "Laporan Serial History", false, false, false, false, false},
+	{"Laporan", "Daftar Perkiraan", false, false, false, false, false},
 	{"Laporan", "Laporan Kas Masuk", false, false, false, false, false},
 	{"Laporan", "Laporan Kas Keluar", false, false, false, false, false},
 	{"Laporan", "Laporan Kas Transfer", false, false, false, false, false},
-	{"Laporan", "Laporan Jurnal Umum", false, false, false, false, false},
-	{"Laporan", "Laporan Buku Besar Akuntansi", false, false, false, false, false},
+	{"Laporan", "Laporan Deposit Pelanggan", false, false, false, false, false},
+	{"Laporan", "Laporan Deposit Supplier", false, false, false, false, false},
+	{"Laporan", "Laporan Laba Jual", false, false, false, false, false},
+	{"Laporan", "Laporan Analisa Laba Jual", false, false, false, false, false},
+	{"Laporan", "Laporan Daftar Jurnal", false, false, false, false, false},
+	{"Laporan", "Laporan Jurnal Tidak Seimbang", false, false, false, false, false},
+	{"Laporan", "Laporan Buku Besar", false, false, false, false, false},
 	{"Laporan", "Laporan Neraca Saldo", false, false, false, false, false},
-	{"Laporan", "Laporan Laba Rugi", false, false, false, false, false},
-	{"Laporan", "Laporan Neraca Standar", false, false, false, false, false},
-	{"Laporan", "Laporan Arus Kas", false, false, false, false, false},
-	{"Laporan", "Laporan Audit Trail BPOM", false, false, false, false, false},
-	{"Laporan", "Laporan Log Aktivitas User", false, false, false, false, false},
-	{"Laporan", "Laporan Ringkasan Eksekutif", false, false, false, false, false},
+	{"Laporan", "Laporan Neraca Lajur", false, false, false, false, false},
+	{"Laporan", "Laporan Neraca", false, false, false, false, false},
+	{"Laporan", "Laporan Laba/Rugi", false, false, false, false, false},
+	{"Laporan", "Laporan Laba/Rugi YTD", false, false, false, false, false},
+	{"Laporan", "Laporan Daftar Aset", false, false, false, false, false},
+	{"Laporan", "Laporan Penyusutan", false, false, false, false, false},
+	{"Laporan", "Laporan Grafik Kas", false, false, false, false, false},
 
-	// 8. Tampilan Menu
-	{"Tampilan Menu", "Menu Master Data", false, false, false, false, false},
-	{"Tampilan Menu", "Menu Pembelian", false, false, false, false, false},
-	{"Tampilan Menu", "Menu Penjualan", false, false, false, false, false},
-	{"Tampilan Menu", "Menu Perakitan", false, false, false, false, false},
-	{"Tampilan Menu", "Menu Persediaan", false, false, false, false, false},
-	{"Tampilan Menu", "Menu Akuntansi", false, false, false, false, false},
-	{"Tampilan Menu", "Menu Laporan", false, false, false, false, false},
-	{"Tampilan Menu", "Menu Pengaturan", false, false, false, false, false},
-	{"Tampilan Menu", "Menu E-commerce", false, false, false, false, false},
+	// 8. Tampilan Menu (Screenshot 4)
+	{"Tampilan Menu", "Tampil Menu Master", false, false, false, false, false},
+	{"Tampilan Menu", "Tampil Menu Pembelian", false, false, false, false, false},
+	{"Tampilan Menu", "Tampil Menu Penjualan", false, false, false, false, false},
+	{"Tampilan Menu", "Tampil Menu Perakitan", false, false, false, false, false},
+	{"Tampilan Menu", "Tampil Menu Persediaan", false, false, false, false, false},
+	{"Tampilan Menu", "Tampil Menu Akuntansi", false, false, false, false, false},
+	{"Tampilan Menu", "Tampil Menu Laporan", false, false, false, false, false},
+	{"Tampilan Menu", "Tampil Menu Pengaturan", false, false, false, false, false},
+	{"Tampilan Menu", "Tampil Menu Pengaturan E-commerce", false, false, false, false, false},
+	{"Tampilan Menu", "Tampil Grafik Pada Dashboard", false, false, false, false, false},
+	{"Tampilan Menu", "Langsung Tampil Modul Kasir", false, false, false, false, false},
+	{"Tampilan Menu", "Langsung Tampil Terminal Harga", false, false, false, false, false},
 
-	// 9. Pengaturan Lainnya
-	{"Pengaturan Lainnya", "Pengaturan Umum", false, true, false, false, false},
-	{"Pengaturan Lainnya", "Pengaturan Perusahaan", false, true, false, false, false},
-	{"Pengaturan Lainnya", "Pengaturan Mini Printer", false, true, false, false, false},
-	{"Pengaturan Lainnya", "Setting Nomor Transaksi", false, true, false, false, false},
-	{"Pengaturan Lainnya", "Setting Nomor Master", false, true, false, false, false},
-	{"Pengaturan Lainnya", "Log Aktivitas User", false, false, true, false, false},
-	{"Pengaturan Lainnya", "Daftar Modul Terbuka", false, false, true, false, false},
-	{"Pengaturan Lainnya", "Import Data Master & Item", true, false, false, false, false},
-	{"Pengaturan Lainnya", "Pengaturan Database (Backup & Restore)", true, false, false, false, false},
-	{"Pengaturan Lainnya", "Informasi Sistem & Lisensi", false, false, false, false, false},
+	// 9. Pengaturan Lainnya (Screenshot 8)
+	{"Pengaturan Lainnya", "Kunci Ubah Akun Transaksi", false, false, false, false, false},
+	{"Pengaturan Lainnya", "User Manajemen", false, false, true, false, false},
+	{"Pengaturan Lainnya", "Data Perusahaan", false, false, false, false, false},
+	{"Pengaturan Lainnya", "Pengaturan Umum", false, false, false, false, false},
+	{"Pengaturan Lainnya", "Pengaturan Nomor Transaksi dan Master", false, false, false, false, false},
+	{"Pengaturan Lainnya", "Import Data", false, false, false, false, false},
+	{"Pengaturan Lainnya", "Tampil Stok pada Semua modul Pencarian Item", false, false, false, false, false},
+	{"Pengaturan Lainnya", "Restore Database", false, false, false, false, false},
+	{"Pengaturan Lainnya", "Stok Minimum", false, false, false, false, false},
+	{"Pengaturan Lainnya", "User Bisa Akses Dept/Gudang Lain", false, false, false, false, false},
+	{"Pengaturan Lainnya", "Akses Log Aktivitas", false, false, true, false, false},
+	{"Pengaturan Lainnya", "Akses Tombol Buka Transaksi", false, false, false, false, false},
+	{"Pengaturan Lainnya", "Akses Daftar Modul Terbuka", false, false, true, false, false},
+	{"Pengaturan Lainnya", "Setting Payment Gateway (E-Money)", false, false, false, false, false},
+	{"Pengaturan Lainnya", "Setting PPOB (Pulsa, Listrik, dan lainnya)", false, false, false, false, false},
+	{"Pengaturan Lainnya", "Setting Marketplace (Omnichannel)", false, false, false, false, false},
+	{"Pengaturan Lainnya", "Setting API Sistem", false, false, false, false, false},
+	{"Pengaturan Lainnya", "Riwayat Serial", false, false, false, false, false},
 
-	// 10. Pengaturan E-commerce
-	{"Pengaturan E-commerce", "Koneksi Tokopedia", false, true, false, false, false},
-	{"Pengaturan E-commerce", "Koneksi Shopee", false, true, false, false, false},
-	{"Pengaturan E-commerce", "Koneksi TikTok Shop", false, true, false, false, false},
-	{"Pengaturan E-commerce", "Koneksi Blibli", false, true, false, false, false},
-	{"Pengaturan E-commerce", "Koneksi Lazada", false, true, false, false, false},
-	{"Pengaturan E-commerce", "Sinkronisasi Stok Otomatis", false, true, false, false, false},
-	{"Pengaturan E-commerce", "Sinkronisasi Pesanan Masuk", false, true, false, false, false},
+	// 10. Pengaturan E-commerce (Screenshot 9)
+	{"Pengaturan E-commerce", "Share Info", false, false, false, false, false},
+	{"Pengaturan E-commerce", "Share Content", false, false, false, false, false},
+	{"Pengaturan E-commerce", "Share Banner", false, false, false, false, false},
+	{"Pengaturan E-commerce", "Share Top Collection", false, false, false, false, false},
+	{"Pengaturan E-commerce", "Share Label", false, false, false, false, false},
+	{"Pengaturan E-commerce", "Share Special Product", false, false, false, false, false},
+	{"Pengaturan E-commerce", "Share Blog", false, false, false, false, false},
+	{"Pengaturan E-commerce", "Share Kategori", false, false, false, false, false},
+	{"Pengaturan E-commerce", "Share Special Merek", false, false, false, false, false},
+	{"Pengaturan E-commerce", "Share Service", false, false, false, false, false},
+	{"Pengaturan E-commerce", "Share Item", false, false, false, false, false},
+	{"Pengaturan E-commerce", "Share Subscriber", false, false, false, false, false},
 
-	// 11. Notifikasi
-	{"Notifikasi", "Notifikasi Stok Minimum Obat", false, false, false, false, false},
-	{"Notifikasi", "Notifikasi Obat Mendekati Expired (ED)", false, false, false, false, false},
-	{"Notifikasi", "Notifikasi Jatuh Tempo Pembayaran Hutang Supplier", false, false, false, false, false},
-	{"Notifikasi", "Notifikasi Jatuh Tempo Tagihan Piutang Pelanggan", false, false, false, false, false},
-	{"Notifikasi", "Notifikasi Pesanan Penjualan Baru Masuk", false, false, false, false, false},
+	// 11. Notifikasi (Screenshot 2)
+	{"Notifikasi", "Notifikasi Pembelian", false, false, false, false, false},
+	{"Notifikasi", "Notifikasi Hutang", false, false, false, false, false},
+	{"Notifikasi", "Notifikasi Order Jual", false, false, false, false, false},
+	{"Notifikasi", "Notifikasi Jual", false, false, false, false, false},
+	{"Notifikasi", "Notifikasi Piutang", false, false, false, false, false},
+	{"Notifikasi", "Notifikasi Kas Masuk", false, false, false, false, false},
+	{"Notifikasi", "Notifikasi Kas Keluar", false, false, false, false, false},
+	{"Notifikasi", "Notifikasi Verifikasi Pelanggan", false, false, false, false, false},
 }
 
 // EnsureDefaultRolePermissions creates default module permissions for a role
 func EnsureDefaultRolePermissions(roleID uuid.UUID, roleName string) []models.RoleModulePermission {
-	var count int64
-	database.DB.Model(&models.RoleModulePermission{}).Where("role_id = ?", roleID).Count(&count)
-	if count > 0 {
-		var list []models.RoleModulePermission
-		database.DB.Where("role_id = ?", roleID).Order("category ASC, id ASC").Find(&list)
-		return list
+	var existing []models.RoleModulePermission
+	database.DB.Where("role_id = ?", roleID).Find(&existing)
+
+	existingMap := make(map[string]bool)
+	for _, p := range existing {
+		existingMap[p.Category+"::"+p.Module] = true
 	}
 
 	isAdmin := strings.ToUpper(roleName) == "ADMINISTRATOR" || strings.ToUpper(roleName) == "SUPERADMIN"
 	isKasir := strings.ToUpper(roleName) == "KASIR"
 
-	var perms []models.RoleModulePermission
+	var missing []models.RoleModulePermission
 	for _, def := range DefaultModules {
-		p := models.RoleModulePermission{
-			RoleID:   roleID,
-			Category: def.Category,
-			Module:   def.Module,
-		}
-
-		if isAdmin {
-			p.CanOpen = true
-			p.CanCreate = def.HasCreate
-			p.CanEdit = def.HasEdit
-			p.CanDelete = def.HasDelete
-			p.LockTransactionNumber = def.HasLockTx
-			p.LockDate = def.HasLockDate
-		} else if isKasir {
-			// Kasir default access: Penjualan, Kasir, Cek Point, Pelanggan, etc.
-			if def.Category == "Penjualan" {
+		key := def.Category + "::" + def.Module
+		if !existingMap[key] {
+			p := models.RoleModulePermission{
+				RoleID:   roleID,
+				Category: def.Category,
+				Module:   def.Module,
+			}
+			if isAdmin {
 				p.CanOpen = true
-				if def.Module == "Penjualan" || def.Module == "Pesanan Penjualan" {
-					p.CanCreate = true
-					p.CanEdit = true
-				}
-			} else if def.Category == "Master Data" && (def.Module == "Daftar Item" || def.Module == "Pelanggan" || def.Module == "Kartu Stok") {
-				p.CanOpen = true
-			} else if def.Category == "Laporan" && (def.Module == "Laporan Penjualan" || def.Module == "Laporan Grafik Penjualan Harian") {
-				p.CanOpen = true
-			} else if def.Category == "Tampilan Menu" {
-				if def.Module == "Menu Penjualan" || def.Module == "Menu Master Data" || def.Module == "Menu Laporan" {
+				p.CanCreate = def.HasCreate
+				p.CanEdit = def.HasEdit
+				p.CanDelete = def.HasDelete
+				p.LockTransactionNumber = def.HasLockTx
+				p.LockDate = def.HasLockDate
+			} else if isKasir {
+				if def.Category == "Penjualan" {
 					p.CanOpen = true
+					if def.Module == "Penjualan" || def.Module == "Pesanan Penjualan" {
+						p.CanCreate = true
+						p.CanEdit = true
+					}
+				} else if def.Category == "Master Data" && (def.Module == "Daftar Item" || def.Module == "Pelanggan" || def.Module == "Kartu Stok") {
+					p.CanOpen = true
+				} else if def.Category == "Laporan" && (def.Module == "Laporan Laba Jual" || def.Module == "Laporan Mutasi Item") {
+					p.CanOpen = true
+				} else if def.Category == "Tampilan Menu" {
+					if def.Module == "Tampil Menu Penjualan" || def.Module == "Tampil Menu Master" || def.Module == "Tampil Menu Laporan" {
+						p.CanOpen = true
+					}
 				}
 			}
+			missing = append(missing, p)
 		}
-
-		perms = append(perms, p)
 	}
 
-	if len(perms) > 0 {
-		database.DB.Create(&perms)
+	if len(missing) > 0 {
+		database.DB.Create(&missing)
 	}
-	return perms
+
+	var finalList []models.RoleModulePermission
+	database.DB.Where("role_id = ?", roleID).Order("category ASC, id ASC").Find(&finalList)
+	return finalList
 }

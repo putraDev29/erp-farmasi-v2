@@ -57,6 +57,7 @@ func MigrateDB(db *gorm.DB) error {
 	// Enable uuid-ossp or pgcrypto extension
 	db.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";")
 	db.Exec("CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";")
+	db.Exec("ALTER TABLE role_module_permissions ALTER COLUMN module TYPE VARCHAR(255);")
 
 	err := db.AutoMigrate(
 		// Core & IAM

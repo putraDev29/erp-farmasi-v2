@@ -14,7 +14,6 @@ import {
   Shield,
   Search,
   Sparkles,
-  Scale,
 } from "lucide-react";
 import { useAuthStore } from "@/lib/auth-store";
 
@@ -109,12 +108,27 @@ export const Header: React.FC<{ onToggleSidebar: () => void }> = ({ onToggleSide
   } else if (pathname.includes("/pos")) {
     pageTitle = "Kasir POS & Resep";
     pageCategory = "Transaksi Kasir";
+  } else if (pathname.includes("/purchasing/orders/new")) {
+    pageTitle = "Pesanan Pembelian Baru (PO)";
+    pageCategory = "Pembelian";
+    hasBack = true;
+    backHref = "/purchasing/orders";
   } else if (pathname.includes("/purchasing/orders")) {
     pageTitle = "Pesanan Pembelian (PO)";
     pageCategory = "Pembelian";
+  } else if (pathname.includes("/purchasing/invoices/new")) {
+    pageTitle = "Faktur Penerimaan Barang Baru";
+    pageCategory = "Pembelian";
+    hasBack = true;
+    backHref = "/purchasing/invoices";
   } else if (pathname.includes("/purchasing/invoices")) {
     pageTitle = "Faktur Penerimaan Barang";
     pageCategory = "Pembelian";
+  } else if (pathname.includes("/purchasing/payments/new")) {
+    pageTitle = "Bayar Hutang Baru";
+    pageCategory = "Pembelian";
+    hasBack = true;
+    backHref = "/purchasing/payments";
   } else if (pathname.includes("/purchasing/payments")) {
     pageTitle = "Pembayaran Hutang Pemasok";
     pageCategory = "Keuangan";
@@ -171,13 +185,14 @@ export const Header: React.FC<{ onToggleSidebar: () => void }> = ({ onToggleSide
   const initialLetter = (user?.full_name || user?.username || "David").charAt(0).toUpperCase();
 
   return (
-    <header className="h-11 sm:h-12 bg-white/95 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-30 flex items-center justify-between px-3 sm:px-6 select-none shadow-[0_1px_3px_rgba(0,0,0,0.02)] shrink-0">
+    <header className="h-13 sm:h-14 bg-white/95 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-30 flex items-center justify-between px-3 sm:px-6 select-none shadow-[0_1px_3px_rgba(0,0,0,0.02)] shrink-0 py-1.5">
       {/* Left: Hamburger + Modern Breadcrumb Title */}
       <div className="flex items-center gap-2.5 min-w-0">
         <button
           onClick={onToggleSidebar}
-          className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 md:hidden transition shrink-0"
+          className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition shrink-0"
           aria-label="Toggle Menu"
+          title="Buka / Tutup Sidebar Menu"
         >
           <Menu className="w-5 h-5" />
         </button>
@@ -191,31 +206,35 @@ export const Header: React.FC<{ onToggleSidebar: () => void }> = ({ onToggleSide
             >
               <ChevronLeft className="w-5 h-5" />
             </Link>
-            <div className="min-w-0">
-              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
-                {pageCategory}
-              </span>
-              <h1 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight truncate">
+            <div className="min-w-0 flex flex-col justify-center py-0.5">
+              <Link
+                href={backHref}
+                className="text-[10px] uppercase font-extrabold text-slate-400 hover:text-emerald-700 tracking-wider block transition leading-tight pt-0.5"
+                title="Kembali ke halaman sebelumnya"
+              >
+                {pageCategory} &bull; Kembali
+              </Link>
+              <h1 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight truncate leading-snug mt-0.5">
                 {pageTitle}
               </h1>
             </div>
           </div>
         ) : (
-          <div className="min-w-0">
-            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+          <div className="min-w-0 flex flex-col justify-center py-0.5">
+            <span className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider block leading-tight pt-0.5">
               {pageCategory}
             </span>
-            <h1 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight truncate">
+            <h1 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight truncate leading-snug mt-0.5">
               {pageTitle}
             </h1>
           </div>
         )}
       </div>
 
-      {/* Right Controls: Branch Badge, Quick POS Button, Bell, User Profile */}
+      {/* Right Controls: Branch Badge, Bell, User Profile */}
       <div className="flex items-center gap-2.5 sm:gap-4 shrink-0">
         {/* Branch / Depo Badge with Live Dot */}
-        <div className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-full bg-slate-100 border border-slate-200/80 text-xs">
+        <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-100 border border-slate-200/80 text-xs">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
           <span className="font-semibold text-slate-700">APOTEK BERKAT PURNAMA [UTAMA]</span>
           <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200/60 uppercase">
@@ -223,19 +242,10 @@ export const Header: React.FC<{ onToggleSidebar: () => void }> = ({ onToggleSide
           </span>
         </div>
 
-        {/* Quick Shortcut to Kasir & POS */}
-        <Link
-          href="/pos"
-          className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#00a86b] hover:bg-[#00925d] text-white text-xs font-bold rounded-lg shadow-sm transition active:scale-95"
-        >
-          <Scale className="w-3.5 h-3.5" />
-          <span>Buka Kasir</span>
-        </Link>
-
         {/* Notification Bell */}
         <div className="relative cursor-pointer p-1.5 rounded-lg hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition">
           <Bell className="w-4 h-4" />
-          <span className="absolute 1 top-1 right-1 w-2 h-2 bg-rose-500 rounded-full ring-2 ring-white"></span>
+          <span className="absolute top-1 right-1 w-2 h-2 bg-rose-500 rounded-full ring-2 ring-white"></span>
         </div>
 
         {/* User Profile Pill & Dropdown */}
