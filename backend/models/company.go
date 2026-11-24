@@ -11,8 +11,13 @@ type Company struct {
 	Phone     string `gorm:"size:30" json:"phone"`
 	Email     string `gorm:"size:100" json:"email"`
 	Currency  string `gorm:"size:10;default:'IDR'" json:"currency"`
-	LogoURL   string `gorm:"size:255" json:"logo_url"`
-	IsActive  bool   `gorm:"default:true" json:"is_active"`
+	LogoURL      string `gorm:"type:text" json:"logo_url"`
+	StampURL     string `gorm:"type:text" json:"stamp_url"`
+	SignatureURL string `gorm:"type:text" json:"signature_url"`
+	APJName      string `gorm:"size:150" json:"apj_name"`
+	APJSIPA      string `gorm:"size:150" json:"apj_sipa"`
+	APJPhone     string `gorm:"size:50" json:"apj_phone"`
+	IsActive     bool   `gorm:"default:true" json:"is_active"`
 
 	Branches []Branch `gorm:"foreignKey:CompanyID" json:"branches,omitempty"`
 }

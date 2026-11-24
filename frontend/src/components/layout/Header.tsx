@@ -261,7 +261,7 @@ export const Header: React.FC<{ onToggleSidebar: () => void }> = ({ onToggleSide
               <span className="text-xs font-bold text-slate-800 block leading-tight">
                 {user?.full_name?.split(" ")[0] || "David"}
               </span>
-              <span className="text-[9px] font-bold text-purple-700 uppercase block">
+              <span className="text-[9px] font-bold text-emerald-700 uppercase block">
                 {user?.roles?.[0] || "SUPER ADMIN"}
               </span>
             </div>
@@ -274,7 +274,7 @@ export const Header: React.FC<{ onToggleSidebar: () => void }> = ({ onToggleSide
               <div className="px-3.5 py-2 border-b border-slate-100">
                 <p className="font-bold text-slate-800 text-xs">{user?.full_name || "David"}</p>
                 <p className="text-[11px] text-slate-400 font-mono mt-0.5">{user?.username || "admin"}</p>
-                <span className="inline-block mt-1 bg-purple-100 text-purple-800 font-semibold text-[9px] px-1.5 py-0.2 rounded border border-purple-200 uppercase">
+                <span className="inline-block mt-1 bg-emerald-50 text-emerald-800 font-semibold text-[9px] px-1.5 py-0.2 rounded border border-emerald-200 uppercase">
                   {user?.roles?.[0] || "SUPER ADMIN"}
                 </span>
               </div>

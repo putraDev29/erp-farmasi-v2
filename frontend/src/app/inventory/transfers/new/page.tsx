@@ -342,7 +342,6 @@ export default function NewTransferPage() {
             onClick={() => setItemSearchOpen(true)}
             className="h-6 px-2.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs"
           >
-            <Plus className="w-3.5 h-3.5" />
             <span>+ Item</span>
           </button>
           <button

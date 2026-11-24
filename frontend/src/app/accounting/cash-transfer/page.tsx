@@ -15,6 +15,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
 export default function CashTransferPage() {
   const router = useRouter();
@@ -286,18 +287,13 @@ export default function CashTransferPage() {
 
               <div>
                 <label className="block text-slate-600 font-semibold mb-0.5">Dari Akun :</label>
-                <select
+                <SearchableAccountSelect
+                  accounts={cashBankAccounts}
                   value={selectedAccountFilter}
-                  onChange={(e) => setSelectedAccountFilter(e.target.value)}
-                  className="w-full h-6 px-1.5 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500"
-                >
-                  <option value="all">Semua Akun Kas / Bank</option>
-                  {cashBankAccounts.map((a: any) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} - {a.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setSelectedAccountFilter(val || "all")}
+                  placeholder="Semua Akun Kas / Bank"
+                  allowClear={true}
+                />
               </div>
 
               <div>
@@ -462,18 +458,12 @@ export default function CashTransferPage() {
             <div className="grid grid-cols-3 items-center gap-2">
               <label className="text-slate-600 font-semibold">Dari Akun :</label>
               <div className="col-span-2">
-                <select
+                <SearchableAccountSelect
+                  accounts={cashBankAccounts}
                   value={dariAkunId}
-                  onChange={(e) => setDariAkunId(e.target.value)}
-                  className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-[11px] focus:outline-none focus:border-sky-500"
-                >
-                  <option value="">Select...</option>
-                  {cashBankAccounts.map((a: any) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} - {a.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setDariAkunId(val)}
+                  placeholder="Select / Cari Dari Akun..."
+                />
               </div>
             </div>
 
@@ -494,18 +484,12 @@ export default function CashTransferPage() {
             <div className="grid grid-cols-3 items-center gap-2">
               <label className="text-slate-600 font-semibold">Transfer Ke :</label>
               <div className="col-span-2">
-                <select
+                <SearchableAccountSelect
+                  accounts={cashBankAccounts}
                   value={keAkunId}
-                  onChange={(e) => setKeAkunId(e.target.value)}
-                  className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-[11px] focus:outline-none focus:border-sky-500"
-                >
-                  <option value="">Select...</option>
-                  {cashBankAccounts.map((a: any) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} - {a.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setKeAkunId(val)}
+                  placeholder="Select / Cari Transfer Ke Akun..."
+                />
               </div>
             </div>
 

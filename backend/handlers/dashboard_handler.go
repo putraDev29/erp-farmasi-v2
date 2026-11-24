@@ -174,6 +174,111 @@ func (h *DashboardHandler) GetSummary(c *gin.Context) {
 		})
 	}
 
+	// 12. Data Barang Pembelian yang Masih Proses atau Masih Dalam Pengiriman
+	type InProgressPurchaseItem struct {
+		ID            uuid.UUID  `json:"id"`
+		DocType       string     `json:"doc_type"` // "PO" or "FAKTUR"
+		DocNo         string     `json:"doc_no"`
+		DocID         uuid.UUID  `json:"doc_id"`
+		Date          time.Time  `json:"date"`
+		ExpectedDate  *time.Time `json:"expected_date,omitempty"`
+		SupplierName  string     `json:"supplier_name"`
+		WarehouseName string     `json:"warehouse_name"`
+		ProductID     uuid.UUID  `json:"product_id"`
+		ProductCode   string     `json:"product_code"`
+		ProductName   string     `json:"product_name"`
+		UnitName      string     `json:"unit_name"`
+		OrderedQty    float64    `json:"ordered_qty"`
+		ReceivedQty   float64    `json:"received_qty"`
+		PendingQty    float64    `json:"pending_qty"`
+		UnitPrice     float64    `json:"unit_price"`
+		TotalAmount   float64    `json:"total_amount"`
+		Status        string     `json:"status"` // "DALAM_PENGIRIMAN", "MENUNGGU_PENERIMAAN", "VERIFIKASI_GUDANG", "DIPROSES", "SEBAGIAN_DIKIRIM"
+		StatusLabel   string     `json:"status_label"`
+	}
+
+	var inProgressItems []InProgressPurchaseItem
+	uniqueDocMap := make(map[string]bool)
+	var totalPendingItems int
+	var totalPendingAmount float64
+	var inTransitCount int
+	var warehouseVerificationCount int
+
+	// 12. Ambil dari Faktur Pembelian (Purchase Invoices) yang sedang menunggu penerimaan / verifikasi fisik gudang (Alur Resmi)
+	var inProgressPurchases []models.Purchase
+	database.DB.Model(&models.Purchase{}).
+		Where("company_id = ? AND status != 'CANCELLED' AND verification_status IN ('MENUNGGU_PENERIMAAN', 'DIPERIKSA_GUDANG', 'VERIFIKASI_GUDANG')", companyID).
+		Preload("Supplier").
+		Preload("Warehouse").
+		Preload("Items.Product").
+		Preload("Items.Unit").
+		Order("date DESC").
+		Limit(100).
+		Find(&inProgressPurchases)
+
+	for _, p := range inProgressPurchases {
+		suppName := "Supplier / Distributor PBF"
+		if p.Supplier != nil && p.Supplier.Name != "" {
+			suppName = p.Supplier.Name
+		}
+		whName := "Gudang Utama Farmasi"
+		if p.Warehouse != nil && p.Warehouse.Name != "" {
+			whName = p.Warehouse.Name
+		}
+
+		st := "MENUNGGU_PENERIMAAN"
+		stLabel := "Menunggu Kedatangan Barang PBF"
+		if p.VerificationStatus == "DIPERIKSA_GUDANG" || p.VerificationStatus == "VERIFIKASI_GUDANG" {
+			st = "VERIFIKASI_GUDANG"
+			stLabel = "Pemeriksaan Fisik Gudang"
+		}
+
+		for _, it := range p.Items {
+			totalPendingItems++
+			itemTotal := it.Qty*it.UnitPrice - it.Discount
+			totalPendingAmount += itemTotal
+
+			if st == "VERIFIKASI_GUDANG" {
+				warehouseVerificationCount++
+			} else {
+				inTransitCount++
+			}
+
+			prodName := "Item Obat"
+			prodCode := "-"
+			if it.Product != nil {
+				prodName = it.Product.Name
+				prodCode = it.Product.Code
+			}
+			unitName := "PCS"
+			if it.Unit != nil && it.Unit.Name != "" {
+				unitName = it.Unit.Name
+			}
+
+			inProgressItems = append(inProgressItems, InProgressPurchaseItem{
+				ID:            it.ID,
+				DocType:       "FAKTUR",
+				DocNo:         p.InvoiceNo,
+				DocID:         p.ID,
+				Date:          p.Date,
+				SupplierName:  suppName,
+				WarehouseName: whName,
+				ProductID:     it.ProductID,
+				ProductCode:   prodCode,
+				ProductName:   prodName,
+				UnitName:      unitName,
+				OrderedQty:    it.Qty,
+				ReceivedQty:   0,
+				PendingQty:    it.Qty,
+				UnitPrice:     it.UnitPrice,
+				TotalAmount:   itemTotal,
+				Status:        st,
+				StatusLabel:   stLabel,
+			})
+		}
+		uniqueDocMap[p.InvoiceNo] = true
+	}
+
 	utils.SendSuccess(c, "Ringkasan data dashboard eksekutif", gin.H{
 		"sales_summary": gin.H{
 			"total_amount": totalSalesAmount,
@@ -182,6 +287,14 @@ func (h *DashboardHandler) GetSummary(c *gin.Context) {
 		"purchase_summary": gin.H{
 			"total_amount": totalPurchasesAmount,
 			"total_count":  purchasesCount,
+		},
+		"in_progress_purchases": gin.H{
+			"total_items":                  totalPendingItems,
+			"total_docs":                   len(uniqueDocMap),
+			"total_amount":                 totalPendingAmount,
+			"in_transit_count":             inTransitCount,
+			"warehouse_verification_count": warehouseVerificationCount,
+			"items":                        inProgressItems,
 		},
 		"financials": gin.H{
 			"cash_bank_balance":   cashBankBalance,

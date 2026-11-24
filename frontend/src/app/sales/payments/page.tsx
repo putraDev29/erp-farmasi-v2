@@ -14,8 +14,11 @@ import {
   FileSpreadsheet,
   AlertCircle,
   ChevronLeft as BackIcon,
+  Printer,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { sortTableData } from "@/components/common/TableSortSelect";
+import { RiwayatPembayaranSalesModal } from "@/components/sales/RiwayatPembayaranSalesModal";
 
 export default function CustomerPaymentsPage() {
   const router = useRouter();
@@ -25,7 +28,8 @@ export default function CustomerPaymentsPage() {
   const [keyword, setKeyword] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [sortBy, setSortBy] = useState("Tanggal");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
+  const [sortBy, setSortBy] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   // Selection & Pagination
@@ -35,6 +39,7 @@ export default function CustomerPaymentsPage() {
 
   // Modals state
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [printModalOpen, setPrintModalOpen] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Queries
@@ -44,16 +49,12 @@ export default function CustomerPaymentsPage() {
       keyword,
       startDate,
       endDate,
-      sortBy,
-      sortDir,
     ],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (keyword) params.append("search", keyword);
       if (startDate) params.append("start_date", startDate);
       if (endDate) params.append("end_date", endDate);
-      params.append("sort_by", sortBy);
-      params.append("sort_dir", sortDir);
 
       const res = await api.get(`/sales/payments?${params.toString()}`);
       return res.data?.data || [];
@@ -76,8 +77,13 @@ export default function CustomerPaymentsPage() {
     },
   });
 
-  const totalPages = Math.max(1, Math.ceil(payments.length / pageSize));
-  const paginatedPayments = payments.slice((page - 1) * pageSize, page * pageSize);
+  const sortedPayments = sortTableData(payments, sortOption, {
+    getCode: (p: any) => p.payment_no,
+    getName: (p: any) => p.customer?.name || p.sales_invoice?.customer?.name,
+    getDate: (p: any) => p.created_at || p.payment_date,
+  });
+  const totalPages = Math.max(1, Math.ceil(sortedPayments.length / pageSize));
+  const paginatedPayments = sortedPayments.slice((page - 1) * pageSize, page * pageSize);
 
   const renderToolbar = (isTop: boolean = false) => (
     <div className="flex items-center justify-between gap-1.5 py-1 flex-wrap">
@@ -140,6 +146,24 @@ export default function CustomerPaymentsPage() {
         >
           <Pencil className="w-3 h-3 stroke-[2.5]" />
           <span>Ubah</span>
+        </button>
+
+        {/* 💵 Faktur / Bukti Pembayaran */}
+        <button
+          type="button"
+          onClick={() => {
+            if (!selectedId) {
+              alert("Silakan pilih baris pembayaran piutang terlebih dahulu.");
+              return;
+            }
+            setPrintModalOpen(true);
+          }}
+          disabled={!selectedId}
+          className="h-6 px-2.5 bg-white hover:bg-emerald-50 border border-emerald-500 text-emerald-700 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40 cursor-pointer"
+          title="Lihat Faktur Pembayaran Piutang"
+        >
+          <Printer className="w-3 h-3 text-emerald-600" />
+          <span>Faktur Pembayaran</span>
         </button>
 
         {/* 🗑️ Hapus button */}
@@ -231,26 +255,20 @@ export default function CustomerPaymentsPage() {
           </div>
           <div>
             <label className="block text-slate-600 font-semibold mb-0.5">Urut Berdasar :</label>
-            <div className="flex gap-1">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-emerald-500"
-              >
-                <option value="Tanggal">Tanggal</option>
-                <option value="No Transaksi">No Transaksi</option>
-                <option value="Pelanggan">Pelanggan</option>
-                <option value="Total">Total</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => setSortDir((prev) => (prev === "asc" ? "desc" : "asc"))}
-                className="h-6 w-6 flex items-center justify-center border border-slate-300 rounded hover:bg-slate-50 text-slate-600 shrink-0"
-                title={`Urutan: ${sortDir.toUpperCase()}`}
-              >
-                <ArrowUpDown className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            <select
+              value={sortOption}
+              onChange={(e) => {
+                setSortOption(e.target.value);
+                setPage(1);
+              }}
+              className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-emerald-500 font-medium shadow-2xs truncate cursor-pointer"
+            >
+              <option value="created_at_desc">1. Urutan sesuai waktu input paling atas</option>
+              <option value="code_asc">2. Kode (A - Z)</option>
+              <option value="code_desc">3. Kode (Z - A)</option>
+              <option value="name_asc">4. Nama (A - Z)</option>
+              <option value="name_desc">5. Nama (Z - A)</option>
+            </select>
           </div>
         </div>
       </div>
@@ -301,16 +319,31 @@ export default function CustomerPaymentsPage() {
                     }`}
                   >
                     <td className="py-0.5 px-2 border-r border-slate-100 text-center">
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedId(p.id);
-                          router.push("/sales/payments/new");
-                        }}
-                        className="text-sky-600 hover:text-sky-800"
-                      >
-                        <Pencil className="w-3 h-3" />
-                      </button>
+                      <div className="flex items-center justify-center gap-1">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedId(p.id);
+                            router.push("/sales/payments/new");
+                          }}
+                          className="text-sky-600 hover:text-sky-800 p-0.5"
+                          title="Ubah"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedId(p.id);
+                            setPrintModalOpen(true);
+                          }}
+                          className="text-emerald-600 hover:text-emerald-800 p-0.5"
+                          title="Lihat Faktur Pembayaran"
+                        >
+                          <Printer className="w-3 h-3" />
+                        </button>
+                      </div>
                     </td>
                     <td className="py-0.5 px-2.5 border-r border-slate-100 font-semibold text-emerald-700">
                       {p.payment_no}
@@ -378,6 +411,20 @@ export default function CustomerPaymentsPage() {
           </div>
         </div>
       )}
+
+      {/* 7. MODAL CETAK BUKTI BAYAR & RIWAYAT */}
+      {(() => {
+        const selectedPayment = payments.find((p: any) => p.id === selectedId);
+        return (
+          <RiwayatPembayaranSalesModal
+            isOpen={printModalOpen}
+            onClose={() => setPrintModalOpen(false)}
+            paymentId={selectedId}
+            orderId={selectedPayment?.details?.find((d: any) => d.sales_order_id)?.sales_order_id}
+            saleId={selectedPayment?.details?.find((d: any) => d.sale_id)?.sale_id}
+          />
+        );
+      })()}
     </div>
   );
 }

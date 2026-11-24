@@ -13,19 +13,33 @@ import {
   ChevronRight,
   ArrowUpDown,
   ChevronLeft as BackIcon,
+  FileCheck2,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { sortTableData } from "@/components/common/TableSortSelect";
+import { useAuthStore } from "@/lib/auth-store";
+import { AlurVerifikasiReturPenjualanModal } from "@/components/sales/AlurVerifikasiReturPenjualanModal";
 
 export default function SalesReturnsPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
+
+  const isGudang = Boolean(
+    user?.roles?.some((r: any) => {
+      const roleName = (typeof r === "string" ? r : r?.name || "").toUpperCase();
+      return roleName.includes("GUDANG");
+    }) || user?.username?.toLowerCase() === "gudang"
+  );
+  const isAdmin = !isGudang;
 
   // Filters matching Ketoko Spec (Image 4)
   const [keyword, setKeyword] = useState("");
   const [selectedWarehouse, setSelectedWarehouse] = useState("all");
   const [startDate, setStartDate] = useState("2026-11-01");
   const [endDate, setEndDate] = useState("2026-11-30");
-  const [sortBy, setSortBy] = useState("Tanggal");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
+  const [sortBy, setSortBy] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   // Selection & Pagination
@@ -36,6 +50,8 @@ export default function SalesReturnsPage() {
   // Modals & Menu
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [isAlurModalOpen, setIsAlurModalOpen] = useState(false);
+  const [selectedReturnForAlurId, setSelectedReturnForAlurId] = useState<string | null>(null);
 
   // Queries
   const { data: returns = [], isLoading } = useQuery({
@@ -45,16 +61,12 @@ export default function SalesReturnsPage() {
       selectedWarehouse,
       startDate,
       endDate,
-      sortBy,
-      sortDir,
     ],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (keyword) params.append("search", keyword);
       if (startDate) params.append("start_date", startDate);
       if (endDate) params.append("end_date", endDate);
-      params.append("sort_by", sortBy);
-      params.append("sort_dir", sortDir);
 
       const res = await api.get(`/sales/returns?${params.toString()}`);
       return res.data?.data || [];
@@ -81,8 +93,13 @@ export default function SalesReturnsPage() {
     },
   });
 
-  const totalPages = Math.max(1, Math.ceil(returns.length / pageSize));
-  const paginatedReturns = returns.slice((page - 1) * pageSize, page * pageSize);
+  const sortedReturns = sortTableData(returns, sortOption, {
+    getCode: (r: any) => r.return_no,
+    getName: (r: any) => r.customer?.name,
+    getDate: (r: any) => r.created_at || r.return_date,
+  });
+  const totalPages = Math.max(1, Math.ceil(sortedReturns.length / pageSize));
+  const paginatedReturns = sortedReturns.slice((page - 1) * pageSize, page * pageSize);
 
   const renderToolbar = () => (
     <div className="flex items-center gap-1.5 py-1">
@@ -157,6 +174,25 @@ export default function SalesReturnsPage() {
       >
         <Pencil className="w-3 h-3 stroke-[2.5]" />
         <span>Ubah</span>
+      </button>
+
+      {/* 📋 Alur Verifikasi Retur */}
+      <button
+        type="button"
+        disabled={!selectedId}
+        onClick={() => {
+          if (!selectedId) {
+            alert("Silakan pilih baris retur penjualan terlebih dahulu.");
+            return;
+          }
+          setSelectedReturnForAlurId(selectedId);
+          setIsAlurModalOpen(true);
+        }}
+        className="h-6 px-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-bold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-40 cursor-pointer"
+        title="Buka Alur Terpadu Verifikasi Retur Penjualan (Pemeriksaan Fisik, Approval, Restock & Jurnal)"
+      >
+        <FileCheck2 className="w-3.5 h-3.5" />
+        <span>Alur Verifikasi</span>
       </button>
 
       {/* 🗑️ Hapus button (Red) */}
@@ -247,26 +283,20 @@ export default function SalesReturnsPage() {
           </div>
           <div>
             <label className="block text-slate-600 font-semibold mb-0.5">Urut Berdasar :</label>
-            <div className="flex gap-1">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-emerald-500"
-              >
-                <option value="Tanggal">Tanggal</option>
-                <option value="No Transaksi">No Transaksi</option>
-                <option value="Pelanggan">Pelanggan</option>
-                <option value="Total">Total</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => setSortDir((prev) => (prev === "asc" ? "desc" : "asc"))}
-                className="h-6 w-6 flex items-center justify-center border border-slate-300 rounded hover:bg-slate-50 text-slate-600 shrink-0"
-                title={`Urutan: ${sortDir.toUpperCase()}`}
-              >
-                <ArrowUpDown className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            <select
+              value={sortOption}
+              onChange={(e) => {
+                setSortOption(e.target.value);
+                setPage(1);
+              }}
+              className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-emerald-500 font-medium shadow-2xs truncate cursor-pointer"
+            >
+              <option value="created_at_desc">1. Urutan sesuai waktu input paling atas</option>
+              <option value="code_asc">2. Kode (A - Z)</option>
+              <option value="code_desc">3. Kode (Z - A)</option>
+              <option value="name_asc">4. Nama (A - Z)</option>
+              <option value="name_desc">5. Nama (Z - A)</option>
+            </select>
           </div>
         </div>
       </div>
@@ -282,6 +312,7 @@ export default function SalesReturnsPage() {
               <th className="py-0.5 px-2.5 border-r border-slate-200">No Transaksi</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">Tanggal</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">Nama</th>
+              <th className="py-0.5 px-2.5 border-r border-slate-200 text-center">Status Alur</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">Pajak</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200 text-right">Total</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">Keterangan</th>
@@ -292,13 +323,13 @@ export default function SalesReturnsPage() {
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={8} className="text-center py-12 text-slate-400">
+                <td colSpan={9} className="text-center py-12 text-slate-400">
                   Memuat data retur penjualan...
                 </td>
               </tr>
             ) : paginatedReturns.length === 0 ? (
               <tr>
-                <td colSpan={8} className="text-center py-20 text-slate-400">
+                <td colSpan={9} className="text-center py-20 text-slate-400">
                   No data
                 </td>
               </tr>
@@ -315,13 +346,62 @@ export default function SalesReturnsPage() {
                     }`}
                   >
                     <td className="py-0.5 px-2.5 border-r border-slate-100 font-semibold text-emerald-700">
-                      {r.return_no}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedId(r.id);
+                          setSelectedReturnForAlurId(r.id);
+                          setIsAlurModalOpen(true);
+                        }}
+                        className="hover:underline text-emerald-700 font-semibold text-left"
+                        title="Klik untuk membuka Alur Verifikasi Retur"
+                      >
+                        {r.return_no}
+                      </button>
                     </td>
                     <td className="py-0.5 px-2.5 border-r border-slate-100">
                       {formatDate(r.date)}
                     </td>
                     <td className="py-0.5 px-2.5 border-r border-slate-100 font-medium">
                       {r.customer?.name || "Pelanggan Umum"}
+                    </td>
+                    <td className="py-0.5 px-2 border-r border-slate-100 text-center">
+                      {r.status === "DRAFT" && (
+                        <span className="px-1.5 py-0.2 bg-amber-50 text-amber-700 border border-amber-200 rounded font-semibold text-[10px]">
+                          1. Draft
+                        </span>
+                      )}
+                      {r.status === "VERIFIED_WAREHOUSE" && (
+                        <span className="px-1.5 py-0.2 bg-blue-50 text-blue-700 border border-blue-200 rounded font-semibold text-[10px]">
+                          2. Cek Gudang
+                        </span>
+                      )}
+                      {r.status === "APPROVED" && (
+                        <span className="px-1.5 py-0.2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded font-semibold text-[10px]">
+                          3. Disetujui
+                        </span>
+                      )}
+                      {r.status === "RESTOCKED" && (
+                        <span className="px-1.5 py-0.2 bg-teal-50 text-teal-700 border border-teal-200 rounded font-semibold text-[10px]">
+                          4. Restocked
+                        </span>
+                      )}
+                      {(r.status === "SELESAI" || r.status === "POSTED") && (
+                        <span className="px-1.5 py-0.2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded font-semibold text-[10px]">
+                          ✓ Selesai
+                        </span>
+                      )}
+                      {r.status === "REJECTED" && (
+                        <span className="px-1.5 py-0.2 bg-rose-50 text-rose-700 border border-rose-200 rounded font-semibold text-[10px]">
+                          ✕ Ditolak
+                        </span>
+                      )}
+                      {!["DRAFT", "VERIFIED_WAREHOUSE", "APPROVED", "RESTOCKED", "SELESAI", "POSTED", "REJECTED"].includes(r.status) && (
+                        <span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 rounded text-[10px]">
+                          {r.status || "POSTED"}
+                        </span>
+                      )}
                     </td>
                     <td className="py-0.5 px-2.5 border-r border-slate-100">
                       {r.tax_type || "Non"}
@@ -379,6 +459,17 @@ export default function SalesReturnsPage() {
           </div>
         </div>
       )}
+      {/* ALUR VERIFIKASI RETUR PENJUALAN MODAL */}
+      <AlurVerifikasiReturPenjualanModal
+        isOpen={isAlurModalOpen}
+        onClose={() => {
+          setIsAlurModalOpen(false);
+          setSelectedReturnForAlurId(null);
+        }}
+        returnId={selectedReturnForAlurId}
+        isGudang={isGudang}
+        isAdmin={isAdmin}
+      />
     </div>
   );
 }

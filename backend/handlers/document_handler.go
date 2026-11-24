@@ -181,6 +181,21 @@ func (h *DocumentHandler) UploadDocument(c *gin.Context) {
 		if err := database.DB.Create(&attachment).Error; err == nil {
 			database.DB.Preload("User").First(&attachment, attachment.ID)
 			savedAttachments = append(savedAttachments, attachment)
+
+			// Sync single unified document URL to purchase_order / purchase
+			if entityType == "purchase_order" {
+				database.DB.Model(&models.PurchaseOrder{}).Where("id = ?", entityID).Update("pbf_document_url", webPath)
+			} else if entityType == "purchase" {
+				database.DB.Model(&models.Purchase{}).Where("id = ?", entityID).Update("pbf_document_url", webPath)
+			} else if entityType == "customer" {
+				// Bila pelanggan baru upload dokumen atau perbaikan dokumen, status otomatis menjadi "Menunggu Verifikasi"
+				var cust models.Customer
+				if errC := database.DB.Where("id = ? AND company_id = ?", entityID, companyID).First(&cust).Error; errC == nil {
+					if !cust.IsVerified && (cust.CustomerStatus == "Ditolak" || cust.CustomerStatus == "Terdaftar" || cust.CustomerStatus == "") {
+						database.DB.Model(&cust).Update("customer_status", "Menunggu Verifikasi")
+					}
+				}
+			}
 		}
 	}
 
@@ -221,6 +236,21 @@ func (h *DocumentHandler) GetDocuments(c *gin.Context) {
 		return
 	}
 
+	// If entityType is purchase and no direct docs found, also check linked purchase order docs
+	if entityType == "purchase" && len(docs) == 0 {
+		var p models.Purchase
+		if errP := database.DB.Where("id = ? AND company_id = ?", entityID, companyID).First(&p).Error; errP == nil && p.PurchaseOrderID != nil && *p.PurchaseOrderID != uuid.Nil {
+			var poDocs []models.DocumentAttachment
+			qPo := database.DB.Where("company_id = ? AND entity_type = 'purchase_order' AND entity_id = ?", companyID, *p.PurchaseOrderID)
+			if docType != "" {
+				qPo = qPo.Where("document_type = ?", docType)
+			}
+			if errPo := qPo.Order("created_at desc").Preload("User").Preload("Approver").Find(&poDocs).Error; errPo == nil && len(poDocs) > 0 {
+				docs = append(docs, poDocs...)
+			}
+		}
+	}
+
 	utils.SendSuccess(c, "Daftar dokumen berhasil diambil", docs)
 }
 
@@ -248,6 +278,12 @@ func (h *DocumentHandler) DeleteDocument(c *gin.Context) {
 	if err := database.DB.Delete(&doc).Error; err != nil {
 		utils.SendError(c, http.StatusInternalServerError, "Gagal menghapus dokumen", err.Error())
 		return
+	}
+
+	if doc.EntityType == "purchase_order" {
+		database.DB.Model(&models.PurchaseOrder{}).Where("id = ? AND pbf_document_url = ?", doc.EntityID, doc.FilePath).Update("pbf_document_url", nil)
+	} else if doc.EntityType == "purchase" {
+		database.DB.Model(&models.Purchase{}).Where("id = ? AND pbf_document_url = ?", doc.EntityID, doc.FilePath).Update("pbf_document_url", nil)
 	}
 
 	utils.SendSuccess(c, "Dokumen berhasil dihapus", nil)
@@ -444,6 +480,44 @@ func (h *DocumentHandler) ApproveDocument(c *gin.Context) {
 		return
 	}
 
+	// Two-way synchronization with Customer status
+	if doc.EntityType == "customer" {
+		var cust models.Customer
+		if errC := database.DB.Where("id = ? AND company_id = ?", doc.EntityID, companyID).First(&cust).Error; errC == nil {
+			if status == "REJECTED" {
+				cust.CustomerStatus = "Ditolak"
+				cust.IsVerified = false
+				rejectNote := req.Notes
+				if strings.TrimSpace(rejectNote) == "" {
+					rejectNote = "Dokumen tidak memenuhi standar CDOB BPOM"
+				}
+				cust.VerifiedNotes = fmt.Sprintf("Dokumen %s ditolak: %s", doc.DocumentType, rejectNote)
+				database.DB.Save(&cust)
+			} else if status == "APPROVED" {
+				// Check if there are still any pending or rejected documents for this customer
+				var nonApprovedCount int64
+				database.DB.Model(&models.DocumentAttachment{}).
+					Where("company_id = ? AND entity_type = 'customer' AND entity_id = ? AND id != ? AND approval_status != 'APPROVED'", companyID, doc.EntityID, doc.ID).
+					Count(&nonApprovedCount)
+
+				if nonApprovedCount == 0 {
+					cust.IsVerified = true
+					cust.CustomerStatus = "Terverifikasi"
+					cust.VerifiedAt = &now
+					cust.VerifiedNotes = "Seluruh dokumen legalitas sarana telah diverifikasi & disetujui APJ"
+					database.DB.Save(&cust)
+				} else {
+					cust.CustomerStatus = "Menunggu Verifikasi"
+					database.DB.Save(&cust)
+				}
+			} else if status == "PENDING" {
+				cust.IsVerified = false
+				cust.CustomerStatus = "Menunggu Verifikasi"
+				database.DB.Save(&cust)
+			}
+		}
+	}
+
 	database.DB.Preload("User").Preload("Approver").First(&doc, doc.ID)
 
 	actionLabel := "disetujui"
@@ -502,7 +576,7 @@ func (h *DocumentHandler) GetPbfRequirements(c *gin.Context) {
 		reqs := []models.PbfRequirement{
 			{
 				DocumentType: "SURAT_PESANAN",
-				Title:        "Surat Pesanan (SP) Asli Pemesan / Sarana",
+				Title:        "Surat Pesanan",
 				Description:  "Surat Pesanan dari Apotek/RS/Klinik pemesan berstempel dan ditandatangani APJ pemesan.",
 				IsRequired:   true,
 			},
@@ -551,16 +625,46 @@ func (h *DocumentHandler) GetPbfRequirements(c *gin.Context) {
 	case "customer":
 		reqs := []models.PbfRequirement{
 			{
-				DocumentType: "IZIN_SARANA",
-				Title:        "Izin Sarana (SIA / Izin RS / Izin Klinik)",
-				Description:  "Legalitas sarana pemesan obat/alkes.",
+				DocumentType: "NIB",
+				Title:        "NIB (Nomor Induk Berusaha)",
+				Description:  "Dokumen legalitas berusaha resmi dari sistem OSS BKPM.",
 				IsRequired:   true,
 			},
 			{
-				DocumentType: "SIPA_APJ",
-				Title:        "SIPA Apoteker Penanggung Jawab Pemesan",
-				Description:  "SIPA / SIPTTK penanggung jawab yang berwenang menandatangani SP.",
+				DocumentType: "SIA",
+				Title:        "Izin Sarana (SIA / Izin RS / Izin Klinik)",
+				Description:  "Surat Izin Operasional resmi dari Dinkes / DPMPTSP.",
 				IsRequired:   true,
+			},
+			{
+				DocumentType: "NPWP",
+				Title:        "NPWP Badan Usaha / Sarana",
+				Description:  "Nomor Pokok Wajib Pajak untuk penerbitan faktur pajak resmi.",
+				IsRequired:   true,
+			},
+			{
+				DocumentType: "SIPA",
+				Title:        "SIPA Apoteker Penanggung Jawab",
+				Description:  "Surat Izin Praktik Apoteker / SIPTTK yang masih berlaku.",
+				IsRequired:   true,
+			},
+			{
+				DocumentType: "STRA",
+				Title:        "STRA Apoteker",
+				Description:  "Surat Tanda Registrasi Apoteker resmi dari Kemenkes RI / IAI.",
+				IsRequired:   true,
+			},
+			{
+				DocumentType: "SK_APJ",
+				Title:        "Surat Penunjukan / SK APJ",
+				Description:  "Surat penunjukan penanggung jawab sarana oleh pimpinan perusahaan.",
+				IsRequired:   false,
+			},
+			{
+				DocumentType: "DOKUMEN_TAMBAHAN",
+				Title:        "Dokumen Pendukung Lain",
+				Description:  "Denah sarana, papan nama apotek, atau berkas pendukung CDOB lainnya.",
+				IsRequired:   false,
 			},
 		}
 		utils.SendSuccess(c, "Persyaratan dokumen sarana pelanggan", reqs)

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import MasterToolbarButtons from "@/components/common/MasterToolbarButtons";
+import { TableSortSelect, parseSortValue, sortTableData } from "@/components/common/TableSortSelect";
 
 export default function SalesRepsPage() {
   const queryClient = useQueryClient();
@@ -23,8 +24,9 @@ export default function SalesRepsPage() {
   // Filters & State
   const [keyword, setKeyword] = useState("");
   const [searchParam, setSearchParam] = useState("");
-  const [sortBy, setSortBy] = useState("name");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const pageSize = 15;
 
@@ -153,13 +155,14 @@ export default function SalesRepsPage() {
     setPage(1);
   };
 
-  const toggleSortDir = () => {
-    setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
-  };
-
-  // Pagination
-  const totalPages = Math.max(1, Math.ceil(salesReps.length / pageSize));
-  const paginatedData = salesReps.slice((page - 1) * pageSize, page * pageSize);
+  // Pagination & Sorting
+  const sortedSalesReps = sortTableData(salesReps, sortOption, {
+    getCode: (s: any) => s.code,
+    getName: (s: any) => s.name,
+    getDate: (s: any) => s.created_at,
+  });
+  const totalPages = Math.max(1, Math.ceil(sortedSalesReps.length / pageSize));
+  const paginatedData = sortedSalesReps.slice((page - 1) * pageSize, page * pageSize);
 
   const renderToolbar = () => (
     <div className="flex items-center gap-2 py-1">
@@ -229,22 +232,23 @@ export default function SalesRepsPage() {
           <div className="md:col-span-5 flex items-center gap-2">
             <label className="w-24 shrink-0 text-slate-700 font-medium">Urut Berdasar :</label>
             <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="flex-1 h-6 px-2 rounded border border-slate-300 bg-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+              value={sortOption}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSortOption(val);
+                const { sortBy: sb, sortDir: sd } = parseSortValue(val);
+                setSortBy(sb);
+                setSortDir(sd);
+                setPage(1);
+              }}
+              className="flex-1 h-6 px-2 rounded border border-slate-300 bg-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium shadow-2xs truncate cursor-pointer"
             >
-              <option value="name">Nama</option>
-              <option value="code">Kode</option>
-              <option value="city">Kota</option>
+              <option value="created_at_desc">1. Urutan sesuai waktu input paling atas</option>
+              <option value="code_asc">2. Kode (A - Z)</option>
+              <option value="code_desc">3. Kode (Z - A)</option>
+              <option value="name_asc">4. Nama (A - Z)</option>
+              <option value="name_desc">5. Nama (Z - A)</option>
             </select>
-            <button
-              onClick={toggleSortDir}
-              className="h-6 px-2.5 border border-slate-300 rounded bg-slate-50 hover:bg-slate-100 text-slate-600 flex items-center gap-1 transition"
-              title="Ganti Urutan Naik/Turun"
-            >
-              <ArrowUpDown className="w-3.5 h-3.5" />
-              <span className="text-[11px] uppercase font-semibold">{sortDir}</span>
-            </button>
           </div>
 
           {/* Cari Button */}

@@ -12,6 +12,8 @@ import {
   Save,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { TableSortSelect, sortTableData } from "@/components/common/TableSortSelect";
+import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
 type CategoryTab =
   | "Aktiva"
@@ -41,6 +43,7 @@ export default function AccountsPage() {
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<CategoryTab>("Aktiva");
+  const [sortOption, setSortOption] = useState<string>("code_asc");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Modal State
@@ -89,6 +92,14 @@ export default function AccountsPage() {
       }
     });
   }, [accounts, activeTab]);
+
+  const sortedAccounts = useMemo(() => {
+    return sortTableData(filteredAccounts, sortOption, {
+      getCode: (a: any) => a.code,
+      getName: (a: any) => a.name,
+      getDate: (a: any) => a.created_at,
+    });
+  }, [filteredAccounts, sortOption]);
 
   // Headers for parent position dropdown
   const headerAccounts = useMemo(() => {
@@ -273,34 +284,43 @@ export default function AccountsPage() {
         </div>
       </div>
 
-      {/* 2. TOP ACTION BUTTONS (Screenshot 1: Green +, Blue Pencil, Red Trash) */}
-      <div className="shrink-0 flex items-center gap-1 pt-0.5">
-        <button
-          type="button"
-          onClick={handleOpenCreate}
-          className="h-6 w-7 bg-[#00c875] hover:bg-[#00b066] text-white rounded flex items-center justify-center shadow-xs transition active:scale-95"
-          title="Tambah Perkiraan"
-        >
-          <Plus className="w-4 h-4 stroke-[3]" />
-        </button>
-        <button
-          type="button"
-          disabled={!selectedId}
-          onClick={() => handleOpenEdit()}
-          className="h-6 w-7 bg-[#3b82f6] hover:bg-blue-600 text-white rounded flex items-center justify-center shadow-xs transition active:scale-95 disabled:opacity-40"
-          title="Ubah Perkiraan"
-        >
-          <Pencil className="w-3.5 h-3.5 stroke-[2.5]" />
-        </button>
-        <button
-          type="button"
-          disabled={!selectedId}
-          onClick={handleDelete}
-          className="h-6 w-7 bg-[#ef4444] hover:bg-red-600 text-white rounded flex items-center justify-center shadow-xs transition active:scale-95 disabled:opacity-40"
-          title="Hapus Perkiraan"
-        >
-          <Trash2 className="w-3.5 h-3.5 stroke-[2.5]" />
-        </button>
+      {/* 2. TOP ACTION BUTTONS & SORT */}
+      <div className="shrink-0 flex items-center justify-between gap-2 pt-0.5">
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handleOpenCreate}
+            className="h-6 w-7 bg-[#00c875] hover:bg-[#00b066] text-white rounded flex items-center justify-center shadow-xs transition active:scale-95"
+            title="Tambah Perkiraan"
+          >
+            <Plus className="w-4 h-4 stroke-[3]" />
+          </button>
+          <button
+            type="button"
+            disabled={!selectedId}
+            onClick={() => handleOpenEdit()}
+            className="h-6 w-7 bg-[#3b82f6] hover:bg-blue-600 text-white rounded flex items-center justify-center shadow-xs transition active:scale-95 disabled:opacity-40"
+            title="Ubah Perkiraan"
+          >
+            <Pencil className="w-3.5 h-3.5 stroke-[2.5]" />
+          </button>
+          <button
+            type="button"
+            disabled={!selectedId}
+            onClick={handleDelete}
+            className="h-6 w-7 bg-[#ef4444] hover:bg-red-600 text-white rounded flex items-center justify-center shadow-xs transition active:scale-95 disabled:opacity-40"
+            title="Hapus Perkiraan"
+          >
+            <Trash2 className="w-3.5 h-3.5 stroke-[2.5]" />
+          </button>
+        </div>
+        <div className="w-64">
+          <TableSortSelect
+            value={sortOption}
+            onChange={(val) => setSortOption(val)}
+            compact
+          />
+        </div>
       </div>
 
       {/* 3. CATEGORY TABS (Screenshot 1: Aktiva, Kewajiban, Modal, Pendapatan, HPP, Biaya, Pendapatan Lain, Biaya Lain, Semua Akun) */}
@@ -346,14 +366,14 @@ export default function AccountsPage() {
                     Memuat data perkiraan...
                   </td>
                 </tr>
-              ) : filteredAccounts.length === 0 ? (
+              ) : sortedAccounts.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="py-16 text-center text-slate-400 font-normal">
                     No data
                   </td>
                 </tr>
               ) : (
-                filteredAccounts.map((acc: any) => {
+                sortedAccounts.map((acc: any) => {
                   const isSelected = selectedId === acc.id;
                   const isHeader = !!acc.is_header;
                   const indentPx = getIndent(acc.code);
@@ -483,18 +503,13 @@ export default function AccountsPage() {
               <div className="grid grid-cols-3 items-center gap-2">
                 <label className="text-slate-600 font-semibold">Posisi :</label>
                 <div className="col-span-2">
-                  <select
+                  <SearchableAccountSelect
+                    accounts={headerAccounts}
                     value={parentAccountId}
-                    onChange={(e) => setParentAccountId(e.target.value)}
-                    className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-[11px] focus:outline-none focus:border-sky-500"
-                  >
-                    <option value="">-- Posisi Utama --</option>
-                    {headerAccounts.map((h: any) => (
-                      <option key={h.id} value={h.id}>
-                        {h.code} - {h.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val) => setParentAccountId(val)}
+                    placeholder="-- Posisi Utama / Cari Induk Akun --"
+                    allowClear={true}
+                  />
                 </div>
               </div>
 

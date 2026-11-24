@@ -16,6 +16,7 @@ import {
   PlusCircle,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
 interface CashItemRow {
   account_id: string;
@@ -333,18 +334,13 @@ export default function CashInPage() {
 
               <div>
                 <label className="block text-slate-600 font-semibold mb-0.5">Masuk Ke :</label>
-                <select
+                <SearchableAccountSelect
+                  accounts={cashBankAccounts}
                   value={selectedAccountFilter}
-                  onChange={(e) => setSelectedAccountFilter(e.target.value)}
-                  className="w-full h-6 px-1.5 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500"
-                >
-                  <option value="all">Semua Akun Kas / Bank</option>
-                  {cashBankAccounts.map((a: any) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} - {a.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setSelectedAccountFilter(val || "all")}
+                  placeholder="Semua Akun Kas / Bank"
+                  allowClear={true}
+                />
               </div>
 
               <div>
@@ -497,18 +493,12 @@ export default function CashInPage() {
 
             <div>
               <label className="block text-slate-600 font-semibold mb-0.5">Masuk Ke Akun :</label>
-              <select
+              <SearchableAccountSelect
+                accounts={cashBankAccounts}
                 value={masukKeAkunId}
-                onChange={(e) => setMasukKeAkunId(e.target.value)}
-                className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-[11px] focus:outline-none focus:border-sky-500"
-              >
-                <option value="">Select...</option>
-                {cashBankAccounts.map((a: any) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} - {a.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setMasukKeAkunId(val)}
+                placeholder="Select / Cari Akun Kas/Bank..."
+              />
             </div>
 
             <div>
@@ -551,18 +541,12 @@ export default function CashInPage() {
                       {idx + 1}
                     </td>
                     <td className="py-0.5 px-1.5 border-r border-slate-200">
-                      <select
+                      <SearchableAccountSelect
+                        accounts={oppositeAccounts}
                         value={row.account_id}
-                        onChange={(e) => handleItemChange(idx, "account_id", e.target.value)}
-                        className="w-full h-6 px-1.5 border border-slate-300 rounded bg-white text-[11px]"
-                      >
-                        <option value="">Select...</option>
-                        {oppositeAccounts.map((a: any) => (
-                          <option key={a.id} value={a.id}>
-                            {a.code} - {a.name}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(val) => handleItemChange(idx, "account_id", val)}
+                        placeholder="Select / Cari Kode Akun..."
+                      />
                     </td>
                     <td className="py-0.5 px-1.5 border-r border-slate-200">
                       <input

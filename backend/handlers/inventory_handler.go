@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"farmasi/backend/database"
@@ -59,6 +60,7 @@ func (h *InventoryHandler) GetStockBalances(c *gin.Context) {
 }
 
 func (h *InventoryHandler) GetStockCard(c *gin.Context) {
+	companyID := c.MustGet("company_id").(uuid.UUID)
 	productID := c.Query("product_id")
 	warehouseID := c.Query("warehouse_id")
 
@@ -78,7 +80,36 @@ func (h *InventoryHandler) GetStockCard(c *gin.Context) {
 	var movements []models.StockMovement
 	query.Order("created_at ASC").Find(&movements)
 
-	utils.SendSuccess(c, "Kartu stok produk", movements)
+	var docNos []string
+	for _, m := range movements {
+		if m.DocNo != "" && (m.DocType == "PURCHASE" || strings.HasPrefix(m.DocNo, "PI/")) {
+			docNos = append(docNos, m.DocNo)
+		}
+	}
+
+	invoiceMap := make(map[string]uuid.UUID)
+	if len(docNos) > 0 {
+		var purchases []models.Purchase
+		database.DB.Select("id, invoice_no").Where("company_id = ? AND invoice_no IN ?", companyID, docNos).Find(&purchases)
+		for _, p := range purchases {
+			invoiceMap[p.InvoiceNo] = p.ID
+		}
+	}
+
+	type StockMovementWithPurchase struct {
+		models.StockMovement
+		PurchaseID *uuid.UUID `json:"purchase_id,omitempty"`
+	}
+
+	result := make([]StockMovementWithPurchase, len(movements))
+	for i, m := range movements {
+		result[i].StockMovement = m
+		if pid, ok := invoiceMap[m.DocNo]; ok {
+			result[i].PurchaseID = &pid
+		}
+	}
+
+	utils.SendSuccess(c, "Kartu stok produk", result)
 }
 
 // ==========================================
@@ -233,7 +264,7 @@ func (h *InventoryHandler) CreateItemEntry(c *gin.Context) {
 		TotalItems:    totalItems,
 		SubTotal:      subTotal,
 		Notes:         req.Notes,
-		ComputerName:  "SERVER",
+		ComputerName:  utils.GetComputerName(c),
 		CreatedBy:     userID,
 		CreatedByName: userName,
 	}
@@ -515,7 +546,7 @@ func (h *InventoryHandler) CreateItemExit(c *gin.Context) {
 		AccountCode:   accCode,
 		TotalItems:    totalItems,
 		Notes:         req.Notes,
-		ComputerName:  "SERVER",
+		ComputerName:  utils.GetComputerName(c),
 		CreatedBy:     userID,
 		CreatedByName: userName,
 	}
@@ -960,11 +991,13 @@ func (h *InventoryHandler) GetTransfers(c *gin.Context) {
 
 	sortBy := c.DefaultQuery("sort_by", "date")
 	sortDir := c.DefaultQuery("sort_dir", "desc")
-	orderClause := "date DESC"
-	if sortBy == "No Transaksi" || sortBy == "transfer_no" {
+	orderClause := "created_at " + sortDir
+	if sortBy == "No Transaksi" || sortBy == "transfer_no" || sortBy == "code" {
 		orderClause = "transfer_no " + sortDir
 	} else if sortBy == "Tanggal" || sortBy == "date" {
 		orderClause = "date " + sortDir
+	} else if sortBy == "created_at" || sortBy == "waktu_input" {
+		orderClause = "created_at " + sortDir
 	}
 
 	var transfers []models.WarehouseTransfer
@@ -1062,7 +1095,7 @@ func (h *InventoryHandler) CreateTransfer(c *gin.Context) {
 		TotalItems:      totalItems,
 		Status:          "RECEIVED",
 		Notes:           req.Notes,
-		ComputerName:    "SERVER",
+		ComputerName:    utils.GetComputerName(c),
 		CreatedBy:       userID,
 		CreatedByName:   userName,
 	}

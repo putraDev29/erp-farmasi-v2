@@ -83,9 +83,32 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-[11px] text-emerald-800 space-y-0.5">
-            <p className="font-semibold">Kredensial Bawaan Sistem:</p>
-            <p>Username: <code className="font-mono bg-white px-1 rounded text-emerald-950">admin</code> | Password: <code className="font-mono bg-white px-1 rounded text-emerald-950">admin123</code></p>
+          <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-[11px] text-emerald-800 space-y-1.5">
+            <p className="font-semibold text-emerald-900">Kredensial Bawaan Sistem (Klik untuk isi otomatis):</p>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setUsername("admin");
+                  setPassword("admin123");
+                }}
+                className="px-2 py-1.5 bg-white hover:bg-emerald-100/80 border border-emerald-200 rounded-lg text-slate-800 font-medium text-left transition shadow-2xs"
+              >
+                <div className="font-bold text-emerald-900">Akun Admin</div>
+                <div className="text-[10px] text-slate-500 font-mono">admin / admin123</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUsername("gudang");
+                  setPassword("admin123");
+                }}
+                className="px-2 py-1.5 bg-white hover:bg-emerald-100/80 border border-emerald-200 rounded-lg text-slate-800 font-medium text-left transition shadow-2xs"
+              >
+                <div className="font-bold text-emerald-900">Akun Gudang</div>
+                <div className="text-[10px] text-slate-500 font-mono">gudang / admin123</div>
+              </button>
+            </div>
           </div>
 
           <button

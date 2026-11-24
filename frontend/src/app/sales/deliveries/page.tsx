@@ -14,6 +14,7 @@ import {
   ChevronLeft as BackIcon,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { sortTableData } from "@/components/common/TableSortSelect";
 
 export default function SalesDeliveriesPage() {
   const router = useRouter();
@@ -24,7 +25,8 @@ export default function SalesDeliveriesPage() {
   const [trackingNo, setTrackingNo] = useState("");
   const [courier, setCourier] = useState("");
   const [status, setStatus] = useState("Semua");
-  const [sortBy, setSortBy] = useState("No Transaksi");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
+  const [sortBy, setSortBy] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   // Selection & Pagination
@@ -42,8 +44,6 @@ export default function SalesDeliveriesPage() {
       trackingNo,
       courier,
       status,
-      sortBy,
-      sortDir,
     ],
     queryFn: async () => {
       const params = new URLSearchParams();
@@ -57,8 +57,13 @@ export default function SalesDeliveriesPage() {
     },
   });
 
-  const totalPages = Math.max(1, Math.ceil(deliveries.length / pageSize));
-  const paginatedDeliveries = deliveries.slice((page - 1) * pageSize, page * pageSize);
+  const sortedDeliveries = sortTableData(deliveries, sortOption, {
+    getCode: (item: any) => item.delivery_no,
+    getName: (item: any) => item.recipient || item.courier,
+    getDate: (item: any) => item.created_at || item.delivery_date,
+  });
+  const totalPages = Math.max(1, Math.ceil(sortedDeliveries.length / pageSize));
+  const paginatedDeliveries = sortedDeliveries.slice((page - 1) * pageSize, page * pageSize);
 
   const selectedDelivery = deliveries.find((d: any) => d.id === selectedId);
 
@@ -140,26 +145,20 @@ export default function SalesDeliveriesPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-[11px] items-center">
           <div>
             <label className="block text-slate-600 font-semibold mb-0.5">Urut Berdasar :</label>
-            <div className="flex gap-1">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-emerald-500"
-              >
-                <option value="No Transaksi">No Transaksi</option>
-                <option value="Tgl Kirim">Tgl Kirim</option>
-                <option value="Kurir">Kurir</option>
-                <option value="Status">Status</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => setSortDir((prev) => (prev === "asc" ? "desc" : "asc"))}
-                className="h-6 w-6 flex items-center justify-center border border-slate-300 rounded hover:bg-slate-50 text-slate-600 shrink-0"
-                title={`Urutan: ${sortDir.toUpperCase()}`}
-              >
-                <ArrowUpDown className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            <select
+              value={sortOption}
+              onChange={(e) => {
+                setSortOption(e.target.value);
+                setPage(1);
+              }}
+              className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-emerald-500 font-medium shadow-2xs truncate cursor-pointer"
+            >
+              <option value="created_at_desc">1. Urutan sesuai waktu input paling atas</option>
+              <option value="code_asc">2. Kode (A - Z)</option>
+              <option value="code_desc">3. Kode (Z - A)</option>
+              <option value="name_asc">4. Nama (A - Z)</option>
+              <option value="name_desc">5. Nama (Z - A)</option>
+            </select>
           </div>
           <div className="pt-4">
             <button

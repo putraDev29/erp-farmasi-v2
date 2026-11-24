@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Search,
@@ -19,6 +19,7 @@ interface CariItemModalProps {
   onClose: () => void;
   onSelect: (item: any) => void;
   supplierCode?: string;
+  defaultWarehouseId?: string;
 }
 
 export const CariItemModal: React.FC<CariItemModalProps> = ({
@@ -26,10 +27,11 @@ export const CariItemModal: React.FC<CariItemModalProps> = ({
   onClose,
   onSelect,
   supplierCode = "",
+  defaultWarehouseId,
 }) => {
   // Filters matching Screenshot 2
   const [keyword, setKeyword] = useState("");
-  const [selectedWarehouse, setSelectedWarehouse] = useState("all");
+  const [selectedWarehouse, setSelectedWarehouse] = useState(defaultWarehouseId || "all");
   const [selectedCategory, setSelectedCategory] = useState("Semua");
   const [selectedBrand, setSelectedBrand] = useState("Semua");
   const [rackFilter, setRackFilter] = useState("");
@@ -39,6 +41,14 @@ export const CariItemModal: React.FC<CariItemModalProps> = ({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const pageSize = 20;
+
+  useEffect(() => {
+    if (isOpen) {
+      if (defaultWarehouseId) {
+        setSelectedWarehouse(defaultWarehouseId);
+      }
+    }
+  }, [isOpen, defaultWarehouseId]);
 
   // Selected item row
   const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
@@ -77,6 +87,7 @@ export const CariItemModal: React.FC<CariItemModalProps> = ({
     queryKey: [
       "cari-items-po",
       keyword,
+      selectedWarehouse,
       selectedCategory,
       selectedBrand,
       rackFilter,
@@ -92,6 +103,9 @@ export const CariItemModal: React.FC<CariItemModalProps> = ({
       params.append("page", page.toString());
       params.append("page_size", pageSize.toString());
       if (keyword) params.append("search", keyword);
+      if (selectedWarehouse && selectedWarehouse !== "all" && selectedWarehouse !== "Semua") {
+        params.append("warehouse_id", selectedWarehouse);
+      }
       if (selectedCategory && selectedCategory !== "Semua") params.append("category_id", selectedCategory);
       if (selectedBrand && selectedBrand !== "Semua") params.append("brand_id", selectedBrand);
       if (rackFilter) params.append("rack", rackFilter);
@@ -112,7 +126,10 @@ export const CariItemModal: React.FC<CariItemModalProps> = ({
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const handleChoose = (item: any) => {
-    onSelect(item);
+    onSelect({
+      ...item,
+      stock: Number(item.stock ?? item.total_stock ?? 0),
+    });
     onClose();
   };
 
@@ -124,12 +141,12 @@ export const CariItemModal: React.FC<CariItemModalProps> = ({
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-2xs flex items-center justify-center p-2 sm:p-4">
       <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-7xl max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-xs">
         {/* Title Bar */}
-        <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-300 flex items-center justify-between">
-          <h2 className="text-sm font-bold text-slate-800">Cari Item...</h2>
+        <div className="px-4 py-2 bg-[#00c875] text-white flex items-center justify-between">
+          <h2 className="text-sm font-bold text-white">Cari Item...</h2>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded transition"
+            className="p-1 text-white/80 hover:text-white hover:bg-white/10 rounded transition"
             title="Tutup (Esc)"
           >
             <X className="w-4 h-4" />
@@ -159,13 +176,16 @@ export const CariItemModal: React.FC<CariItemModalProps> = ({
               <label className="block text-slate-700 font-semibold mb-0.5">Dept/Gudang :</label>
               <select
                 value={selectedWarehouse}
-                onChange={(e) => setSelectedWarehouse(e.target.value)}
+                onChange={(e) => {
+                  setSelectedWarehouse(e.target.value);
+                  setPage(1);
+                }}
                 className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-800 focus:outline-none focus:border-sky-500 bg-white"
               >
-                <option value="all">UTAMA - APOTEK BERKAT</option>
+                <option value="all">Semua Gudang / Apotek</option>
                 {warehouses.map((w: any) => (
                   <option key={w.id} value={w.id}>
-                    {w.name}
+                    {w.code ? `${w.code} - ${w.name}` : w.name}
                   </option>
                 ))}
               </select>
@@ -418,7 +438,7 @@ export const CariItemModal: React.FC<CariItemModalProps> = ({
                         {it.name}
                       </td>
                       <td className="py-1.5 px-2.5 border-r border-slate-200 text-right font-mono font-bold text-slate-800">
-                        {(it.stock || 0).toFixed(2)}
+                        {Number(it.stock ?? it.total_stock ?? 0).toFixed(2)}
                       </td>
                       <td className="py-1.5 px-2 border-r border-slate-200 text-center font-semibold text-slate-700">
                         {it.base_unit?.name || it.unit || "PCS"}
@@ -552,7 +572,7 @@ export const CariItemModal: React.FC<CariItemModalProps> = ({
                 <div className="flex justify-between py-1 border-b">
                   <span className="text-slate-500">Stok Fisik Tersedia:</span>
                   <span className="font-bold text-emerald-700">
-                    {selectedProduct.stock} {selectedProduct.base_unit?.name || "PCS"}
+                    {Number(selectedProduct.stock ?? selectedProduct.total_stock ?? 0).toFixed(2)} {selectedProduct.base_unit?.name || "PCS"}
                   </span>
                 </div>
                 <div className="flex justify-between py-1 border-b">

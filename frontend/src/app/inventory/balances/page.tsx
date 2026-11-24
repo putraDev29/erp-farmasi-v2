@@ -4,11 +4,13 @@ import React, { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search, AlertTriangle, Package, Warehouse } from "lucide-react";
 import { api, formatCurrency } from "@/lib/api";
+import { TableSortSelect, sortTableData } from "@/components/common/TableSortSelect";
 
 export default function StockBalancesPage() {
   const [warehouseID, setWarehouseID] = useState("");
   const [search, setSearch] = useState("");
   const [lowStockOnly, setLowStockOnly] = useState(false);
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
 
   const { data: warehouses } = useQuery({
     queryKey: ["warehouses"],
@@ -18,7 +20,7 @@ export default function StockBalancesPage() {
     },
   });
 
-  const { data: balances, isLoading } = useQuery({
+  const { data: balances = [], isLoading } = useQuery({
     queryKey: ["stock-balances", warehouseID, search, lowStockOnly],
     queryFn: async () => {
       let url = `/inventory/balances?search=${encodeURIComponent(search)}`;
@@ -29,7 +31,13 @@ export default function StockBalancesPage() {
     },
   });
 
-  const totalValue = balances?.reduce((acc: number, b: any) => acc + b.qty * b.avg_cost, 0) || 0;
+  const sortedBalances = sortTableData(balances, sortOption, {
+    getCode: (b: any) => b.product?.sku || b.product?.code,
+    getName: (b: any) => b.product?.name,
+    getDate: (b: any) => b.created_at || b.updated_at,
+  });
+
+  const totalValue = sortedBalances?.reduce((acc: number, b: any) => acc + b.qty * b.avg_cost, 0) || 0;
 
   return (
     <div className="flex flex-col h-full min-h-0 space-y-1 text-xs select-none">
@@ -78,6 +86,14 @@ export default function StockBalancesPage() {
           </select>
         </div>
 
+        <div className="w-full sm:w-64">
+          <TableSortSelect
+            value={sortOption}
+            onChange={(val) => setSortOption(val)}
+            compact
+          />
+        </div>
+
         <button
           onClick={() => setLowStockOnly(!lowStockOnly)}
           className={`h-6 px-2.5 rounded text-[11px] font-semibold flex items-center gap-1.5 transition whitespace-nowrap shadow-2xs ${
@@ -110,10 +126,10 @@ export default function StockBalancesPage() {
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
                 <tr><td colSpan={9} className="py-8 text-center text-slate-400">Memuat saldo persediaan...</td></tr>
-              ) : balances?.length === 0 ? (
+              ) : sortedBalances?.length === 0 ? (
                 <tr><td colSpan={9} className="py-8 text-center text-slate-400">Tidak ada saldo stok yang cocok.</td></tr>
               ) : (
-                balances?.map((b: any) => {
+                sortedBalances?.map((b: any) => {
                   const isLow = b.product && b.available_qty <= b.product.min_stock;
                   const itemVal = b.qty * b.avg_cost;
                   return (

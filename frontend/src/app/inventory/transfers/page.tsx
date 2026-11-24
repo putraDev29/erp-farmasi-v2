@@ -14,6 +14,7 @@ import {
   ChevronLeft as BackIcon,
 } from "lucide-react";
 import { api, formatDate } from "@/lib/api";
+import { TableSortSelect, parseSortValue, sortTableData } from "@/components/common/TableSortSelect";
 
 export default function TransfersListPage() {
   const router = useRouter();
@@ -23,7 +24,8 @@ export default function TransfersListPage() {
   const [selectedWarehouse, setSelectedWarehouse] = useState("all");
   const [startDate, setStartDate] = useState("2026-11-01");
   const [endDate, setEndDate] = useState("2026-11-30");
-  const [sortBy, setSortBy] = useState("Tanggal");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
+  const [sortBy, setSortBy] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -77,8 +79,13 @@ export default function TransfersListPage() {
     },
   });
 
-  const totalPages = Math.max(1, Math.ceil(transfers.length / pageSize));
-  const paginated = transfers.slice((page - 1) * pageSize, page * pageSize);
+  const sortedTransfers = sortTableData(transfers, sortOption, {
+    getCode: (item: any) => item.transfer_no,
+    getName: (item: any) => item.from_warehouse?.name || item.to_warehouse?.name,
+    getDate: (item: any) => item.created_at || item.date,
+  });
+  const totalPages = Math.max(1, Math.ceil(sortedTransfers.length / pageSize));
+  const paginated = sortedTransfers.slice((page - 1) * pageSize, page * pageSize);
 
   const renderToolbar = () => (
     <div className="flex items-center gap-1.5 py-1">
@@ -219,24 +226,24 @@ export default function TransfersListPage() {
           </div>
           <div>
             <label className="block text-slate-600 font-semibold mb-0.5">Urut Berdasar :</label>
-            <div className="flex gap-1">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-emerald-500"
-              >
-                <option value="Tanggal">Tanggal</option>
-                <option value="No Transaksi">No Transaksi</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
-                className="h-6 w-7 border border-slate-300 rounded flex items-center justify-center hover:bg-slate-100 bg-white"
-                title="Arah Urutan"
-              >
-                <ArrowUpDown className="w-3.5 h-3.5 text-slate-600" />
-              </button>
-            </div>
+            <select
+              value={sortOption}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSortOption(val);
+                const { sortBy: sb, sortDir: sd } = parseSortValue(val);
+                setSortBy(sb);
+                setSortDir(sd);
+                setPage(1);
+              }}
+              className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-emerald-500 font-medium shadow-2xs truncate cursor-pointer"
+            >
+              <option value="created_at_desc">1. Urutan sesuai waktu input paling atas</option>
+              <option value="code_asc">2. Kode (A - Z)</option>
+              <option value="code_desc">3. Kode (Z - A)</option>
+              <option value="name_asc">4. Nama (A - Z)</option>
+              <option value="name_desc">5. Nama (Z - A)</option>
+            </select>
           </div>
         </div>
       </div>

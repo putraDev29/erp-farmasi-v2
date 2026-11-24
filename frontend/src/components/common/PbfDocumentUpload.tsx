@@ -66,13 +66,24 @@ export interface PbfRequirement {
 }
 
 interface PbfDocumentUploadProps {
-  entityType: "purchase" | "purchase_order" | "sale" | "sales_order" | "supplier" | "customer";
+  entityType: "purchase" | "purchase_order" | "sale" | "sales_order" | "supplier" | "customer" | "purchase_return" | "sales_return";
   entityId: string;
   title?: string;
   subtitle?: string;
   initialDocType?: string;
   onUploadedCountChange?: (count: number) => void;
 }
+
+const isDocTypeMatch = (docType: string, reqType: string) => {
+  const d = (docType || "").toUpperCase();
+  const r = (reqType || "").toUpperCase();
+  if (d === r) return true;
+  if ((d === "SIA" || d === "IZIN_SARANA" || d === "IZIN_OPERASIONAL") && (r === "SIA" || r === "IZIN_SARANA" || r === "IZIN_OPERASIONAL")) return true;
+  if ((d === "SIPA" || d === "SIPA_APJ") && (r === "SIPA" || r === "SIPA_APJ")) return true;
+  if ((d === "STRA" || d === "STR_APJ") && (r === "STRA" || r === "STR_APJ")) return true;
+  if ((d === "SK_APJ" || d === "SURAT_PENUNJUKAN_APJ") && (r === "SK_APJ" || r === "SURAT_PENUNJUKAN_APJ")) return true;
+  return false;
+};
 
 export default function PbfDocumentUpload({
   entityType,
@@ -130,7 +141,7 @@ export default function PbfDocumentUpload({
           },
           {
             document_type: "SURAT_JALAN",
-            title: "Surat Jalan / Delivery Order (DO) PBF",
+            title: "Surat Jalan",
             description: "Bukti fisik serah terima barang obat/alkes dari kurir PBF berstempel apotek.",
             isRequired: true,
           },
@@ -161,7 +172,7 @@ export default function PbfDocumentUpload({
         return [
           {
             document_type: "SURAT_PESANAN",
-            title: "Surat Pesanan (SP) Asli Pemesan / Sarana",
+            title: "Surat Pesanan",
             description: "Surat Pesanan dari Apotek/RS/Klinik pemesan berstempel dan ditandatangani APJ pemesan.",
             isRequired: true,
           },
@@ -173,7 +184,7 @@ export default function PbfDocumentUpload({
           },
           {
             document_type: "SURAT_JALAN",
-            title: "Surat Jalan / DO Pengiriman Penjualan",
+            title: "Surat Jalan",
             description: "Bukti penyerahan produk ke sarana pemesan.",
             isRequired: false,
           },
@@ -210,43 +221,97 @@ export default function PbfDocumentUpload({
           {
             document_type: "NIB",
             title: "NIB (Nomor Induk Berusaha)",
-            description: "Dokumen Nomor Induk Berusaha fasilitas (Format: PDF)",
-            isRequired: false,
+            description: "Dokumen Nomor Induk Berusaha fasilitas dari OSS BKPM (Format: PDF / Gambar)",
+            isRequired: true,
           },
           {
-            document_type: "IZIN_OPERASIONAL",
-            title: "Izin Operasional Fasilitas",
-            description: "Izin Operasional Fasilitas / SIA / Izin RS / Klinik (Format: PDF)",
-            isRequired: false,
+            document_type: "SIA",
+            title: "Izin Operasional Sarana (SIA / RS / Klinik)",
+            description: "Surat Izin Apotek (SIA) / Izin Operasional Klinik / RS dari Dinkes/DPMPTSP (Format: PDF / Gambar)",
+            isRequired: true,
           },
           {
             document_type: "NPWP",
-            title: "NPWP",
+            title: "NPWP Badan Usaha / Sarana",
             description: "Nomor Pokok Wajib Pajak fasilitas (Format: PDF / JPG)",
-            isRequired: false,
+            isRequired: true,
           },
           {
-            document_type: "SIPA_APJ",
-            title: "SIPA Apoteker",
-            description: "Surat Izin Praktik Apoteker Penanggung Jawab (Format: PDF / JPG)",
-            isRequired: false,
+            document_type: "SIPA",
+            title: "SIPA Apoteker Penanggung Jawab",
+            description: "Surat Izin Praktik Apoteker / SIPTTK yang masih aktif (Format: PDF / JPG)",
+            isRequired: true,
           },
           {
-            document_type: "STR_APJ",
-            title: "STR Apoteker",
-            description: "Surat Tanda Registrasi Apoteker / STRA (Format: PDF / JPG)",
-            isRequired: false,
+            document_type: "STRA",
+            title: "STRA Apoteker",
+            description: "Surat Tanda Registrasi Apoteker resmi Kemenkes / IAI (Format: PDF / JPG)",
+            isRequired: true,
           },
           {
-            document_type: "SURAT_PENUNJUKAN_APJ",
-            title: "Surat Penunjukan Apoteker",
-            description: "Surat penunjukan / SK penugasan APJ (Format: PDF)",
+            document_type: "SK_APJ",
+            title: "Surat Penunjukan / SK APJ",
+            description: "Surat penunjukan / SK penugasan APJ (Format: PDF / JPG)",
             isRequired: false,
           },
           {
             document_type: "DOKUMEN_TAMBAHAN",
-            title: "Dokumen Tambahan",
-            description: "Denah sarana atau dokumen pendukung lain (Format: PDF / JPG / PNG)",
+            title: "Dokumen Tambahan (Denah / Foto Sarana)",
+            description: "Denah sarana atau dokumen pendukung CDOB lain (Format: PDF / JPG / PNG)",
+            isRequired: false,
+          },
+        ];
+      case "purchase_return":
+        return [
+          {
+            document_type: "NOTA_RETUR",
+            title: "Nota Retur Pembelian Asli",
+            description: "Scan form atau nota retur resmi apotek yang diajukan ke distributor PBF.",
+            isRequired: true,
+          },
+          {
+            document_type: "SURAT_JALAN_RETUR",
+            title: "Surat Jalan / Resi Pengiriman ke PBF",
+            description: "Bukti fisik serah terima paket obat retur dengan ekspedisi / kurir distributor PBF.",
+            isRequired: true,
+          },
+          {
+            document_type: "TANDA_TERIMA_PBF",
+            title: "Bukti Tanda Terima / Konfirmasi PBF",
+            description: "Bukti penerimaan barang fisik yang telah ditandatangani dan distempel pihak PBF.",
+            isRequired: false,
+          },
+          {
+            document_type: "NOTA_KREDIT",
+            title: "Nota Kredit (Credit Note / CN) dari PBF",
+            description: "Dokumen nota kredit potongan tagihan atau bukti transfer pengembalian dana dari PBF.",
+            isRequired: false,
+          },
+        ];
+      case "sales_return":
+        return [
+          {
+            document_type: "NOTA_RETUR_PELANGGAN",
+            title: "Nota Permohonan Retur dari Pelanggan",
+            description: "Surat / form permohonan retur resmi dari sarana / pelanggan pemesan.",
+            isRequired: true,
+          },
+          {
+            document_type: "SURAT_JALAN_RETUR",
+            title: "Surat Jalan / Tanda Terima Fisik Barang Masuk",
+            description: "Bukti fisik serah terima obat yang dikembalikan pelanggan ke apotek.",
+            isRequired: true,
+          },
+          {
+            document_type: "BUKTI_PEMERIKSAAN_GUDANG",
+            title: "Berita Acara Pemeriksaan Fisik Gudang",
+            description: "Hasil pemeriksaan kondisi fisik obat (baik/rusak), segel, bets & expired date.",
+            isRequired: false,
+          },
+          {
+            document_type: "NOTA_KREDIT_PENJUALAN",
+            title: "Nota Kredit (Credit Note) / Bukti Refund Kas",
+            description: "Bukti pemotongan piutang, saldo kredit deposit pelanggan, atau bukti kas keluar refund.",
             isRequired: false,
           },
         ];
@@ -307,6 +372,7 @@ export default function PbfDocumentUpload({
       setRejectingDocId(null);
       setRejectionReason("");
       queryClient.invalidateQueries({ queryKey: ["documents", entityType, entityId] });
+      queryClient.invalidateQueries({ queryKey: ["customers"] });
       setTimeout(() => setSuccessMsg(null), 3000);
     },
     onError: (err: any) => {
@@ -472,8 +538,16 @@ export default function PbfDocumentUpload({
     });
   };
 
-  // Backend URL helper for files
-  const backendBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  // Backend URL helper for files - strip any /api/v1 suffix so static files are loaded properly
+  const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+  const backendBaseUrl = rawApiUrl.replace(/\/api\/v1\/?$/, "");
+
+  const getDocFileUrl = (path: string) => {
+    if (!path) return "";
+    if (path.startsWith("http://") || path.startsWith("https://")) return path;
+    const cleanPath = path.startsWith("/") ? path : `/${path}`;
+    return `${backendBaseUrl}${cleanPath}`;
+  };
 
   // Filter single vs bundle documents
   const singleDocuments = documents.filter((d) => d.upload_mode !== "BUNDLE");
@@ -574,7 +648,7 @@ export default function PbfDocumentUpload({
           <div>
             <h3 className="font-bold text-slate-800 text-sm">{title}</h3>
             <p className="text-[11px] text-slate-500">
-              {subtitle || "Unggah dokumen kepatuhan (SP, Faktur PBF Asal, SIA, SIPA) dengan alur persetujuan perusahaan & preview."}
+              {subtitle || ""}
             </p>
           </div>
         </div>
@@ -628,7 +702,7 @@ export default function PbfDocumentUpload({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {requirements.map((req) => {
               const uploadedDocs = singleDocuments.filter(
-                (d) => d.document_type === req.document_type
+                (d) => isDocTypeMatch(d.document_type, req.document_type)
               );
               const isUploaded = uploadedDocs.length > 0;
 
@@ -851,36 +925,22 @@ export default function PbfDocumentUpload({
                   </div>
 
                   {/* Upload button for this specific slot */}
-                  <div className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
-                    {/* Tanggal Expired Dokumen Input */}
-                    <div className="flex items-center gap-1 text-[10.5px]">
-                      <span className="text-slate-600 font-medium">Tgl Expired:</span>
+                  <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-end gap-2">
+                    <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded text-[11px] shadow-2xs transition active:scale-95">
+                      <Upload className="w-3.5 h-3.5 text-[#00c875]" />
+                      <span>{isUploaded ? "+ Tambah File Lain" : "Unggah File Ini"}</span>
                       <input
-                        type="date"
-                        value={docExpiryDate}
-                        onChange={(e) => setDocExpiryDate(e.target.value)}
-                        className="h-6 px-1.5 border border-slate-300 rounded text-[10.5px] bg-white text-slate-800"
-                        title="Tanggal Kedaluwarsa Dokumen / Izin (SIPA, SIA, Izin PBF, dsb)"
+                        type="file"
+                        className="hidden"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={(e) => {
+                          setSelectedDocType(req.document_type);
+                          handleSingleUpload(e);
+                        }}
+                        disabled={uploading}
                       />
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <label className="cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded text-[11px] shadow-2xs transition active:scale-95">
-                        <Upload className="w-3.5 h-3.5 text-[#00c875]" />
-                        <span>{isUploaded ? "+ Tambah File Lain" : "Unggah File Ini"}</span>
-                        <input
-                          type="file"
-                          className="hidden"
-                          accept=".pdf,.jpg,.jpeg,.png"
-                          onChange={(e) => {
-                            setSelectedDocType(req.document_type);
-                            handleSingleUpload(e);
-                          }}
-                          disabled={uploading}
-                        />
-                      </label>
-                      <span className="text-[10px] text-slate-400">PDF, JPG, PNG</span>
-                    </div>
+                    </label>
+                    <span className="text-[10px] text-slate-400">PDF, JPG, PNG</span>
                   </div>
                 </div>
               );
@@ -1145,24 +1205,24 @@ export default function PbfDocumentUpload({
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-2xs flex items-center justify-center p-4">
           <div className="bg-white rounded-lg shadow-2xl border border-slate-300 w-full max-w-4xl h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             {/* Modal Header */}
-            <div className="px-4 py-2.5 bg-slate-900 text-white flex items-center justify-between shrink-0">
+            <div className="px-4 py-2.5 bg-[#00c875] text-white flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2 overflow-hidden">
-                <FileText className="w-4 h-4 text-emerald-400 shrink-0" />
+                <FileText className="w-4 h-4 text-white shrink-0" />
                 <span className="font-bold text-xs truncate max-w-md">
                   {previewDoc.original_name}
                 </span>
-                <span className="text-[10px] text-slate-400 shrink-0">
+                <span className="text-[10px] text-emerald-100 shrink-0">
                   ({formatFileSize(previewDoc.file_size)})
                 </span>
                 {renderApprovalBadge(previewDoc)}
               </div>
               <div className="flex items-center gap-2">
                 <a
-                  href={`${backendBaseUrl}${previewDoc.file_path}`}
+                  href={getDocFileUrl(previewDoc.file_path)}
                   download={previewDoc.original_name}
                   target="_blank"
                   rel="noreferrer"
-                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] font-semibold flex items-center gap-1.5 transition"
+                  className="px-2.5 py-1 bg-emerald-800 hover:bg-emerald-900 text-white rounded text-[11px] font-semibold flex items-center gap-1.5 transition"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Unduh File</span>
@@ -1181,7 +1241,7 @@ export default function PbfDocumentUpload({
             <div className="flex-1 min-h-0 bg-slate-100 flex items-center justify-center overflow-auto p-2">
               {previewDoc.mime_type.includes("pdf") || previewDoc.file_name.endsWith(".pdf") ? (
                 <iframe
-                  src={`${backendBaseUrl}${previewDoc.file_path}#toolbar=1`}
+                  src={`${getDocFileUrl(previewDoc.file_path)}#toolbar=1`}
                   className="w-full h-full rounded border border-slate-300 bg-white"
                   title="PDF Preview"
                 />
@@ -1190,7 +1250,7 @@ export default function PbfDocumentUpload({
                 <div className="max-w-full max-h-full flex items-center justify-center">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={`${backendBaseUrl}${previewDoc.file_path}`}
+                    src={getDocFileUrl(previewDoc.file_path)}
                     alt={previewDoc.original_name}
                     className="max-w-full max-h-[75vh] object-contain rounded shadow border border-slate-300 bg-white"
                   />
@@ -1271,15 +1331,15 @@ export default function PbfDocumentUpload({
       {editDoc && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-2xs flex items-center justify-center p-4">
           <div className="bg-white rounded-lg shadow-xl border border-slate-300 w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-              <h3 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
-                <Edit2 className="w-3.5 h-3.5 text-amber-600" />
+            <div className="px-4 py-2.5 bg-[#00c875] text-white flex items-center justify-between">
+              <h3 className="font-bold text-xs text-white flex items-center gap-1.5">
+                <Edit2 className="w-3.5 h-3.5 text-white" />
                 <span>Edit Dokumen / Ganti Berkas</span>
               </h3>
               <button
                 type="button"
                 onClick={() => setEditDoc(null)}
-                className="text-slate-400 hover:text-slate-700 transition"
+                className="text-white/80 hover:text-white transition"
               >
                 <X className="w-4 h-4" />
               </button>

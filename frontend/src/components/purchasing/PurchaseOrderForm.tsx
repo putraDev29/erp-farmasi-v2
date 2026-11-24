@@ -23,15 +23,26 @@ import {
   User,
   Calculator,
   Undo2,
+  PackageCheck,
+  Users,
+  FileText,
+  FileCheck,
+  CheckCircle2,
+  CheckSquare,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
 import { CariSupplierModal } from "./CariSupplierModal";
 import { CariItemModal } from "./CariItemModal";
 import { IncludeBiayaModal } from "./IncludeBiayaModal";
 import { DetailItemModal } from "./DetailItemModal";
-import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
+import { AlokasiSupplierModal, SupplierAllocationRow } from "./AlokasiSupplierModal";
+import { TerimaBarangPOModal } from "./TerimaBarangPOModal";
+import { DokumenSPModal } from "./DokumenSPModal";
+import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
+import { UploadDokumenPBFModal } from "./UploadDokumenPBFModal";
 
 interface POItemRow {
+  id?: string;
   product_id: string;
   code: string;
   name: string;
@@ -43,9 +54,13 @@ interface POItemRow {
   unit_price: number;
   discount_percent: number;
   line_total: number;
+  supplier_id?: string;
+  supplier_name?: string;
   stock?: number;
   rack?: string;
   selling_price?: number;
+  is_fulfilled?: boolean;
+  purchase_id?: string;
 }
 
 interface PurchaseOrderFormProps {
@@ -67,7 +82,20 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
   const [isHargaJualModalOpen, setIsHargaJualModalOpen] = useState(false);
   const [isInfoRowModalOpen, setIsInfoRowModalOpen] = useState(false);
   const [isBayarModalOpen, setIsBayarModalOpen] = useState(false);
+  const [isDokumenSPOpen, setIsDokumenSPOpen] = useState(false);
+  const [isUploadPbfDocOpen, setIsUploadPbfDocOpen] = useState(false);
+  const [pbfDocUrl, setPbfDocUrl] = useState("");
+  const [isSaveConfirmModalOpen, setIsSaveConfirmModalOpen] = useState(false);
+  const [isTerimaModalOpen, setIsTerimaModalOpen] = useState(false);
   const [isIncludeBiayaModalOpen, setIsIncludeBiayaModalOpen] = useState(false);
+  const [selectedItemIndices, setSelectedItemIndices] = useState<number[]>([]);
+  const [isFulfilling, setIsFulfilling] = useState(false);
+
+  // Multi-Supplier Allocation Modal state
+  const [isAlokasiModalOpen, setIsAlokasiModalOpen] = useState(false);
+  const [alokasiTargetProduct, setAlokasiTargetProduct] = useState<any | null>(null);
+  const [alokasiInitialRows, setAlokasiInitialRows] = useState<SupplierAllocationRow[]>([]);
+  const [alokasiTotalQty, setAlokasiTotalQty] = useState<number>(1);
   const [includeBiayaData, setIncludeBiayaData] = useState({
     name: "Ongkos Kirim",
     nominal: 0,
@@ -98,6 +126,31 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
   const [isPbfDocModalOpen, setIsPbfDocModalOpen] = useState(false);
   const [pbfDocCount, setPbfDocCount] = useState(0);
 
+  // Persistent / Draft Purchase Order ID for linking documents before creation
+  const [draftOrderId] = useState<string>(() => {
+    if (orderId) return orderId;
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+    return "00000000-0000-0000-0000-000000000000";
+  });
+
+  // Query linked documents for this PO
+  const { data: poDocs = [], refetch: refetchPODocs } = useQuery({
+    queryKey: ["purchase-order-docs", draftOrderId],
+    queryFn: async () => {
+      const res = await api.get(`/documents?entity_type=purchase_order&entity_id=${draftOrderId}`);
+      return res.data?.data || [];
+    },
+    enabled: !!draftOrderId,
+  });
+
+  useEffect(() => {
+    if (poDocs) {
+      setPbfDocCount(poDocs.length);
+    }
+  }, [poDocs]);
+
   // Items table
   const [items, setItems] = useState<POItemRow[]>([]);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
@@ -126,7 +179,57 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
   const [bayarTunai, setBayarTunai] = useState<number>(0);
   const [bayarDeposit, setBayarDeposit] = useState<number>(0);
   const [bayarKredit, setBayarKredit] = useState<number>(0);
+  const [paymentStatus, setPaymentStatus] = useState<string>("UNPAID");
   const [isPrintAfterSave, setIsPrintAfterSave] = useState(false);
+
+  // Format number to Rupiah string e.g. "734.965"
+  const formatRupiahNumber = (num: number): string => {
+    if (!num && num !== 0) return "0";
+    if (Math.round(num) === num) {
+      return num.toLocaleString("id-ID");
+    }
+    return num.toLocaleString("id-ID", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  };
+
+  // Parse Rupiah string e.g. "734.965" -> 734965
+  const parseRupiahNumber = (str: string): number => {
+    if (!str) return 0;
+    const clean = str.replace(/[^0-9,-]/g, "").replace(",", ".");
+    const n = parseFloat(clean);
+    return isNaN(n) ? 0 : n;
+  };
+
+  const handleDpChange = (val: number) => {
+    setDpAmount(val);
+    let newBayarTunai = bayarTunai;
+    if (bayarTunai === grandTotal || (val > 0 && bayarTunai + val > grandTotal)) {
+      newBayarTunai = 0;
+      setBayarTunai(0);
+    }
+    const totalPaid = val + newBayarTunai + bayarDeposit;
+    const sisa = Math.max(0, grandTotal - totalPaid);
+    setBayarKredit(sisa);
+  };
+
+  const handleBayarTunaiChange = (val: number) => {
+    setBayarTunai(val);
+    const totalPaid = dpAmount + val + bayarDeposit;
+    const sisa = Math.max(0, grandTotal - totalPaid);
+    setBayarKredit(sisa);
+  };
+
+  const handleBayarDepositChange = (val: number) => {
+    setBayarDeposit(val);
+    const totalPaid = dpAmount + bayarTunai + val;
+    const sisa = Math.max(0, grandTotal - totalPaid);
+    setBayarKredit(sisa);
+  };
+
+  const handleBayarKreditChange = (val: number) => {
+    setBayarKredit(val);
+    const net = Math.max(0, grandTotal - dpAmount - bayarDeposit - val);
+    setBayarTunai(net);
+  };
 
   // Queries
   const { data: accountsList = [] } = useQuery({
@@ -178,6 +281,14 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
     },
   });
 
+  const { data: suppliers = [] } = useQuery({
+    queryKey: ["suppliers-list"],
+    queryFn: async () => {
+      const res = await api.get("/suppliers");
+      return res.data?.data || [];
+    },
+  });
+
   // Default warehouse
   useEffect(() => {
     if (warehouses.length > 0 && !warehouseId) {
@@ -196,11 +307,33 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
     enabled: isEdit && Boolean(orderId),
   });
 
+  // Status apakah pembayaran sudah pernah disubmit (DP / Sebagian / Lunas / Tempo kredit)
+  // Sesuai aturan: jika pembayaran sudah disubmit, tombol bayar didisable karena sisa hutang muncul di menu Bayar Hutang
+  const isPaymentSubmitted = Boolean(
+    (existingPO && (
+      existingPO.payment_status === "PAID" ||
+      existingPO.payment_status === "PARTIAL" ||
+      existingPO.payment_status === "DP" ||
+      existingPO.payment_status === "TEMPO" ||
+      existingPO.payment_status === "KREDIT" ||
+      (Number(existingPO.paid_amount) || 0) > 0 ||
+      (Number(existingPO.dp_amount) || 0) > 0
+    )) ||
+    (paymentStatus === "PAID" ||
+     paymentStatus === "PARTIAL" ||
+     paymentStatus === "DP" ||
+     paymentStatus === "TEMPO" ||
+     paymentStatus === "KREDIT")
+  );
+
   useEffect(() => {
     if (existingPO) {
       setOrderNo(existingPO.order_no || "Auto");
       if (existingPO.supplier) {
         setSelectedSupplier(existingPO.supplier);
+      } else if (existingPO.supplier_id && suppliers.length > 0) {
+        const foundS = suppliers.find((s: any) => s.id === existingPO.supplier_id);
+        if (foundS) setSelectedSupplier(foundS);
       }
       if (existingPO.warehouse_id) {
         setWarehouseId(existingPO.warehouse_id);
@@ -215,9 +348,19 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
       if (existingPO.sp_number) setSpNumber(existingPO.sp_number);
       if (existingPO.apj_name) setApjName(existingPO.apj_name);
       if (existingPO.apj_sipa_no) setApjSipaNo(existingPO.apj_sipa_no);
+      if (existingPO.pbf_document_url) setPbfDocUrl(existingPO.pbf_document_url);
       if (existingPO.expected_date) {
         setExpectedDate(existingPO.expected_date.split("T")[0]);
       }
+      if (existingPO.dp_amount !== undefined) setDpAmount(Number(existingPO.dp_amount));
+      if (existingPO.paid_amount !== undefined) {
+        const pAmount = Number(existingPO.paid_amount);
+        const dp = Number(existingPO.dp_amount || 0);
+        setBayarTunai(Math.max(0, pAmount - dp));
+      }
+      if (existingPO.remaining_amount !== undefined) setBayarKredit(Number(existingPO.remaining_amount));
+      if (existingPO.payment_status) setPaymentStatus(existingPO.payment_status);
+      if (existingPO.cash_account_id) setCashAccountId(existingPO.cash_account_id);
       if (existingPO.tax_percent !== undefined) {
         setTaxPercent(existingPO.tax_percent);
         if (existingPO.tax_percent > 0) {
@@ -243,20 +386,25 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
           const discPct = qty * unitPrice > 0 ? (disc / (qty * unitPrice)) * 100 : 0;
 
           return {
+            id: it.id,
             product_id: it.product_id,
             code: prod.code || it.code || "-",
             name: prod.name || it.name || "-",
             brand_name: prod.brand?.name || it.brand_name || "-",
             qty: qty,
-            received_qty: 0,
+            received_qty: Number(it.received_qty || 0),
             unit_id: it.unit_id || prod.base_unit_id,
             unit_name: it.unit?.name || prod.base_unit?.name || "PCS",
             unit_price: unitPrice,
             discount_percent: Math.round(discPct * 100) / 100,
             line_total: lineTot,
+            supplier_id: it.supplier_id || existingPO.supplier_id,
+            supplier_name: it.supplier?.name || existingPO.supplier?.name || "-",
             stock: prod.stock || 0,
             rack: prod.rack || "-",
             selling_price: prod.selling_price || 0,
+            is_fulfilled: Boolean(it.is_fulfilled),
+            purchase_id: it.purchase_id,
           };
         });
         setItems(mappedItems);
@@ -329,7 +477,14 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
 
   // Add Item from CariItemModal
   const handleItemChosen = (product: any) => {
-    const existingIndex = items.findIndex((it) => it.product_id === product.id);
+    const currentSupplierId = selectedSupplier?.id || "";
+    // Only combine if it's the exact same product AND same supplier
+    const existingIndex = items.findIndex(
+      (it) =>
+        it.product_id === product.id &&
+        (it.supplier_id === currentSupplierId || (!it.supplier_id && !currentSupplierId))
+    );
+
     if (existingIndex >= 0) {
       // Increment qty
       const updated = [...items];
@@ -356,7 +511,9 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         unit_price: price,
         discount_percent: 0,
         line_total: price,
-        stock: product.stock || 0,
+        supplier_id: selectedSupplier?.id,
+        supplier_name: selectedSupplier?.name,
+        stock: Number(product.stock ?? product.total_stock ?? 0),
         rack: product.rack || "-",
         selling_price: product.selling_price || 0,
       };
@@ -376,6 +533,10 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
       alert("Pilih item dalam tabel yang ingin dihapus.");
       return;
     }
+    if (items[selectedRowIndex]?.is_fulfilled) {
+      alert("Item ini sudah dipindahkan ke Pembelian dan tidak dapat dihapus.");
+      return;
+    }
     const updated = items.filter((_, idx) => idx !== selectedRowIndex);
     setItems(updated);
     setSelectedRowIndex(updated.length > 0 ? 0 : null);
@@ -387,17 +548,97 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
       alert("Pilih item yang ingin diubah.");
       return;
     }
+    if (items[selectedRowIndex]?.is_fulfilled) {
+      alert("Item ini sudah terpenuhi dan dipindahkan ke Pembelian (tidak dapat diubah lagi).");
+      return;
+    }
     setEditingRow({ ...items[selectedRowIndex] });
     setIsEditRowModalOpen(true);
   };
 
-  // Save row edit (Detail Item matching Screenshot 2)
-  const handleSaveDetailItem = (updatedRow: POItemRow) => {
+  // Save row edit (Detail Item with multi-supplier split support)
+  const handleSaveDetailItem = (updatedRow: POItemRow, splitRow?: POItemRow) => {
     if (selectedRowIndex === null) return;
     const updated = [...items];
     updated[selectedRowIndex] = updatedRow;
+    if (splitRow) {
+      // Sisipkan baris supplier tambahan tepat di bawahnya
+      updated.splice(selectedRowIndex + 1, 0, splitRow);
+    }
     setItems(updated);
     setIsEditRowModalOpen(false);
+  };
+
+  // Open Multi-Supplier Allocation Modal
+  const handleOpenAlokasiSupplier = () => {
+    if (selectedRowIndex === null || !items[selectedRowIndex]) {
+      alert("Pilih item obat dalam tabel yang ingin dialokasikan ke supplier.");
+      return;
+    }
+
+    const targetItem = items[selectedRowIndex];
+    // Find all rows in items that belong to the SAME product_id
+    const matchingRows = items.filter((it) => it.product_id === targetItem.product_id);
+    const totalQty = matchingRows.reduce((sum, it) => sum + (Number(it.qty) || 0), 0);
+
+    const initialAllocations: SupplierAllocationRow[] = matchingRows.map((it) => ({
+      supplier_id: it.supplier_id || selectedSupplier?.id || "",
+      supplier_name: it.supplier_name || selectedSupplier?.name || "Supplier Utama",
+      qty: it.qty,
+      unit_price: it.unit_price,
+      discount_percent: it.discount_percent,
+    }));
+
+    setAlokasiTargetProduct({
+      product_id: targetItem.product_id,
+      code: targetItem.code,
+      name: targetItem.name,
+      unit_id: targetItem.unit_id,
+      unit_name: targetItem.unit_name,
+      unit_price: targetItem.unit_price,
+      discount_percent: targetItem.discount_percent,
+    });
+    setAlokasiTotalQty(totalQty);
+    setAlokasiInitialRows(initialAllocations);
+    setIsAlokasiModalOpen(true);
+  };
+
+  // Save Multi-Supplier Allocation (Replaces all rows of this product with the new allocation)
+  const handleSaveAlokasi = (allocations: SupplierAllocationRow[], newTotalQty: number) => {
+    if (!alokasiTargetProduct) return;
+
+    const targetPid = alokasiTargetProduct.product_id;
+    const firstIdx = items.findIndex((it) => it.product_id === targetPid);
+    if (firstIdx === -1) return;
+
+    const baseItem = items[firstIdx];
+
+    // Generate the new rows for each supplier allocation
+    const newRows: POItemRow[] = allocations.map((alloc, aIdx) => {
+      const uPrice = Number(alloc.unit_price) || Number(baseItem.unit_price) || 0;
+      const dPct = Number(alloc.discount_percent) || Number(baseItem.discount_percent) || 0;
+      const lineTot = alloc.qty * uPrice - (alloc.qty * uPrice * dPct) / 100;
+
+      return {
+        ...baseItem,
+        id: aIdx === 0 && alloc.supplier_id === baseItem.supplier_id ? baseItem.id : undefined,
+        qty: alloc.qty,
+        supplier_id: alloc.supplier_id,
+        supplier_name: alloc.supplier_name,
+        unit_price: uPrice,
+        discount_percent: dPct,
+        line_total: lineTot,
+        is_fulfilled: aIdx === 0 && alloc.supplier_id === baseItem.supplier_id ? Boolean(baseItem.is_fulfilled) : false,
+      };
+    });
+
+    // Replace old rows for this product with newRows at firstIdx
+    const remaining = items.filter((it) => it.product_id !== targetPid);
+    remaining.splice(firstIdx >= 0 ? firstIdx : remaining.length, 0, ...newRows);
+
+    setItems(remaining);
+    setSelectedRowIndex(firstIdx);
+    setIsAlokasiModalOpen(false);
   };
 
   // Cek Stok Minimum feature: scans catalog items where stock <= min_stock and adds them!
@@ -454,6 +695,10 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
     if (items.length > 0 && !confirm("Kosongkan form untuk membuat Pesanan Pembelian baru?")) {
       return;
     }
+    if (isEdit) {
+      router.push("/purchasing/orders/new");
+      return;
+    }
     setOrderNo("Auto");
     setSelectedSupplier(null);
     setOrderStatus("Select...");
@@ -467,6 +712,12 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
     setNotaDiscountPercent(0);
     setExtraFee(0);
     setExtraFeeCheckbox(false);
+    setDpAmount(0);
+    setBayarTunai(0);
+    setBayarDeposit(0);
+    setBayarKredit(0);
+    setPaymentStatus("UNPAID");
+    setCashAccountId("");
     setIncludeBiayaData({
       name: "Ongkos Kirim",
       nominal: 0,
@@ -478,17 +729,49 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
   // Save PO Mutation
   const saveMutation = useMutation({
     mutationFn: async () => {
-      if (!selectedSupplier?.id) {
+      const finalSupplierId = selectedSupplier?.id || items.find((it) => it.supplier_id)?.supplier_id || suppliers[0]?.id;
+      if (!finalSupplierId) {
         throw new Error("Pilih Supplier terlebih dahulu.");
       }
       if (items.length === 0) {
         throw new Error("Tabel item pesanan masih kosong. Silakan klik [+ Item].");
       }
 
+      const totalPaid = (Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0);
+      let calculatedPaymentStatus = "UNPAID";
+      if (totalPaid >= grandTotal && grandTotal > 0) {
+        calculatedPaymentStatus = "PAID";
+      } else if (Number(dpAmount) > 0) {
+        calculatedPaymentStatus = "DP";
+      } else if (totalPaid > 0) {
+        calculatedPaymentStatus = "PARTIAL";
+      } else if (bayarKredit > 0 || (isBayarModalOpen && totalPaid === 0)) {
+        calculatedPaymentStatus = "TEMPO";
+      }
+
+      const isExistingPayment = Boolean(
+        existingPO && (
+          existingPO.payment_status === "PAID" ||
+          existingPO.payment_status === "PARTIAL" ||
+          existingPO.payment_status === "DP" ||
+          existingPO.payment_status === "TEMPO" ||
+          (Number(existingPO.paid_amount) || 0) > 0 ||
+          (Number(existingPO.dp_amount) || 0) > 0
+        )
+      );
+
+      const finalPaidAmount = isExistingPayment
+        ? (Number(existingPO.paid_amount) || totalPaid)
+        : totalPaid;
+
+      const finalPaymentStatus = isExistingPayment
+        ? (existingPO.payment_status || calculatedPaymentStatus)
+        : calculatedPaymentStatus;
+
       const defaultUnit = units.find((u: any) => u.name === "Pcs / Buah" || u.code === "PCS") || units[0];
       const payload = {
         warehouse_id: warehouseId || undefined,
-        supplier_id: selectedSupplier.id,
+        supplier_id: finalSupplierId,
         expected_date: expectedDate ? new Date(expectedDate) : undefined,
         notes: notes,
         tax_percent: taxPercent,
@@ -499,44 +782,70 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         sp_number: spNumber,
         apj_name: apjName,
         apj_sipa_no: apjSipaNo,
-        items: items.map((it) => {
-          let resolvedUnitId = it.unit_id;
-          if (!resolvedUnitId || resolvedUnitId.length < 20) {
-            const foundU = units.find(
-              (u: any) =>
-                u.id === it.unit_id ||
-                u.name?.toLowerCase() === it.unit_name?.toLowerCase() ||
-                u.code?.toLowerCase() === it.unit_name?.toLowerCase()
-            );
-            resolvedUnitId = foundU ? foundU.id : defaultUnit?.id;
-          }
-          return {
-            product_id: it.product_id,
-            unit_id: resolvedUnitId,
-            qty: it.qty,
-            unit_price: it.unit_price,
-            discount: (it.qty * it.unit_price * it.discount_percent) / 100,
-          };
-        }),
+        pbf_document_url: pbfDocUrl,
+        dp_amount: isExistingPayment ? Number(existingPO?.dp_amount || dpAmount) : (Number(dpAmount) || 0),
+        paid_amount: finalPaidAmount,
+        remaining_amount: Math.max(0, grandTotal - finalPaidAmount),
+        payment_status: finalPaymentStatus,
+        cash_account_id: cashAccountId || undefined,
+        items: (() => {
+          const seenIds = new Set<string>();
+          return items.map((it) => {
+            let resolvedUnitId = it.unit_id;
+            if (!resolvedUnitId || resolvedUnitId.length < 20) {
+              const foundU = units.find(
+                (u: any) =>
+                  u.id === it.unit_id ||
+                  u.name?.toLowerCase() === it.unit_name?.toLowerCase() ||
+                  u.code?.toLowerCase() === it.unit_name?.toLowerCase()
+              );
+              resolvedUnitId = foundU ? foundU.id : defaultUnit?.id;
+            }
+            let validId = it.id;
+            if (validId) {
+              if (seenIds.has(validId)) {
+                validId = undefined;
+              } else {
+                seenIds.add(validId);
+              }
+            }
+            return {
+              id: validId || undefined,
+              supplier_id: it.supplier_id || finalSupplierId,
+              product_id: it.product_id,
+              unit_id: resolvedUnitId,
+              qty: it.qty,
+              unit_price: it.unit_price,
+              discount: (it.qty * it.unit_price * it.discount_percent) / 100,
+              is_fulfilled: Boolean(it.is_fulfilled),
+              purchase_id: it.purchase_id || undefined,
+            };
+          });
+        })(),
       };
 
       if (isEdit && orderId) {
         return await api.put(`/purchases/orders/${orderId}`, payload);
       }
-      return await api.post("/purchases/orders", payload);
+      return await api.post("/purchases/orders", {
+        ...payload,
+        id: draftOrderId,
+      });
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["journals"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["cash-transactions"] });
       setIsBayarModalOpen(false);
-      alert(
-        isEdit
-          ? "Pesanan Pembelian berhasil diperbarui!"
-          : "Pesanan Pembelian baru berhasil disimpan!"
-      );
+      setIsSaveConfirmModalOpen(false);
       if (isPrintAfterSave) {
-        window.print();
+        setIsDokumenSPOpen(true);
+      } else if (confirm((isEdit ? "Pesanan Pembelian berhasil diperbarui!" : "Pesanan Pembelian baru berhasil disimpan!") + "\n\nDokumen Surat Pesanan (SP) otomatis digenerate.\nApakah Anda ingin melihat & mencetak Dokumen SP sekarang?")) {
+        setIsDokumenSPOpen(true);
+      } else {
+        router.push("/purchasing/orders");
       }
-      router.push("/purchasing/orders");
     },
     onError: (err: any) => {
       alert("Gagal menyimpan PO: " + (err.response?.data?.message || err.message));
@@ -566,6 +875,204 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
     }
     if (confirm(`Apakah Anda yakin ingin menghapus Pesanan Pembelian ${orderNo}?`)) {
       deleteMutation.mutate();
+    }
+  };
+
+  // Handle Fulfill Selected Items into Purchases
+  const handleFulfillSelectedItems = async () => {
+    const selectedRows = selectedItemIndices
+      .map((idx) => items[idx])
+      .filter((it) => it && !it.is_fulfilled);
+
+    if (selectedRows.length === 0) {
+      alert("Silakan centang/checklist minimal satu item yang belum terpenuhi untuk dipindahkan ke Pembelian.");
+      return;
+    }
+
+    try {
+      setIsFulfilling(true);
+
+      let targetOrderId = orderId;
+      const finalSupplierId = selectedSupplier?.id || items.find((it) => it.supplier_id)?.supplier_id || suppliers[0]?.id;
+      if (!finalSupplierId) {
+        alert("Pilih Supplier terlebih dahulu.");
+        return;
+      }
+
+      const defaultUnit = units.find((u: any) => u.name === "Pcs / Buah" || u.code === "PCS") || units[0];
+
+      // Auto-save form PO terlebih dahulu tanpa perlu user klik 'Simpan' secara manual
+      const payload = {
+        warehouse_id: warehouseId || undefined,
+        supplier_id: finalSupplierId,
+        expected_date: expectedDate ? new Date(expectedDate) : undefined,
+        notes: notes,
+        tax_percent: taxPercent,
+        discount: calculatedNominalDiscount,
+        shipping_fee: Number(extraFee) || 0,
+        status: orderStatus !== "Select..." ? orderStatus : "PENDING",
+        sp_type: spType,
+        sp_number: spNumber,
+        apj_name: apjName,
+        apj_sipa_no: apjSipaNo,
+        items: (() => {
+          const seenIds = new Set<string>();
+          return items.map((it) => {
+            let resolvedUnitId = it.unit_id;
+            if (!resolvedUnitId || resolvedUnitId.length < 20) {
+              const foundU = units.find(
+                (u: any) =>
+                  u.id === it.unit_id ||
+                  u.name?.toLowerCase() === it.unit_name?.toLowerCase() ||
+                  u.code?.toLowerCase() === it.unit_name?.toLowerCase()
+              );
+              resolvedUnitId = foundU ? foundU.id : defaultUnit?.id;
+            }
+            let validId = it.id;
+            if (validId) {
+              if (seenIds.has(validId)) {
+                validId = undefined;
+              } else {
+                seenIds.add(validId);
+              }
+            }
+            return {
+              id: validId || undefined,
+              supplier_id: it.supplier_id || finalSupplierId,
+              product_id: it.product_id,
+              unit_id: resolvedUnitId,
+              qty: it.qty,
+              unit_price: it.unit_price,
+              discount: (it.qty * it.unit_price * it.discount_percent) / 100,
+              is_fulfilled: Boolean(it.is_fulfilled),
+              purchase_id: it.purchase_id || undefined,
+            };
+          });
+        })(),
+      };
+
+      if (isEdit && targetOrderId) {
+        await api.put(`/purchases/orders/${targetOrderId}`, payload);
+      } else {
+        const createRes = await api.post("/purchases/orders", {
+          ...payload,
+          id: draftOrderId,
+        });
+        targetOrderId = createRes.data?.data?.id || draftOrderId;
+      }
+
+      // Ambil data PO tersimpan dari server agar mendapatkan ID DB dari setiap item
+      const freshPoRes = await api.get(`/purchases/orders/${targetOrderId}`);
+      const freshPO = freshPoRes.data?.data;
+      const dbItems: any[] = freshPO?.items || [];
+
+      // Dapatkan item_ids yang dipilih dengan mencocokkan baris yang dicentang
+      const itemIdsToFulfill: string[] = [];
+      selectedItemIndices.forEach((idx) => {
+        const row = items[idx];
+        if (!row || row.is_fulfilled) return;
+
+        // 1. Coba cari di dbItems berdasarkan ID yang sama
+        if (row.id) {
+          const directMatch = dbItems.find((dbIt: any) => dbIt.id === row.id && !dbIt.is_fulfilled);
+          if (directMatch) {
+            itemIdsToFulfill.push(directMatch.id);
+            return;
+          }
+        }
+
+        // 2. Cocokkan berdasarkan index yang sama jika item memiliki product_id sama
+        if (
+          dbItems[idx] &&
+          dbItems[idx].product_id === row.product_id &&
+          !dbItems[idx].is_fulfilled &&
+          !itemIdsToFulfill.includes(dbItems[idx].id)
+        ) {
+          itemIdsToFulfill.push(dbItems[idx].id);
+          return;
+        }
+
+        // 3. Cocokkan berdasarkan product_id & supplier_id di dbItems
+        const match = dbItems.find(
+          (dbIt: any) =>
+            dbIt.product_id === row.product_id &&
+            (dbIt.supplier_id === row.supplier_id || (!dbIt.supplier_id && row.supplier_id === finalSupplierId)) &&
+            !itemIdsToFulfill.includes(dbIt.id) &&
+            !dbIt.is_fulfilled
+        );
+        if (match) {
+          itemIdsToFulfill.push(match.id);
+          return;
+        }
+
+        // 4. Fallback cocokkan item unfulfilled apa saja yang memiliki product_id sama
+        const fallbackMatch = dbItems.find(
+          (dbIt: any) =>
+            dbIt.product_id === row.product_id &&
+            !itemIdsToFulfill.includes(dbIt.id) &&
+            !dbIt.is_fulfilled
+        );
+        if (fallbackMatch) {
+          itemIdsToFulfill.push(fallbackMatch.id);
+        }
+      });
+
+      if (itemIdsToFulfill.length === 0) {
+        alert("Gagal memproses item: item tidak ditemukan di database.");
+        return;
+      }
+
+      // Langsung eksekusi pemenuhan item ke menu Pembelian
+      const fulfillRes = await api.post(`/purchases/orders/${targetOrderId}/fulfill-items`, {
+        item_ids: itemIdsToFulfill,
+      });
+
+      if (!fulfillRes.data?.success) {
+        alert(fulfillRes.data?.message || "Gagal memproses pemenuhan item.");
+        return;
+      }
+
+      // LANGSUNG DISABLE item yang terpenuhi di tabel tanpa perlu simpan
+      setItems((prevItems) =>
+        prevItems.map((item, idx) => {
+          if (selectedItemIndices.includes(idx)) {
+            return {
+              ...item,
+              is_fulfilled: true,
+              received_qty: item.qty,
+            };
+          }
+          return item;
+        })
+      );
+      setSelectedItemIndices([]);
+
+      queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["purchase-order", targetOrderId] });
+      queryClient.invalidateQueries({ queryKey: ["purchases"] });
+
+      // Cek apakah seluruh item dalam pesanan ini sudah terpenuhi
+      const remainingUnfulfilled = items.filter(
+        (it, idx) => !selectedItemIndices.includes(idx) && !it.is_fulfilled
+      );
+
+      if (remainingUnfulfilled.length === 0) {
+        alert(
+          "Semua item dalam pesanan pembelian telah terpenuhi dan langsung masuk ke menu Pembelian!\n\n" +
+          "Pesanan ini sudah selesai dan tidak akan muncul di daftar Pesanan Pembelian lagi."
+        );
+        router.push("/purchasing/orders");
+      } else {
+        alert(
+          `${selectedRows.length} item berhasil dipenuhi dan langsung masuk ke menu Pembelian!\n` +
+          `Item yang telah terpenuhi langsung dinonaktifkan (disable).`
+        );
+      }
+    } catch (err: any) {
+      console.error("Gagal memindahkan item ke Pembelian:", err);
+      alert(err.response?.data?.message || err.message || "Terjadi kesalahan saat memindahkan item ke Pembelian.");
+    } finally {
+      setIsFulfilling(false);
     }
   };
 
@@ -682,10 +1189,10 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
           </div>
         </div>
 
-        {/* ROW 2: Masuk Ke | PPN */}
+        {/* ROW 2: Masuk Ke | PPN | Terpenuhi | Dokumen SP */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-1.5 items-end">
           {/* Masuk Ke */}
-          <div className="md:col-span-6">
+          <div className="md:col-span-5">
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
               Masuk Ke :
             </label>
@@ -703,7 +1210,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
           </div>
 
           {/* PPN */}
-          <div className="md:col-span-6">
+          <div className="md:col-span-3">
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
               PPN :
             </label>
@@ -717,66 +1224,46 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
               <option value="Exclude">Exclude</option>
             </select>
           </div>
-        </div>
 
-        {/* ROW 3: PBF SP Compliance & Upload */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-1.5 items-end pt-0.5">
-          {/* No. SP Farmasi */}
-          <div className="md:col-span-3">
-            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
-              No. SP Farmasi Resmi :
-            </label>
-            <input
-              type="text"
-              value={spNumber}
-              onChange={(e) => setSpNumber(e.target.value)}
-              placeholder="Contoh: SP/AB/2026/XI/001"
-              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 font-mono"
-            />
-          </div>
-
-          {/* Nama APJ */}
-          <div className="md:col-span-3">
-            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
-              Apoteker Penanggung Jawab (APJ) :
-            </label>
-            <input
-              type="text"
-              value={apjName}
-              onChange={(e) => setApjName(e.target.value)}
-              placeholder="Nama APJ Pemesan"
-              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500"
-            />
-          </div>
-
-          {/* SIPA APJ */}
-          <div className="md:col-span-3">
-            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
-              No. SIPA APJ :
-            </label>
-            <input
-              type="text"
-              value={apjSipaNo}
-              onChange={(e) => setApjSipaNo(e.target.value)}
-              placeholder="No. SIPA APJ"
-              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 font-mono"
-            />
-          </div>
-
-          {/* Lampiran Dokumen SP */}
-          <div className="md:col-span-3">
+          {/* Tombol Terpenuhi */}
+          <div className="md:col-span-2">
             <button
               type="button"
-              onClick={() => setIsPbfDocModalOpen(true)}
-              className="w-full h-6 px-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-semibold rounded text-[11px] inline-flex items-center justify-between shadow-2xs transition active:scale-95"
-              title="Upload scan Surat Pesanan fisik bertandatangan basah APJ"
+              onClick={handleFulfillSelectedItems}
+              disabled={isFulfilling}
+              className="w-full h-6 px-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded text-[10.5px] inline-flex items-center justify-between shadow-2xs transition active:scale-95 cursor-pointer disabled:opacity-50"
+              title="Pindahkan item yang dicentang ke menu Pembelian (Terpenuhi)"
             >
-              <span className="flex items-center gap-1">
-                <span>📎</span>
-                <span>Upload Scan SP APJ</span>
+              <span className="flex items-center gap-1 truncate">
+                <CheckSquare className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{isFulfilling ? "Memproses..." : "Terpenuhi"}</span>
               </span>
-              <span className="bg-emerald-600 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
-                {pbfDocCount}
+              <span className="bg-emerald-800 text-white text-[9px] px-1 py-0.2 rounded font-bold shrink-0">
+                {selectedItemIndices.length > 0 ? `${selectedItemIndices.length} Item` : "OK"}
+              </span>
+            </button>
+          </div>
+
+          {/* Dokumen SP */}
+          <div className="md:col-span-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (items.length === 0) {
+                  alert("Tabel item obat masih kosong. Tambahkan item terlebih dahulu untuk melihat Dokumen SP.");
+                  return;
+                }
+                setIsDokumenSPOpen(true);
+              }}
+              className="w-full h-6 px-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-semibold rounded text-[10.5px] inline-flex items-center justify-between shadow-2xs transition active:scale-95 cursor-pointer"
+              title="Lihat & Cetak Dokumen Surat Pesanan (SP) Resmi"
+            >
+              <span className="flex items-center gap-1 truncate">
+                <FileText className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                <span className="truncate">Dokumen SP</span>
+              </span>
+              <span className="bg-emerald-600 text-white text-[9px] px-1 py-0.2 rounded font-bold shrink-0">
+                SP
               </span>
             </button>
           </div>
@@ -791,12 +1278,40 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
             <table className="w-full text-left border-collapse text-[10.5px] whitespace-nowrap">
               <thead className="bg-slate-100 border-b border-slate-300 text-slate-700 font-bold sticky top-0 z-10 shadow-2xs h-6">
                 <tr>
+                  <th className="py-1 px-1.5 border-r border-slate-300 w-7 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label="Pilih Semua Item"
+                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer h-3 w-3"
+                      checked={
+                        items.length > 0 &&
+                        items.filter((it) => !it.is_fulfilled).length > 0 &&
+                        items
+                          .map((it, idx) => ({ it, idx }))
+                          .filter(({ it }) => !it.is_fulfilled)
+                          .every(({ idx }) => selectedItemIndices.includes(idx))
+                      }
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          const unfulfilledIndices = items
+                            .map((it, idx) => ({ it, idx }))
+                            .filter(({ it }) => !it.is_fulfilled)
+                            .map(({ idx }) => idx);
+                          setSelectedItemIndices(unfulfilledIndices);
+                        } else {
+                          setSelectedItemIndices([]);
+                        }
+                      }}
+                      title="Pilih semua item yang belum terpenuhi"
+                    />
+                  </th>
                   <th className="py-1 px-2 border-r border-slate-300 w-8 text-center">No</th>
                   <th className="py-1 px-2 border-r border-slate-300 w-24">Kode</th>
                   <th className="py-1 px-2.5 border-r border-slate-300 min-w-[180px]">Nama</th>
                   <th className="py-1 px-2 border-r border-slate-300 w-24">Merek</th>
                   <th className="py-1 px-2 border-r border-slate-300 w-16 text-right">Jumlah</th>
                   <th className="py-1 px-2 border-r border-slate-300 w-16 text-right">Jml Teri...</th>
+                  <th className="py-1 px-2 border-r border-slate-300 w-28">Supplier</th>
                   <th className="py-1 px-1.5 border-r border-slate-300 w-14 text-center">Satuan</th>
                   <th className="py-1 px-2 border-r border-slate-300 w-24 text-right">Harga</th>
                   <th className="py-1 px-1.5 border-r border-slate-300 w-14 text-right">Pot %</th>
@@ -806,24 +1321,47 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
               <tbody className="divide-y divide-slate-100">
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="py-5 text-center text-slate-400 font-medium text-xs">
+                    <td colSpan={12} className="py-5 text-center text-slate-400 font-medium text-xs">
                       No data
                     </td>
                   </tr>
                 ) : (
                   items.map((it, idx) => {
                     const isSelected = selectedRowIndex === idx;
+                    const isChecked = Boolean(it.is_fulfilled || selectedItemIndices.includes(idx));
                     return (
                       <tr
                         key={idx}
                         onClick={() => handleSelectRow(idx)}
                         onDoubleClick={handleOpenEditRow}
-                        className={`cursor-pointer transition border-b border-slate-100 h-6 ${
-                          isSelected
-                            ? "bg-sky-50 font-medium text-sky-950"
-                            : "hover:bg-slate-50 text-slate-800"
+                        className={`transition border-b border-slate-100 h-6 ${
+                          it.is_fulfilled
+                            ? "bg-slate-100/70 text-slate-400 select-none cursor-not-allowed opacity-75"
+                            : isSelected
+                            ? "bg-sky-50 font-medium text-sky-950 cursor-pointer"
+                            : "hover:bg-slate-50 text-slate-800 cursor-pointer"
                         }`}
                       >
+                        <td className="py-0.5 px-1.5 text-center border-r border-slate-200">
+                          <input
+                            type="checkbox"
+                            disabled={it.is_fulfilled}
+                            checked={isChecked}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              if (it.is_fulfilled) return;
+                              if (e.target.checked) {
+                                setSelectedItemIndices((prev) => [...prev, idx]);
+                              } else {
+                                setSelectedItemIndices((prev) => prev.filter((i) => i !== idx));
+                              }
+                            }}
+                            className={`rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-3 w-3 ${
+                              it.is_fulfilled ? "cursor-not-allowed opacity-40" : "cursor-pointer"
+                            }`}
+                            title={it.is_fulfilled ? "Item ini sudah dipindahkan ke Pembelian" : "Checklist untuk dipindahkan ke Pembelian"}
+                          />
+                        </td>
                         <td className="py-0.5 px-2 text-center border-r border-slate-200 text-slate-500">
                           {idx + 1}
                         </td>
@@ -841,6 +1379,22 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                         </td>
                         <td className="py-0.5 px-2 border-r border-slate-200 text-right font-mono text-slate-500">
                           {it.received_qty.toFixed(2)}
+                        </td>
+                        <td className="py-0.5 px-2 border-r border-slate-200 text-slate-700 truncate max-w-[140px]" title={it.supplier_name || selectedSupplier?.name || "-"}>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="truncate">{it.supplier_name || selectedSupplier?.name || "-"}</span>
+                            {it.is_fulfilled ? (
+                              <span className="px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 font-bold text-[8.5px] border border-emerald-300 shrink-0">
+                                Di Pembelian
+                              </span>
+                            ) : (
+                              items.filter((x) => x.product_id === it.product_id).length > 1 && (
+                                <span className="px-1 py-0.2 rounded bg-emerald-100 text-emerald-800 font-bold text-[8.5px] border border-emerald-300 shrink-0">
+                                  Multi
+                                </span>
+                              )
+                            )}
+                          </div>
                         </td>
                         <td className="py-0.5 px-1.5 border-r border-slate-200 text-center font-semibold text-slate-700">
                           {it.unit_name}
@@ -931,14 +1485,13 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
           className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 rounded font-bold text-[10.5px] flex items-center gap-1 shadow-2xs transition active:scale-95"
           title="Tambah Item Pesanan (+ Item)"
         >
-          <Plus className="w-3 h-3 stroke-[2.8]" />
           <span>+ Item</span>
         </button>
 
         <button
           type="button"
           onClick={handleOpenEditRow}
-          disabled={selectedRowIndex === null}
+          disabled={selectedRowIndex === null || Boolean(selectedItemRow?.is_fulfilled)}
           className="w-6 h-6 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded flex items-center justify-center shadow-2xs transition active:scale-95 disabled:opacity-40"
           title="Ubah Item Terpilih (Pencil)"
         >
@@ -948,7 +1501,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         <button
           type="button"
           onClick={handleDeleteRow}
-          disabled={selectedRowIndex === null}
+          disabled={selectedRowIndex === null || Boolean(selectedItemRow?.is_fulfilled)}
           className="w-6 h-6 bg-white hover:bg-slate-50 border border-slate-300 text-rose-600 rounded flex items-center justify-center shadow-2xs transition active:scale-95 disabled:opacity-40"
           title="Hapus Item Terpilih (Trash)"
         >
@@ -977,6 +1530,17 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
           title="Lihat Daftar Harga Jual Item"
         >
           <span>Harga Jual</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={handleOpenAlokasiSupplier}
+          disabled={selectedRowIndex === null}
+          className="h-6 px-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded font-bold text-[10.5px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-40"
+          title="Alokasi kekurangan obat ini ke beberapa supplier (Bisa lebih dari 2 supplier)"
+        >
+          <Users className="w-3.5 h-3.5 text-emerald-700" />
+          <span>Alokasi Supplier</span>
         </button>
 
         <button
@@ -1241,10 +1805,12 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
           <span>Tambah</span>
         </button>
 
+        {/* 💾 Simpan (Membuka Modal Persetujuan Simpan) */}
         <button
           type="button"
           onClick={() => {
-            if (!selectedSupplier?.id) {
+            const finalSupplierId = selectedSupplier?.id || items.find((it) => it.supplier_id)?.supplier_id || suppliers[0]?.id;
+            if (!finalSupplierId) {
               alert("Pilih Supplier terlebih dahulu.");
               return;
             }
@@ -1252,14 +1818,10 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
               alert("Tabel item pesanan masih kosong. Silakan klik [+ Item].");
               return;
             }
-            if (bayarTunai === 0 && bayarKredit === 0 && grandTotal > 0) {
-              setBayarTunai(grandTotal);
-              setBayarKredit(0);
-            }
-            setIsBayarModalOpen(true);
+            setIsSaveConfirmModalOpen(true);
           }}
           disabled={saveMutation.isPending}
-          className="h-6 px-3 bg-[#009b62] hover:bg-[#008754] text-white font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-50"
+          className="h-6 px-3 bg-[#009b62] hover:bg-[#008754] text-white font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-50 cursor-pointer"
           title="Simpan Pesanan Pembelian"
         >
           <Save className="w-3 h-3" />
@@ -1270,7 +1832,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
           type="button"
           onClick={handleDeletePO}
           disabled={!isEdit}
-          className="h-6 px-2.5 bg-white hover:bg-rose-50 border border-slate-300 text-rose-600 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-40"
+          className="h-6 px-2.5 bg-white hover:bg-rose-50 border border-slate-300 text-rose-600 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-40 cursor-pointer"
           title="Hapus Pesanan Pembelian"
         >
           <Trash2 className="w-3 h-3" />
@@ -1280,32 +1842,29 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         <button
           type="button"
           onClick={() => window.print()}
-          className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95"
+          className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
           title="Cetak Pesanan Pembelian"
         >
           <Printer className="w-3 h-3" />
           <span>Cetak</span>
         </button>
 
+        {/* 📄 Dokumen SP (Generate Otomatis) */}
         <button
           type="button"
           onClick={() => {
-            if (bayarTunai === 0 && bayarKredit === 0 && grandTotal > 0) {
-              setBayarTunai(grandTotal);
-              setBayarKredit(0);
+            if (items.length === 0) {
+              alert("Tabel item obat masih kosong. Tambahkan item terlebih dahulu untuk melihat Dokumen SP.");
+              return;
             }
-            setIsBayarModalOpen(true);
+            setIsDokumenSPOpen(true);
           }}
-          className="h-6 px-2.5 bg-white hover:bg-amber-50 border border-amber-400 text-amber-700 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95"
-          title="Bayar DP / Pembayaran PO"
+          className="h-6 px-2.5 bg-sky-50 hover:bg-sky-100 border border-sky-300 text-sky-800 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
+          title="Lihat & Cetak Dokumen Surat Pesanan (SP) Resmi"
         >
-          <CreditCard className="w-3 h-3 text-amber-600" />
-          <span>Bayar</span>
+          <FileText className="w-3 h-3 text-sky-600" />
+          <span>Dokumen SP</span>
         </button>
-      </div>
-
-      <div className="px-3 pb-1 text-[10px] text-slate-400">
-        Status Pembayaran PO: <strong className={((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0)) >= grandTotal && grandTotal > 0 ? "text-emerald-600 font-bold" : ((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0)) > 0 ? "text-amber-600 font-bold" : "text-slate-600 font-bold"}>{((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0)) >= grandTotal && grandTotal > 0 ? "LUNAS" : ((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0)) > 0 ? "DP / SEBAGIAN" : "BELUM LUNAS"}</strong>
       </div>
 
       {/* MODAL 1: CARI SUPPLIER */}
@@ -1322,6 +1881,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         onClose={() => setIsItemModalOpen(false)}
         onSelect={handleItemChosen}
         supplierCode={selectedSupplier?.code || ""}
+        defaultWarehouseId={warehouseId}
       />
 
       {/* MODAL INCLUDE BIAYA */}
@@ -1348,6 +1908,8 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         onClose={() => setIsEditRowModalOpen(false)}
         item={editingRow}
         onSave={handleSaveDetailItem}
+        mainSupplier={selectedSupplier}
+        onOpenMultiSupplier={handleOpenAlokasiSupplier}
       />
 
       {/* MODAL 4: HARGA JUAL */}
@@ -1492,10 +2054,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
               <div className="bg-[#fce7f3] border-2 border-dashed border-pink-300 rounded-lg px-4 py-3 flex items-center justify-between shadow-2xs">
                 <span className="text-base font-bold text-slate-800 tracking-wide">Total :</span>
                 <span className="text-3xl font-black font-mono text-slate-900 tracking-tight">
-                  {Number(grandTotal).toLocaleString("en-US", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  Rp {formatRupiahNumber(grandTotal)}
                 </span>
               </div>
 
@@ -1507,28 +2066,25 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                     DP PO/Pesanan :
                   </label>
                   <div className="flex-1 relative flex items-center">
+                    <span className="absolute left-2.5 text-xs text-slate-400 font-bold select-none">Rp</span>
                     <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={dpAmount === 0 ? "" : dpAmount}
-                      placeholder="0.00"
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setDpAmount(val);
-                        setBayarKredit(Math.max(0, grandTotal - (val + bayarTunai + bayarDeposit)));
-                      }}
-                      className="w-full h-7 px-2.5 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                      type="text"
+                      value={formatRupiahNumber(dpAmount)}
+                      placeholder="0"
+                      onChange={(e) => handleDpChange(parseRupiahNumber(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      className="w-full h-7 pl-9 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
                     />
                     <button
                       type="button"
                       tabIndex={-1}
                       onClick={() => {
-                        const poDp = Number(grandTotal) * 0.3;
+                        const poDp = Math.round(Number(grandTotal) * 0.3);
                         setDpAmount(poDp);
-                        setBayarKredit(Math.max(0, grandTotal - (poDp + bayarTunai + bayarDeposit)));
+                        setBayarTunai(0);
+                        setBayarKredit(Math.max(0, grandTotal - (poDp + bayarDeposit)));
                       }}
-                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50"
+                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50 cursor-pointer"
                       title="Hitung DP PO (30%)"
                     >
                       <Calculator className="w-3 h-3" />
@@ -1541,17 +2097,15 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                   <label className="w-32 text-right font-medium text-slate-700 shrink-0">
                     Kas / Bank :
                   </label>
-                  <select
-                    value={cashAccountId}
-                    onChange={(e) => setCashAccountId(e.target.value)}
-                    className="flex-1 h-7 px-2 border border-slate-300 rounded text-xs font-semibold focus:border-sky-500 focus:outline-none bg-white font-mono"
-                  >
-                    {accountsList.map((a: any) => (
-                      <option key={a.id} value={a.id}>
-                        {a.code} - {a.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex-1">
+                    <SearchableAccountSelect
+                      accounts={accountsList}
+                      value={cashAccountId}
+                      onChange={(val) => setCashAccountId(val)}
+                      placeholder="Pilih Akun Kas / Bank..."
+                      buttonClassName="h-7 text-xs font-semibold font-mono"
+                    />
+                  </div>
                 </div>
 
                 {/* Bayar Tunai */}
@@ -1561,19 +2115,15 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                       Bayar Tunai :
                     </label>
                     <div className="flex-1 relative flex items-center">
+                      <span className="absolute left-2.5 text-xs text-slate-400 font-bold select-none">Rp</span>
                       <input
-                        type="number"
-                        step="any"
-                        min="0"
+                        type="text"
                         autoFocus
-                        value={bayarTunai === 0 ? "" : bayarTunai}
-                        placeholder="0.00"
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          setBayarTunai(val);
-                          setBayarKredit(Math.max(0, grandTotal - (dpAmount + val + bayarDeposit)));
-                        }}
-                        className="w-full h-7 px-2.5 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                        value={formatRupiahNumber(bayarTunai)}
+                        placeholder="0"
+                        onChange={(e) => handleBayarTunaiChange(parseRupiahNumber(e.target.value))}
+                        onFocus={(e) => e.target.select()}
+                        className="w-full h-7 pl-9 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
                       />
                       <button
                         type="button"
@@ -1583,7 +2133,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                           setBayarTunai(fullCash);
                           setBayarKredit(0);
                         }}
-                        className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50"
+                        className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50 cursor-pointer"
                         title="Isi Tunai Penuh"
                       >
                         <Calculator className="w-3 h-3" />
@@ -1608,7 +2158,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                       type="button"
                       onClick={() => {
                         const net = Math.max(0, grandTotal - dpAmount - bayarDeposit);
-                        const half = Math.round(net * 0.5 * 100) / 100;
+                        const half = Math.round(net * 0.5);
                         setBayarTunai(half);
                         setBayarKredit(Math.max(0, net - half));
                       }}
@@ -1635,18 +2185,14 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                     Bayar Deposit :
                   </label>
                   <div className="flex-1 relative flex items-center">
+                    <span className="absolute left-2.5 text-xs text-slate-400 font-bold select-none">Rp</span>
                     <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={bayarDeposit === 0 ? "" : bayarDeposit}
-                      placeholder="0.00"
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setBayarDeposit(val);
-                        setBayarKredit(Math.max(0, grandTotal - (dpAmount + bayarTunai + val)));
-                      }}
-                      className="w-full h-7 px-2.5 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                      type="text"
+                      value={formatRupiahNumber(bayarDeposit)}
+                      placeholder="0"
+                      onChange={(e) => handleBayarDepositChange(parseRupiahNumber(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      className="w-full h-7 pl-9 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
                     />
                     <button
                       type="button"
@@ -1655,7 +2201,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                         setBayarDeposit(0);
                         setBayarKredit(Math.max(0, grandTotal - (dpAmount + bayarTunai)));
                       }}
-                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50"
+                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50 cursor-pointer"
                       title="Reset Deposit"
                     >
                       <Calculator className="w-3 h-3" />
@@ -1669,18 +2215,14 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                     Bayar Kredit :
                   </label>
                   <div className="flex-1 relative flex items-center">
+                    <span className="absolute left-2.5 text-xs text-slate-400 font-bold select-none">Rp</span>
                     <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={bayarKredit === 0 ? "" : bayarKredit}
-                      placeholder="0.00"
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setBayarKredit(val);
-                        setBayarTunai(Math.max(0, grandTotal - (dpAmount + bayarDeposit + val)));
-                      }}
-                      className="w-full h-7 px-2.5 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                      type="text"
+                      value={formatRupiahNumber(bayarKredit)}
+                      placeholder="0"
+                      onChange={(e) => handleBayarKreditChange(parseRupiahNumber(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      className="w-full h-7 pl-9 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
                     />
                     <button
                       type="button"
@@ -1690,7 +2232,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                         setBayarTunai(0);
                         setBayarKredit(fullKredit);
                       }}
-                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50"
+                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50 cursor-pointer"
                       title="Jadikan Hutang Penuh"
                     >
                       <Calculator className="w-3 h-3" />
@@ -1703,10 +2245,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
               <div className="bg-[#22c55e] text-white rounded-lg px-4 py-2 flex items-center justify-between shadow-2xs">
                 <span className="text-sm font-bold tracking-wide">Total :</span>
                 <span className="text-2xl font-black font-mono tracking-tight">
-                  {((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0)).toLocaleString("en-US", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  Rp {formatRupiahNumber((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0))}
                 </span>
               </div>
 
@@ -1714,13 +2253,10 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
               <div className="bg-[#f97316] text-white rounded-lg px-4 py-2 flex items-center justify-between shadow-2xs">
                 <span className="text-sm font-bold tracking-wide">Sisa :</span>
                 <span className="text-2xl font-black font-mono tracking-tight">
-                  {Math.max(
+                  Rp {formatRupiahNumber(Math.max(
                     0,
                     grandTotal - ((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0))
-                  ).toLocaleString("en-US", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  ))}
                 </span>
               </div>
             </div>
@@ -1769,44 +2305,172 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         </div>
       )}
 
-      {/* MODAL 7: DOKUMEN SP & PBF UPLOAD (Dual Mode Upload) */}
-      {isPbfDocModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-2xs p-3">
-          <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-4xl max-h-[90vh] overflow-y-auto flex flex-col animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-4 py-2.5 bg-slate-100 border-b border-slate-200 flex justify-between items-center">
-              <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
-                <span>📎</span>
-                <span>Lampiran Dokumen Surat Pesanan (SP) Farmasi</span>
+      {/* MODAL PERSETUJUAN SIMPAN (Bukan Modal Pembayaran) */}
+      {isSaveConfirmModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-2xs p-3 animate-in fade-in duration-150">
+          <div className="bg-white rounded-lg shadow-2xl border border-slate-300 w-full max-w-md overflow-hidden">
+            {/* Header Ketoko Green */}
+            <div className="px-4 py-2.5 bg-[#00c875] text-white flex justify-between items-center">
+              <span className="font-bold text-sm flex items-center gap-1.5">
+                <Save className="w-4 h-4 text-white" />
+                <span>Konfirmasi Simpan Pesanan Pembelian</span>
               </span>
               <button
                 type="button"
-                onClick={() => setIsPbfDocModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded"
+                onClick={() => setIsSaveConfirmModalOpen(false)}
+                className="p-1 text-white/80 hover:text-white rounded"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-4">
-              <PbfDocumentUpload
-                entityType="purchase_order"
-                entityId={orderId || "temp"}
-                title={`Dokumen Surat Pesanan (SP): ${orderNo || "PO"}`}
-                subtitle="Unggah scan fisik Surat Pesanan (SP) bertandatangan basah APJ dan berstempel resmi apotek"
-                onUploadedCountChange={setPbfDocCount}
-              />
+
+            {/* Content */}
+            <div className="p-4 space-y-3 text-xs">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-emerald-700">
+                  <Check className="w-5 h-5 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-800 text-sm">Simpan Dokumen Pesanan?</h4>
+                  <p className="text-slate-500 text-[11px] mt-0.5">
+                    Apakah Anda yakin ingin menyimpan dokumen pesanan pembelian ini ke sistem?
+                  </p>
+                </div>
+              </div>
+
+              {/* Ringkasan Dokumen */}
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5 text-[11px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">No. Transaksi :</span>
+                  <span className="font-mono font-bold text-slate-800">{orderNo || "Auto"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Tanggal :</span>
+                  <span className="text-slate-700">{orderDate}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Supplier :</span>
+                  <span className="font-semibold text-slate-800">{selectedSupplier?.name || "-"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Jumlah Item :</span>
+                  <span className="font-medium text-slate-800">{items.length} item obat</span>
+                </div>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 text-xs font-bold">
+                  <span className="text-slate-700">Total Nilai Pesanan :</span>
+                  <span className="text-emerald-700">{formatCurrency(grandTotal)}</span>
+                </div>
+              </div>
+
+              <div className="p-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-800 flex items-center gap-1.5">
+                <span>💡</span>
+                <span>
+                  Pembayaran DP atau pelunasan kas/bank dapat dilakukan terpisah melalui tombol <strong>Bayar</strong>.
+                </span>
+              </div>
             </div>
-            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex justify-end">
+
+            {/* Footer Buttons */}
+            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 text-xs">
               <button
                 type="button"
-                onClick={() => setIsPbfDocModalOpen(false)}
-                className="h-7 px-4 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-xs shadow-2xs transition"
+                onClick={() => setIsSaveConfirmModalOpen(false)}
+                className="h-7 px-3.5 border border-slate-300 rounded hover:bg-slate-100 text-slate-700 font-medium transition cursor-pointer"
               >
-                Selesai
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={saveMutation.isPending}
+                onClick={() => {
+                  saveMutation.mutate();
+                }}
+                className="h-7 px-4 bg-[#00c875] hover:bg-[#00b066] text-white font-bold rounded shadow-2xs transition active:scale-95 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{saveMutation.isPending ? "Menyimpan..." : "Ya, Simpan Data"}</span>
               </button>
             </div>
           </div>
         </div>
       )}
+
+
+
+      {/* MODAL 8: TERIMA & VERIFIKASI BARANG PO */}
+      <TerimaBarangPOModal
+        isOpen={isTerimaModalOpen}
+        onClose={() => setIsTerimaModalOpen(false)}
+        poId={orderId || null}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+          queryClient.invalidateQueries({ queryKey: ["purchases"] });
+        }}
+      />
+
+      {/* MODAL 9: ALOKASI PEMENUHAN MULTI-SUPPLIER (Fleksibel & Otomatis Hitung Kekurangan) */}
+      <AlokasiSupplierModal
+        isOpen={isAlokasiModalOpen}
+        onClose={() => setIsAlokasiModalOpen(false)}
+        product={alokasiTargetProduct}
+        initialAllocations={alokasiInitialRows}
+        totalQtyNeeded={alokasiTotalQty}
+        availableSuppliers={suppliers}
+        defaultSupplier={selectedSupplier}
+        onSave={handleSaveAlokasi}
+      />
+
+      {/* MODAL 10: DOKUMEN SP RESMI (Generate Otomatis Sesuai Format KOP) */}
+      <DokumenSPModal
+        isOpen={isDokumenSPOpen}
+        onClose={() => {
+          setIsDokumenSPOpen(false);
+          if (saveMutation.isSuccess) {
+            router.push("/purchasing/orders");
+          }
+        }}
+        orderId={orderId || null}
+        poData={{
+          id: orderId || draftOrderId,
+          order_no: orderNo,
+          date: new Date(),
+          sp_number: spNumber,
+          apj_name: apjName,
+          apj_sipa_no: apjSipaNo,
+          supplier: selectedSupplier,
+          items: items.map((it) => {
+            const itemSupp = it.supplier_id
+              ? suppliers.find((s: any) => s.id === it.supplier_id)
+              : selectedSupplier;
+            return {
+              id: it.product_id,
+              name: it.name,
+              qty: it.qty,
+              supplier_id: it.supplier_id || selectedSupplier?.id,
+              supplier: itemSupp,
+              unit: { name: it.unit_name || "Box", code: it.unit_name || "BOX" },
+              product: { name: it.name },
+            };
+          }),
+        }}
+      />
+
+      {/* MODAL 11: UPLOAD DOKUMEN PEMBELIAN / DARI PBF ASAL (1 Dokumen Faktur/Surat Jalan) */}
+      <UploadDokumenPBFModal
+        isOpen={isUploadPbfDocOpen}
+        onClose={() => setIsUploadPbfDocOpen(false)}
+        orderId={orderId || draftOrderId || null}
+        orderNo={orderNo}
+        supplierName={selectedSupplier?.name}
+        existingDocUrl={pbfDocUrl || existingPO?.pbf_document_url}
+        onSuccess={(newDocUrl) => {
+          setPbfDocUrl(newDocUrl);
+          queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+          if (orderId) {
+            queryClient.invalidateQueries({ queryKey: ["purchase-order", orderId] });
+          }
+        }}
+      />
     </div>
   );
 };

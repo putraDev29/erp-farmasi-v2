@@ -58,6 +58,20 @@ func MigrateDB(db *gorm.DB) error {
 	db.Exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";")
 	db.Exec("CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";")
 	db.Exec("ALTER TABLE role_module_permissions ALTER COLUMN module TYPE VARCHAR(255);")
+	db.Exec("ALTER TABLE sales_orders ALTER COLUMN process_status TYPE VARCHAR(100);")
+	db.Exec("ALTER TABLE sales_orders ALTER COLUMN status TYPE VARCHAR(50);")
+	db.Exec("ALTER TABLE sales ALTER COLUMN status TYPE VARCHAR(50);")
+	db.Exec("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'TRANSAKSI';")
+	db.Exec("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS doc_no VARCHAR(100);")
+	db.Exec("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS description TEXT;")
+	db.Exec("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'Sukses';")
+	db.Exec("ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS computer_name VARCHAR(100) DEFAULT 'Desktop (Windows)';")
+
+	// Clean up and standardize SP Numbers
+	db.Exec("UPDATE sales SET customer_sp_number = REPLACE(customer_sp_number, 'SP/INV/', 'SP/') WHERE customer_sp_number LIKE 'SP/INV/%';")
+	db.Exec("UPDATE sales_orders SET customer_sp_number = REPLACE(customer_sp_number, 'SP/SO/', 'SP/') WHERE customer_sp_number LIKE 'SP/SO/%';")
+	db.Exec("UPDATE sales SET customer_sp_number = 'SP/' || REPLACE(REPLACE(invoice_no, 'INV/', ''), 'POS/', '') WHERE (customer_sp_number IS NULL OR customer_sp_number = '') AND invoice_no IS NOT NULL;")
+	db.Exec("UPDATE sales_orders SET customer_sp_number = 'SP/' || REPLACE(order_no, 'SO/', '') WHERE (customer_sp_number IS NULL OR customer_sp_number = '') AND order_no IS NOT NULL;")
 
 	err := db.AutoMigrate(
 		// Core & IAM
@@ -106,6 +120,7 @@ func MigrateDB(db *gorm.DB) error {
 		// Inventory
 		&models.StockBalance{},
 		&models.StockMovement{},
+		&models.ProductBatch{},
 		&models.StockOpname{},
 		&models.StockOpnameItem{},
 		&models.WarehouseTransfer{},
@@ -125,6 +140,7 @@ func MigrateDB(db *gorm.DB) error {
 		&models.PurchaseItem{},
 		&models.PurchaseReturn{},
 		&models.PurchaseReturnItem{},
+		&models.PurchaseReturnStatusLog{},
 		&models.SupplierPayment{},
 		&models.SupplierPaymentDetail{},
 
@@ -136,6 +152,7 @@ func MigrateDB(db *gorm.DB) error {
 		&models.SalePayment{},
 		&models.SalesReturn{},
 		&models.SalesReturnItem{},
+		&models.SalesReturnStatusLog{},
 		&models.CustomerPayment{},
 		&models.CustomerPaymentDetail{},
 		&models.SalesCommissionPayment{},

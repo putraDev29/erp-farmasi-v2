@@ -20,6 +20,8 @@ import {
   Building,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { sortTableData } from "@/components/common/TableSortSelect";
+import { BuktiPembayaranModal } from "@/components/purchasing/BuktiPembayaranModal";
 
 export default function SupplierPaymentsPage() {
   const router = useRouter();
@@ -29,7 +31,8 @@ export default function SupplierPaymentsPage() {
   const [keyword, setKeyword] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [sortBy, setSortBy] = useState("Tanggal");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
+  const [sortBy, setSortBy] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   // Selection & Pagination
@@ -45,26 +48,28 @@ export default function SupplierPaymentsPage() {
 
   // Queries
   const { data: payments = [], isLoading, refetch } = useQuery({
-    queryKey: ["supplier-payments", keyword, startDate, endDate, sortBy, sortDir],
+    queryKey: ["supplier-payments", keyword, startDate, endDate],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (keyword) params.append("search", keyword);
       if (startDate) params.append("start_date", startDate);
       if (endDate) params.append("end_date", endDate);
-      params.append("sort_by", sortBy);
-      params.append("sort_dir", sortDir);
 
       const res = await api.get(`/purchases/payments?${params.toString()}`);
       return res.data?.data || [];
     },
   });
 
-  // Client-side pagination
-  const totalPages = Math.max(1, Math.ceil(payments.length / pageSize));
+  const sortedPayments = sortTableData(payments, sortOption, {
+    getCode: (p: any) => p.payment_no,
+    getName: (p: any) => p.supplier?.name,
+    getDate: (p: any) => p.created_at || p.payment_date,
+  });
+  const totalPages = Math.max(1, Math.ceil(sortedPayments.length / pageSize));
   const paginatedPayments = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return payments.slice(start, start + pageSize);
-  }, [payments, page, pageSize]);
+    return sortedPayments.slice(start, start + pageSize);
+  }, [sortedPayments, page, pageSize]);
 
   // Delete Mutation
   const deleteMutation = useMutation({
@@ -234,26 +239,20 @@ export default function SupplierPaymentsPage() {
           {/* Urut Berdasar */}
           <div>
             <label className="block text-slate-600 font-semibold text-[11px] mb-0.5">Urut Berdasar :</label>
-            <div className="flex gap-1">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-teal-500"
-              >
-                <option value="Tanggal">Tanggal</option>
-                <option value="No Transaksi">No Transaksi</option>
-                <option value="Supplier">Supplier</option>
-                <option value="Total">Total</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => setSortDir((prev) => (prev === "asc" ? "desc" : "asc"))}
-                className="h-6 w-6 flex items-center justify-center border border-slate-300 rounded hover:bg-slate-50 text-slate-600 shrink-0"
-                title={`Urutan: ${sortDir.toUpperCase()}`}
-              >
-                <ArrowUpDown className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            <select
+              value={sortOption}
+              onChange={(e) => {
+                setSortOption(e.target.value);
+                setPage(1);
+              }}
+              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-teal-500 font-medium shadow-2xs truncate cursor-pointer"
+            >
+              <option value="created_at_desc">1. Urutan sesuai waktu input paling atas</option>
+              <option value="code_asc">2. Kode (A - Z)</option>
+              <option value="code_desc">3. Kode (Z - A)</option>
+              <option value="name_asc">4. Nama (A - Z)</option>
+              <option value="name_desc">5. Nama (Z - A)</option>
+            </select>
           </div>
         </div>
       </div>
@@ -268,6 +267,7 @@ export default function SupplierPaymentsPage() {
             <tr>
               <th className="py-0.5 px-2 w-8 text-center border-r border-slate-200">Aksi</th>
               <th className="py-0.5 px-2 border-r border-slate-200">No Transaksi</th>
+              <th className="py-0.5 px-2 border-r border-slate-200">No Faktur Supplier</th>
               <th className="py-0.5 px-2 border-r border-slate-200">Tanggal</th>
               <th className="py-0.5 px-2 border-r border-slate-200">Cara Bayar</th>
               <th className="py-0.5 px-1.5 border-r border-slate-200">Kode Supplier</th>
@@ -281,19 +281,26 @@ export default function SupplierPaymentsPage() {
           <tbody className="divide-y divide-slate-100 text-slate-700">
             {isLoading ? (
               <tr>
-                <td colSpan={10} className="text-center py-12 text-slate-400">
+                <td colSpan={11} className="text-center py-12 text-slate-400">
                   Memuat data pembayaran hutang...
                 </td>
               </tr>
             ) : paginatedPayments.length === 0 ? (
               <tr>
-                <td colSpan={10} className="text-center py-12 text-slate-400">
+                <td colSpan={11} className="text-center py-12 text-slate-400">
                   Tidak ada data pembayaran hutang.
                 </td>
               </tr>
             ) : (
               paginatedPayments.map((p: any) => {
                 const isSelected = selectedId === p.id;
+                const pbfInvoices = (p.details || [])
+                  .map((d: any) => d.purchase?.pbf_invoice_no)
+                  .filter(Boolean);
+                const pbfInvoiceText =
+                  pbfInvoices.length > 0
+                    ? Array.from(new Set(pbfInvoices)).join(", ")
+                    : "-";
                 return (
                   <tr
                     key={p.id}
@@ -320,6 +327,9 @@ export default function SupplierPaymentsPage() {
                     </td>
                     <td className="py-0.5 px-2 font-mono font-medium text-slate-800 border-r border-slate-100">
                       {p.payment_no}
+                    </td>
+                    <td className="py-0.5 px-2 font-mono text-slate-700 border-r border-slate-100">
+                      {pbfInvoiceText}
                     </td>
                     <td className="py-0.5 px-2 text-slate-600 border-r border-slate-100">
                       {formatDate(p.date)}
@@ -394,102 +404,14 @@ export default function SupplierPaymentsPage() {
         </div>
       )}
 
-      {/* 7. MODAL CETAK BUKTI BAYAR */}
-      {printModalOpen && selectedPayment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-xl shadow-2xl max-w-xl w-full p-4 space-y-3 print:p-0">
-            <div className="flex items-center justify-between border-b pb-2 print:hidden">
-              <h3 className="font-bold text-sm text-slate-800">Cetak Bukti Pembayaran Hutang</h3>
-              <button
-                type="button"
-                onClick={() => setPrintModalOpen(false)}
-                className="p-1 hover:bg-slate-100 rounded"
-              >
-                <X className="w-4 h-4 text-slate-500" />
-              </button>
-            </div>
-
-            <div className="border border-slate-200 p-4 rounded bg-slate-50/50 space-y-3 text-xs font-sans">
-              <div className="flex justify-between items-start border-b border-slate-200 pb-2">
-                <div>
-                  <h2 className="text-sm font-extrabold text-slate-900">APOTEK BERKAT PURNAMA</h2>
-                  <p className="text-[10px] text-slate-500">Jl. Farmasi Sehat No. 10, Jakarta Pusat</p>
-                </div>
-                <div className="text-right">
-                  <h3 className="text-xs font-bold text-teal-700">BUKTI KAS KELUAR (BKK)</h3>
-                  <p className="font-mono text-slate-800 font-bold">{selectedPayment.payment_no}</p>
-                  <p className="text-slate-500 text-[10px]">{formatDate(selectedPayment.date)}</p>
-                </div>
-              </div>
-
-              <div className="space-y-0.5 text-[11px]">
-                <p>
-                  <strong>Dibayarkan Kepada :</strong> {selectedPayment.supplier?.name} (
-                  {selectedPayment.supplier?.code})
-                </p>
-                <p>
-                  <strong>Metode Pembayaran :</strong> {selectedPayment.payment_method}{" "}
-                  {selectedPayment.check_no ? `(No Cek: ${selectedPayment.check_no})` : ""}
-                </p>
-                <p>
-                  <strong>Keterangan :</strong> {selectedPayment.notes || "-"}
-                </p>
-              </div>
-
-              <table className="w-full border-collapse border border-slate-300 text-left mt-2 text-[11px]">
-                <thead className="bg-slate-200/60 font-semibold text-slate-700">
-                  <tr>
-                    <th className="border border-slate-300 p-1 text-center w-8">No</th>
-                    <th className="border border-slate-300 p-1">No Faktur</th>
-                    <th className="border border-slate-300 p-1 text-right">Jumlah Dibayar</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedPayment.details?.map((d: any, idx: number) => (
-                    <tr key={idx}>
-                      <td className="border border-slate-300 p-1 text-center">{idx + 1}</td>
-                      <td className="border border-slate-300 p-1 font-mono">
-                        {d.purchase?.invoice_no || "-"}
-                      </td>
-                      <td className="border border-slate-300 p-1 text-right font-semibold">
-                        {formatCurrency(d.amount_paid)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td colSpan={2} className="border border-slate-300 p-1 text-right font-bold">
-                      Total Pembayaran :
-                    </td>
-                    <td className="border border-slate-300 p-1 text-right font-bold text-teal-700">
-                      {formatCurrency(selectedPayment.total_amount)}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 print:hidden">
-              <button
-                type="button"
-                onClick={() => setPrintModalOpen(false)}
-                className="px-3 h-6 border border-slate-300 rounded text-xs font-semibold text-slate-600 hover:bg-slate-100"
-              >
-                Tutup
-              </button>
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="px-4 h-6 bg-teal-600 hover:bg-teal-700 text-white rounded text-xs font-bold flex items-center gap-1"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Cetak BKK</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 7. MODAL CETAK BUKTI BAYAR & RIWAYAT */}
+      <BuktiPembayaranModal
+        isOpen={printModalOpen}
+        onClose={() => setPrintModalOpen(false)}
+        paymentId={selectedId}
+        orderId={selectedPayment?.details?.find((d: any) => d.purchase_order_id)?.purchase_order_id}
+        purchaseId={selectedPayment?.details?.find((d: any) => d.purchase_id)?.purchase_id}
+      />
 
       {/* 8. MODAL IMPORT EXCEL */}
       {excelImportOpen && (

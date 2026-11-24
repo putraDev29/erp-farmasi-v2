@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: false,
+  experimental: {
+    optimizePackageImports: ['lucide-react', '@tanstack/react-query', 'recharts', 'axios'],
+  },
   async rewrites() {
     return [
       {

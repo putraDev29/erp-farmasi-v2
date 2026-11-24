@@ -22,9 +22,12 @@ import {
   ExternalLink,
   ShoppingBag,
   RotateCcw,
+  TrendingUp,
+  Zap,
 } from "lucide-react";
 import { api, formatCurrency } from "@/lib/api";
 import { MasterToolbarButtons } from "@/components/common/MasterToolbarButtons";
+import { TableSortSelect, parseSortValue, sortTableData } from "@/components/common/TableSortSelect";
 
 export default function ItemListPage() {
   const router = useRouter();
@@ -38,8 +41,9 @@ export default function ItemListPage() {
   const [brandID, setBrandID] = useState("Semua");
   const [rack, setRack] = useState("");
   const [stockOption, setStockOption] = useState("Semua Data");
-  const [sortBy, setSortBy] = useState("code");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [discontinued, setDiscontinued] = useState(false);
 
   // Active query parameters applied on "Cari" click
@@ -51,10 +55,25 @@ export default function ItemListPage() {
     brandID: "Semua",
     rack: "",
     stockOption: "Semua Data",
-    sortBy: "code",
-    sortDir: "asc" as "asc" | "desc",
+    sortOption: "created_at_desc",
+    sortBy: "created_at",
+    sortDir: "desc" as "asc" | "desc",
     discontinued: false,
   });
+
+  const handleSortOptionChange = (val: string) => {
+    setSortOption(val);
+    const { sortBy: sb, sortDir: sd } = parseSortValue(val);
+    setSortBy(sb);
+    setSortDir(sd);
+    setAppliedFilters((prev) => ({
+      ...prev,
+      sortOption: val,
+      sortBy: sb,
+      sortDir: sd,
+    }));
+    setPage(1);
+  };
 
   // Pagination state
   const [page, setPage] = useState(1);
@@ -68,6 +87,59 @@ export default function ItemListPage() {
   const [showUnitCheckModal, setShowUnitCheckModal] = useState(false);
   const [showMarketplaceModal, setShowMarketplaceModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showApplyMarginModal, setShowApplyMarginModal] = useState(false);
+  const [marginProfitInput, setMarginProfitInput] = useState("");
+  const [isApplyingMargin, setIsApplyingMargin] = useState(false);
+
+  // Query General Settings to get current min_profit_percent
+  const { data: generalSettings = {} } = useQuery<Record<string, string>>({
+    queryKey: ["settings-general"],
+    queryFn: async () => {
+      const res = await api.get("/settings/groups/GENERAL");
+      return res.data?.data || {};
+    },
+  });
+
+  useEffect(() => {
+    if (generalSettings?.min_profit_percent && !marginProfitInput) {
+      setMarginProfitInput(generalSettings.min_profit_percent);
+    }
+  }, [generalSettings, marginProfitInput]);
+
+  const handleApplyMarginProfit = async () => {
+    const margin = parseFloat(marginProfitInput);
+    if (isNaN(margin) || margin <= 0) {
+      alert("Masukkan persentase margin yang valid (lebih besar dari 0%).");
+      return;
+    }
+
+    if (
+      !confirm(
+        `Yakin ingin memperbarui harga jual SELURUH OBAT otomatis dengan Margin Profit ${margin}%?\n\nRumus: Harga Jual = Harga Pokok + (${margin}% × Harga Pokok)\nData harga jual seluruh obat akan langsung disinkronkan.`
+      )
+    ) {
+      return;
+    }
+
+    setIsApplyingMargin(true);
+    try {
+      const res = await api.post("/settings/apply-margin-profit", {
+        margin_percent: margin,
+        round_nearest: 0,
+        update_locked: false,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["settings-general"] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      queryClient.invalidateQueries({ queryKey: ["products-list"] });
+      alert(res.data?.message || `Berhasil memperbarui harga jual obat sesuai margin profit ${margin}%!`);
+      setShowApplyMarginModal(false);
+    } catch (err: any) {
+      alert("Gagal memperbarui harga obat: " + (err.response?.data?.message || err.message));
+    } finally {
+      setIsApplyingMargin(false);
+    }
+  };
 
   // Query Warehouses (Dept/Gudang)
   const { data: warehouses = [] } = useQuery({
@@ -148,17 +220,11 @@ export default function ItemListPage() {
       brandID,
       rack,
       stockOption,
+      sortOption,
       sortBy,
       sortDir,
       discontinued,
     });
-  };
-
-  // Toggle sort direction
-  const handleToggleSortDirection = () => {
-    const nextDir = sortDir === "asc" ? "desc" : "asc";
-    setSortDir(nextDir);
-    setAppliedFilters((prev) => ({ ...prev, sortDir: nextDir }));
   };
 
   // Reset all filters
@@ -169,8 +235,9 @@ export default function ItemListPage() {
     setBrandID("Semua");
     setRack("");
     setStockOption("Semua Data");
-    setSortBy("code");
-    setSortDir("asc");
+    setSortOption("created_at_desc");
+    setSortBy("created_at");
+    setSortDir("desc");
     setDiscontinued(false);
     setPage(1);
     setAppliedFilters({
@@ -181,8 +248,9 @@ export default function ItemListPage() {
       brandID: "Semua",
       rack: "",
       stockOption: "Semua Data",
-      sortBy: "code",
-      sortDir: "asc",
+      sortOption: "created_at_desc",
+      sortBy: "created_at",
+      sortDir: "desc",
       discontinued: false,
     });
   };
@@ -195,6 +263,8 @@ export default function ItemListPage() {
     onSuccess: () => {
       setShowDeleteConfirm(false);
       setSelectedItemID(null);
+      queryClient.invalidateQueries({ queryKey: ["settings-general"] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
       queryClient.invalidateQueries({ queryKey: ["products-list"] });
     },
   });
@@ -215,6 +285,8 @@ export default function ItemListPage() {
       return await api.post("/products", payload);
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings-general"] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
       queryClient.invalidateQueries({ queryKey: ["products-list"] });
     },
   });
@@ -359,32 +431,22 @@ export default function ItemListPage() {
             </select>
           </div>
 
-          {/* Urut Berdasar + Toggle Direction (md:col-span-3) */}
+          {/* Urut Berdasar (5 Pilihan Standar) */}
           <div className="md:col-span-3">
             <label className="block text-slate-700 font-semibold text-[11px] mb-1">
               Urut Berdasar :
             </label>
-            <div className="flex items-center gap-1">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full h-6 px-2.5 py-0 border border-slate-300 rounded text-slate-800 text-xs focus:outline-none focus:border-sky-500 bg-white"
-              >
-                <option value="code">Kode Item</option>
-                <option value="name">Nama Item</option>
-                <option value="purchase_price">Harga Pokok</option>
-                <option value="selling_price">Harga Jual</option>
-                <option value="rack">Rak</option>
-              </select>
-              <button
-                type="button"
-                onClick={handleToggleSortDirection}
-                title={`Urutan: ${sortDir.toUpperCase()}`}
-                className="h-6 w-6 border border-slate-300 rounded bg-white hover:bg-slate-100 text-slate-700 flex items-center justify-center shrink-0 transition"
-              >
-                <ArrowUpDown className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            <select
+              value={sortOption}
+              onChange={(e) => handleSortOptionChange(e.target.value)}
+              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-slate-800 text-xs focus:outline-none focus:border-emerald-500 bg-white font-medium shadow-2xs truncate cursor-pointer"
+            >
+              <option value="created_at_desc">1. Urutan sesuai waktu input paling atas</option>
+              <option value="code_asc">2. Kode (A - Z)</option>
+              <option value="code_desc">3. Kode (Z - A)</option>
+              <option value="name_asc">4. Nama (A - Z)</option>
+              <option value="name_desc">5. Nama (Z - A)</option>
+            </select>
           </div>
 
           {/* Tidak Dijual / Discontinued (md:col-span-2) */}
@@ -520,6 +582,16 @@ export default function ItemListPage() {
                   className="h-6 px-3 bg-white hover:bg-slate-50 border border-slate-300 rounded text-slate-700 text-xs font-semibold transition shadow-2xs flex items-center gap-1"
                 >
                   <span>Satuan Salah</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowApplyMarginModal(true)}
+                  className="h-6 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-semibold transition shadow-2xs flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  title="Update Otomatis Seluruh Harga Jual Sesuai Margin Profit (Tanpa Set Satu-Satu)"
+                >
+                  <TrendingUp className="w-3.5 h-3.5" />
+                  <span>Update Margin Obat</span>
                 </button>
 
                 <button
@@ -825,6 +897,86 @@ export default function ItemListPage() {
                 className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded text-xs font-medium transition"
               >
                 Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL: UPDATE OTOMATIS HARGA SESUAI MARGIN PROFIT
+         ========================================================================= */}
+      {showApplyMarginModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg border border-slate-200 shadow-xl max-w-md w-full p-4 space-y-3.5">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
+              <div className="flex items-center gap-2 text-slate-800 font-bold text-sm">
+                <TrendingUp className="w-4 h-4 text-emerald-600" />
+                <span>Update Otomatis Harga Obat Sesuai Margin</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowApplyMarginModal(false)}
+                className="text-slate-400 hover:text-slate-700 font-bold text-base cursor-pointer"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-700">
+              <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-lg space-y-1.5">
+                <span className="font-bold text-emerald-950 block text-[11.5px]">
+                  Kalkulasi Harga Jual Massal Otomatis
+                </span>
+                <p className="text-[11px] text-emerald-900 leading-relaxed">
+                  Sistem akan menghitung ulang seluruh Harga Jual obat berdasarkan:
+                  <br />
+                  <strong className="font-mono text-emerald-950">Harga Jual = Harga Pokok + (Margin % × Harga Pokok)</strong>
+                </p>
+                <p className="text-[10.5px] text-emerald-800 font-medium pt-0.5">
+                  ✓ Anda tidak perlu lagi mengubah dan menentukan harga obat satu-per-satu.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold text-[11px] mb-1">
+                  Persentase Margin Profit (%) :
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.1"
+                    value={marginProfitInput}
+                    onChange={(e) => setMarginProfitInput(e.target.value)}
+                    placeholder="Contoh: 20"
+                    className="w-full h-8 px-2.5 pr-8 border-2 border-emerald-500 rounded font-bold text-emerald-900 focus:outline-none focus:border-emerald-600 bg-white text-sm"
+                  />
+                  <span className="absolute right-2.5 top-1.5 text-xs font-bold text-emerald-600">%</span>
+                </div>
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  Nilai bawaan diambil dari Pengaturan Umum &gt; Min. Profit ({generalSettings?.min_profit_percent || "0"}%).
+                </span>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
+              <button
+                type="button"
+                disabled={isApplyingMargin}
+                onClick={() => setShowApplyMarginModal(false)}
+                className="px-3.5 py-1.5 border border-slate-300 rounded text-slate-700 hover:bg-slate-50 transition text-xs font-semibold cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={isApplyingMargin || !marginProfitInput || parseFloat(marginProfitInput) <= 0}
+                onClick={handleApplyMarginProfit}
+                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded text-xs font-bold flex items-center gap-1.5 shadow transition active:scale-95 cursor-pointer"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>{isApplyingMargin ? "Memproses..." : "Terapkan Sekarang"}</span>
               </button>
             </div>
           </div>

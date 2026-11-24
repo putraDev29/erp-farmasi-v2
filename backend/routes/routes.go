@@ -18,6 +18,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 	r.Use(middleware.StructuredLogger())
 	r.Use(middleware.CORSMiddleware())
 	r.Use(middleware.CleanJSONMiddleware())
+	r.Use(middleware.ActivityLoggerMiddleware())
 
 	// Health check
 	r.GET("/health", func(c *gin.Context) {
@@ -28,8 +29,9 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		})
 	})
 
-	// Serve static uploaded files
+	// Serve static uploaded files (both root and api prefix for maximum client compatibility)
 	r.Static("/uploads", "./uploads")
+	r.Static("/api/v1/uploads", "./uploads")
 
 	authHandler := handlers.NewAuthHandler(cfg)
 	companyHandler := handlers.NewCompanyHandler()
@@ -51,6 +53,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 		auth := api.Group("/auth")
 		{
 			auth.POST("/login", authHandler.Login)
+			auth.POST("/register-customer", authHandler.RegisterCustomer)
 		}
 
 		// Protected routes
@@ -66,6 +69,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			// Company, Branch, Warehouse
 			protected.GET("/companies", companyHandler.GetCompanies)
 			protected.PUT("/companies/:id", companyHandler.UpdateCompany)
+			protected.POST("/companies/upload", companyHandler.UploadAsset)
 			protected.GET("/branches", companyHandler.GetBranches)
 			protected.POST("/branches", companyHandler.CreateBranch)
 			protected.PUT("/branches/:id", companyHandler.UpdateBranch)
@@ -115,6 +119,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			protected.DELETE("/suppliers/:id", masterHandler.DeleteSupplier)
 
 			protected.GET("/customers", masterHandler.GetCustomers)
+			protected.GET("/customers/:id", masterHandler.GetCustomerByID)
 			protected.POST("/customers", masterHandler.CreateCustomer)
 			protected.PUT("/customers/:id", masterHandler.UpdateCustomer)
 			protected.DELETE("/customers/:id", masterHandler.DeleteCustomer)
@@ -249,17 +254,37 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			protected.POST("/purchases/orders", purchaseHandler.CreatePurchaseOrder)
 			protected.PUT("/purchases/orders/:id", purchaseHandler.UpdatePurchaseOrder)
 			protected.DELETE("/purchases/orders/:id", purchaseHandler.DeletePurchaseOrder)
+			protected.POST("/purchases/orders/:id/send", purchaseHandler.SendPOToSupplier)
+			protected.POST("/purchases/orders/:id/reallocate", purchaseHandler.ReallocateRemainingPO)
+			protected.POST("/purchases/orders/:id/cancel-remaining", purchaseHandler.CancelRemainingPO)
+			protected.POST("/purchases/orders/:id/receive", purchaseHandler.ReceiveAndVerifyPO)
+			protected.POST("/purchases/orders/:id/fulfill-items", purchaseHandler.FulfillPurchaseOrderItems)
+			protected.GET("/purchases/orders/:id/payment-history", purchaseHandler.GetPurchaseOrderPaymentHistory)
 
 			protected.GET("/purchases", purchaseHandler.GetPurchases)
 			protected.GET("/purchases/:id", purchaseHandler.GetPurchase)
+			protected.GET("/purchases/:id/payment-history", purchaseHandler.GetPurchasePaymentHistory)
 			protected.POST("/purchases", purchaseHandler.CreatePurchase)
 			protected.PUT("/purchases/:id", purchaseHandler.UpdatePurchase)
+			protected.POST("/purchases/:id/receive", purchaseHandler.ReceivePurchaseInvoice)
+			protected.PUT("/purchases/:id/verify", purchaseHandler.VerifyPurchase)
+			protected.PUT("/purchases/:id/admin-approve", purchaseHandler.AdminApprovePurchase)
+			protected.PUT("/purchases/:id/admin-reject", purchaseHandler.AdminRejectPurchase)
 			protected.DELETE("/purchases/:id", purchaseHandler.DeletePurchase)
 
 			// Purchase Returns
 			protected.GET("/purchases/returns", purchaseHandler.GetPurchaseReturns)
+			protected.GET("/purchases/returns/:id", purchaseHandler.GetPurchaseReturnByID)
 			protected.POST("/purchases/returns", purchaseHandler.CreatePurchaseReturn)
+			protected.POST("/purchases/returns/:id/warehouse-verify", purchaseHandler.WarehouseVerifyPurchaseReturn)
+			protected.POST("/purchases/returns/:id/admin-approve", purchaseHandler.AdminApprovePurchaseReturn)
+			protected.POST("/purchases/returns/:id/reject", purchaseHandler.RejectPurchaseReturn)
+			protected.POST("/purchases/returns/:id/ship", purchaseHandler.ShipPurchaseReturn)
+			protected.POST("/purchases/returns/:id/pbf-confirm", purchaseHandler.PbfConfirmPurchaseReturn)
+			protected.POST("/purchases/returns/:id/finalize", purchaseHandler.FinalizePurchaseReturn)
 			protected.DELETE("/purchases/returns/:id", purchaseHandler.DeletePurchaseReturn)
+			protected.GET("/purchases/returnable-items", purchaseHandler.GetReturnablePurchaseItems)
+			protected.GET("/purchases/product-batches", purchaseHandler.GetProductBatchesForReturn)
 
 			// Price History
 			protected.GET("/purchases/price-history", purchaseHandler.GetPriceHistory)
@@ -277,16 +302,38 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			protected.POST("/sales/orders", salesHandler.CreateSalesOrder)
 			protected.PUT("/sales/orders/:id", salesHandler.UpdateSalesOrder)
 			protected.DELETE("/sales/orders/:id", salesHandler.DeleteSalesOrder)
+			protected.POST("/sales/orders/:id/approve", salesHandler.ApproveSalesOrder)
+			protected.PUT("/sales/orders/:id/approve", salesHandler.ApproveSalesOrder)
+			protected.POST("/sales/orders/:id/process", salesHandler.ProcessSalesOrder)
+			protected.POST("/sales/orders/:id/ship", salesHandler.ShipSalesOrder)
+			protected.POST("/sales/orders/:id/receive", salesHandler.ReceiveSalesOrder)
+			protected.POST("/sales/orders/:id/convert-to-invoice", salesHandler.ConvertSalesOrderToInvoice)
+			protected.GET("/sales/orders/:id/print-data", salesHandler.GetSalesOrderPrintData)
+			protected.POST("/sales/orders/:id/print", salesHandler.PrintSalesOrder)
+			protected.GET("/sales/orders/:id/payment-history", salesHandler.GetSalesOrderPaymentHistory)
 
 			protected.GET("/sales", salesHandler.GetSales)
 			protected.GET("/sales/:id", salesHandler.GetSale)
+			protected.GET("/sales/:id/print-data", salesHandler.GetSalePrintData)
+			protected.POST("/sales/:id/print", salesHandler.PrintSaleInvoice)
+			protected.GET("/sales/:id/payment-history", salesHandler.GetSalePaymentHistory)
 			protected.POST("/sales", salesHandler.CreateSale)
 			protected.PUT("/sales/:id", salesHandler.UpdateSale)
 			protected.DELETE("/sales/:id", salesHandler.DeleteSale)
+			protected.POST("/sales/:id/receive", salesHandler.ReceiveSale)
+			protected.PUT("/sales/:id/receive", salesHandler.ReceiveSale)
+			protected.POST("/sales/:id/ship", salesHandler.ShipSale)
+			protected.PUT("/sales/:id/ship", salesHandler.ShipSale)
 
 			// Sales Returns
 			protected.GET("/sales/returns", salesHandler.GetSalesReturns)
+			protected.GET("/sales/returns/:id", salesHandler.GetSalesReturn)
 			protected.POST("/sales/returns", salesHandler.CreateSalesReturn)
+			protected.POST("/sales/returns/:id/verify-warehouse", salesHandler.VerifyWarehouseSalesReturn)
+			protected.POST("/sales/returns/:id/admin-approve", salesHandler.AdminApproveSalesReturn)
+			protected.POST("/sales/returns/:id/admin-reject", salesHandler.AdminRejectSalesReturn)
+			protected.POST("/sales/returns/:id/restock", salesHandler.RestockSalesReturn)
+			protected.POST("/sales/returns/:id/finalize", salesHandler.FinalizeSalesReturn)
 			protected.DELETE("/sales/returns/:id", salesHandler.DeleteSalesReturn)
 
 			// Sales Price History
@@ -393,6 +440,8 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			protected.GET("/settings/audit-logs", settingHandler.GetAuditLogs)
 			protected.GET("/settings/groups/:group", settingHandler.GetGroupSettings)
 			protected.PUT("/settings/groups/:group", settingHandler.UpdateGroupSettings)
+			protected.POST("/settings/apply-margin-profit", settingHandler.ApplyMarginProfitToAllProducts)
+			protected.POST("/products/apply-margin-profit", settingHandler.ApplyMarginProfitToAllProducts)
 			protected.GET("/settings/open-modules", settingHandler.GetOpenModules)
 			protected.DELETE("/settings/open-modules/:id", settingHandler.CloseOpenModule)
 			protected.GET("/settings/database/stats", settingHandler.GetDatabaseStats)

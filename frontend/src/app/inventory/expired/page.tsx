@@ -24,6 +24,7 @@ import {
   FileSpreadsheet,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { TableSortSelect, sortTableData } from "@/components/common/TableSortSelect";
 
 type FilterType = "all" | "expired" | "1_week" | "2_weeks" | "30_days" | "2_months" | "3_months";
 
@@ -59,6 +60,7 @@ export default function ExpiredDrugsPage() {
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("ALL");
   const [stockOnly, setStockOnly] = useState(false);
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
   const [page, setPage] = useState(1);
   const pageSize = 15;
 
@@ -105,12 +107,20 @@ export default function ExpiredDrugsPage() {
     total_monitored: 0,
   };
 
-  // Pagination
-  const totalPages = Math.ceil(items.length / pageSize) || 1;
+  // Pagination & Sorting
+  const sortedItems = useMemo(() => {
+    return sortTableData(items, sortOption, {
+      getCode: (item: any) => item.code,
+      getName: (item: any) => item.name,
+      getDate: (item: any) => item.expired_date,
+    });
+  }, [items, sortOption]);
+
+  const totalPages = Math.ceil(sortedItems.length / pageSize) || 1;
   const paginatedItems = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return items.slice(start, start + pageSize);
-  }, [items, page, pageSize]);
+    return sortedItems.slice(start, start + pageSize);
+  }, [sortedItems, page, pageSize]);
 
   // Handle Edit Save
   const handleSaveEdit = async () => {
@@ -442,6 +452,18 @@ export default function ExpiredDrugsPage() {
                 </option>
               ))}
             </select>
+
+            <div className="w-56">
+              <TableSortSelect
+                value={sortOption}
+                onChange={(val) => {
+                  setSortOption(val);
+                  setPage(1);
+                }}
+                timeLabel="Urutan sesuai waktu input paling atas"
+                compact
+              />
+            </div>
 
             <label className="flex items-center gap-1.5 text-slate-600 cursor-pointer ml-1 select-none">
               <input

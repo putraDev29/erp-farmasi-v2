@@ -17,10 +17,15 @@ import {
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
 import { CariSupplierModal } from "@/components/purchasing/CariSupplierModal";
+import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
 interface DebtRow {
-  purchase_id: string;
+  id: string;
+  source_type: "PURCHASE" | "ORDER";
+  purchase_id?: string;
+  purchase_order_id?: string;
   invoice_no: string;
+  pbf_invoice_no?: string;
   date: string;
   due_date: string;
   remaining_amount: number;
@@ -29,6 +34,17 @@ interface DebtRow {
   is_pay: boolean;
   pay_amount: number;
 }
+
+const formatRupiahNumber = (val: number): string => {
+  if (!val && val !== 0) return "";
+  return Math.round(val).toLocaleString("id-ID");
+};
+
+const parseRupiahNumber = (str: string): number => {
+  if (!str) return 0;
+  const cleaned = str.replace(/[^\d]/g, "");
+  return Number(cleaned) || 0;
+};
 
 const EMPTY_ACCOUNTS: any[] = [];
 const EMPTY_BANKS: any[] = [];
@@ -83,56 +99,29 @@ export default function NewSupplierPaymentPage() {
     },
   });
 
-  useEffect(() => {
-    if (cashAccounts.length > 0 && !selectedAccountId) {
-      // Default to BCA account if present, else first cash/bank account
-      const bca = cashAccounts.find(
-        (a: any) =>
-          a.code === "1-1131" ||
-          a.code === "1-1120" ||
-          a.name?.toUpperCase().includes("BCA")
-      );
-      setSelectedAccountId(bca ? bca.id : cashAccounts[0].id);
-    }
-  }, [cashAccounts, selectedAccountId]);
-
-  // Fetch Unpaid Invoices when supplier changes
-  const { data: unpaidInvoices, isLoading: isLoadingInvoices } = useQuery({
-    queryKey: ["unpaid-invoices", selectedSupplier?.id],
+  // Fetch Unpaid Invoices strictly for Approved Purchases with remaining debt
+  const { data: unpaidDebts, isLoading: isLoadingInvoices } = useQuery({
+    queryKey: ["unpaid-debts-all", selectedSupplier?.id],
     enabled: !!selectedSupplier?.id,
     queryFn: async () => {
       const res = await api.get(
         `/purchases?supplier_id=${selectedSupplier.id}&has_debt=true`
       );
-      const list = res.data?.data || [];
-      return list.filter(
+      const pList = (res.data?.data || []).filter(
         (p: any) =>
           String(p.supplier_id) === String(selectedSupplier.id) &&
-          Number(p.remaining_amount) > 0
-      );
-    },
-  });
-
-  // Populate rows from unpaid invoices safely without infinite render cycles
-  useEffect(() => {
-    if (!selectedSupplier?.id) {
-      setRows((prev) => (prev.length > 0 ? [] : prev));
-      setSelectedRowIndex((prev) => (prev !== null ? null : prev));
-      return;
-    }
-
-    if (unpaidInvoices && unpaidInvoices.length > 0) {
-      const filtered = unpaidInvoices.filter(
-        (inv: any) =>
-          String(inv.supplier_id) === String(selectedSupplier.id) &&
-          Number(inv.remaining_amount) > 0
+          Number(p.remaining_amount) > 0 &&
+          (p.is_verified === true || p.verification_status === "APPROVED")
       );
 
-      const initialRows: DebtRow[] = filtered.map((inv: any) => {
+      const mappedPurchases: DebtRow[] = pList.map((inv: any) => {
         const sisa = Number(inv.remaining_amount) || 0;
         return {
+          id: "purchase-" + inv.id,
+          source_type: "PURCHASE",
           purchase_id: inv.id,
           invoice_no: inv.invoice_no,
+          pbf_invoice_no: inv.pbf_invoice_no || "-",
           date: inv.date,
           due_date: inv.due_date || inv.date,
           remaining_amount: sisa,
@@ -142,13 +131,27 @@ export default function NewSupplierPaymentPage() {
           pay_amount: 0,
         };
       });
-      setRows(initialRows);
-      setSelectedRowIndex(initialRows.length > 0 ? 0 : null);
+
+      return mappedPurchases;
+    },
+  });
+
+  // Populate rows from unpaid invoices & POs safely without infinite render cycles
+  useEffect(() => {
+    if (!selectedSupplier?.id) {
+      setRows((prev) => (prev.length > 0 ? [] : prev));
+      setSelectedRowIndex((prev) => (prev !== null ? null : prev));
+      return;
+    }
+
+    if (unpaidDebts && unpaidDebts.length > 0) {
+      setRows(unpaidDebts);
+      setSelectedRowIndex(0);
     } else {
       setRows((prev) => (prev.length > 0 ? [] : prev));
       setSelectedRowIndex((prev) => (prev !== null ? null : prev));
     }
-  }, [selectedSupplier?.id, unpaidInvoices]);
+  }, [selectedSupplier?.id, unpaidDebts]);
 
   // Handle Pay All or Pay Row (Fill Full Payment)
   const handleAutoPaySelectedRow = () => {
@@ -260,7 +263,10 @@ export default function NewSupplierPaymentPage() {
       if (!selectedSupplier?.id) {
         throw new Error("Pilih supplier terlebih dahulu.");
       }
-      const activeRows = rows.filter((r) => r.is_pay && r.pay_amount > 0);
+      if (!selectedAccountId) {
+        throw new Error("Pilih Kode Akun (Kas / Bank) pembayaran terlebih dahulu.");
+      }
+      const activeRows = rows.filter((r) => r.is_pay && (r.pay_amount > 0 || Number(r.discount) > 0));
       if (activeRows.length === 0) {
         throw new Error("Pilih setidaknya satu faktur hutang yang akan dibayar.");
       }
@@ -275,13 +281,16 @@ export default function NewSupplierPaymentPage() {
         check_no: checkNo,
         notes: notes || "Pembayaran Utang Usaha",
         allocations: activeRows.map((r) => ({
-          purchase_id: r.purchase_id,
+          purchase_id: r.purchase_id || undefined,
+          purchase_order_id: r.purchase_order_id || undefined,
           amount_paid: r.pay_amount,
+          discount: Number(r.discount) || 0,
         })),
         items: activeRows.map((r) => ({
-          purchase_id: r.purchase_id,
+          purchase_id: r.purchase_id || undefined,
+          purchase_order_id: r.purchase_order_id || undefined,
           amount: r.pay_amount,
-          discount: r.discount,
+          discount: Number(r.discount) || 0,
         })),
       };
 
@@ -290,7 +299,12 @@ export default function NewSupplierPaymentPage() {
     onSuccess: (res: any) => {
       queryClient.invalidateQueries({ queryKey: ["supplier-payments"] });
       queryClient.invalidateQueries({ queryKey: ["purchases"] });
+      queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["unpaid-debts-all"] });
       queryClient.invalidateQueries({ queryKey: ["bg-checks"] });
+      queryClient.invalidateQueries({ queryKey: ["journals"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["cash-transactions"] });
       alert(
         `Pembayaran Hutang berhasil disimpan dengan No: ${
           res.data?.data?.payment_no || "PH-OK"
@@ -416,55 +430,45 @@ export default function NewSupplierPaymentPage() {
           <label className="block text-slate-600 text-[10px] mb-0.5 font-medium">
             Kode Akun :
           </label>
-          <select
+          <SearchableAccountSelect
+            accounts={cashAccounts}
             value={selectedAccountId}
-            onChange={(e) => setSelectedAccountId(e.target.value)}
-            className="w-full h-6 px-1.5 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500 cursor-pointer truncate font-medium text-slate-800"
-          >
-            {cashAccounts.map((acc: any) => {
-              const linkedBank = banks.find((b: any) => b.account_id === acc.id);
-              const extraInfo = linkedBank?.account_number
-                ? ` (${linkedBank.account_number})`
-                : "";
-              return (
-                <option key={acc.id} value={acc.id}>
-                  {acc.code} - {acc.name}
-                  {extraInfo}
-                </option>
-              );
-            })}
-          </select>
+            onChange={(val) => setSelectedAccountId(val)}
+            placeholder="-- Pilih / Cari Akun Pembayaran (Kas / Bank) --"
+          />
         </div>
       </div>
 
       {/* 3. Main Debt Allocation Table matching Screenshot 7 */}
-      {/* Columns: No Baris | No Transaksi | Tanggal | Tanggal JT | Sisa | Pot | Total | Bayar | Jml Bayar */}
+      {/* Columns: No Baris | No Transaksi | Tanggal | Tanggal JT | Sisa | Pot | Total | Bayar | Jml Bayar | Status */}
       <div className="flex-1 border border-slate-300 rounded bg-white overflow-hidden flex flex-col min-h-[220px]">
         <div className="flex-1 overflow-auto">
-          <table className="w-full text-[11px] text-left border-collapse">
-            <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b border-slate-300 sticky top-0 z-10 whitespace-nowrap">
+          <table className="w-full text-[11px] text-left border-collapse whitespace-nowrap">
+            <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b border-slate-300 sticky top-0 z-10">
               <tr>
-                <th className="py-1 px-1.5 text-center w-12 border-r border-slate-200">No Baris</th>
+                <th className="py-1 px-1.5 text-center w-10 border-r border-slate-200">No Baris</th>
                 <th className="py-1 px-2 border-r border-slate-200">No Transaksi</th>
+                <th className="py-1 px-2 border-r border-slate-200 bg-sky-50 text-sky-900 font-bold">No. Faktur Supplier</th>
                 <th className="py-1 px-2 border-r border-slate-200">Tanggal</th>
                 <th className="py-1 px-2 border-r border-slate-200">Tanggal JT</th>
-                <th className="py-1 px-2 text-right border-r border-slate-200">Sisa</th>
+                <th className="py-1 px-2 text-right border-r border-slate-200">Jumlah Hutang (Sisa)</th>
                 <th className="py-1 px-2 text-right border-r border-slate-200">Pot</th>
-                <th className="py-1 px-2 text-right border-r border-slate-200">Total</th>
-                <th className="py-1 px-1.5 text-center w-12 border-r border-slate-200">Bayar</th>
-                <th className="py-1 px-2 text-right">Jml Bayar</th>
+                <th className="py-1 px-2 text-right border-r border-slate-200">Total Tagihan</th>
+                <th className="py-1 px-2 text-center border-r border-slate-200">Aksi Bayar</th>
+                <th className="py-1 px-2 text-right border-r border-slate-200">Jml Bayar (Rp)</th>
+                <th className="py-1 px-2 text-center">Status Pelunasan</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 bg-white text-slate-800">
               {isLoadingInvoices ? (
                 <tr>
-                  <td colSpan={9} className="py-16 text-center text-slate-400">
-                    Memuat daftar faktur hutang supplier...
+                  <td colSpan={11} className="py-16 text-center text-slate-400">
+                    Memuat daftar faktur &amp; tagihan PO hutang supplier...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-16 text-center text-slate-400">
+                  <td colSpan={11} className="py-16 text-center text-slate-400">
                     {selectedSupplier
                       ? "Tidak ada tagihan hutang yang belum lunas untuk supplier ini."
                       : "Pilih Supplier di atas untuk menampilkan daftar tagihan hutang."}
@@ -475,7 +479,7 @@ export default function NewSupplierPaymentPage() {
                   const isSelected = selectedRowIndex === idx;
                   return (
                     <tr
-                      key={r.purchase_id}
+                      key={r.id || idx}
                       onClick={() => setSelectedRowIndex(idx)}
                       className={`cursor-pointer transition hover:bg-sky-50/60 ${
                         isSelected ? "bg-sky-100/70 font-semibold text-sky-900" : ""
@@ -484,8 +488,20 @@ export default function NewSupplierPaymentPage() {
                       <td className="py-1 px-1.5 text-center text-slate-500 border-r border-slate-200">
                         {idx + 1}
                       </td>
-                      <td className="py-1 px-2 font-mono whitespace-nowrap border-r border-slate-200">
-                        {r.invoice_no}
+                      <td className="py-1 px-2 border-r border-slate-200 whitespace-nowrap">
+                        <span
+                          className={`inline-block px-1.5 py-0.2 rounded text-[9.5px] font-bold mr-1 ${
+                            r.source_type === "ORDER"
+                              ? "bg-indigo-100 text-indigo-800 border border-indigo-200"
+                              : "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                          }`}
+                        >
+                          {r.source_type === "ORDER" ? "PO" : "Faktur"}
+                        </span>
+                        <span className="font-mono font-medium">{r.invoice_no}</span>
+                      </td>
+                      <td className="py-1 px-2 whitespace-nowrap border-r border-slate-200 font-mono text-slate-800 bg-sky-50/30">
+                        {r.pbf_invoice_no || "-"}
                       </td>
                       <td className="py-1 px-2 whitespace-nowrap border-r border-slate-200 text-slate-600">
                         {formatDate(r.date)}
@@ -493,46 +509,76 @@ export default function NewSupplierPaymentPage() {
                       <td className="py-1 px-2 whitespace-nowrap border-r border-slate-200 text-slate-600">
                         {formatDate(r.due_date)}
                       </td>
-                      <td className="py-1 px-2 text-right font-mono font-semibold text-rose-700 border-r border-slate-200">
+                      <td className="py-1 px-2 text-right font-mono font-bold text-rose-700 border-r border-slate-200" title="Jumlah Sisa Hutang">
                         {formatCurrency(r.remaining_amount)}
                       </td>
                       <td className="py-0.5 px-1 text-right border-r border-slate-200">
                         <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={r.discount || ""}
+                          type="text"
+                          value={r.discount ? formatRupiahNumber(r.discount) : ""}
+                          placeholder="0"
                           onChange={(e) =>
-                            handleRowDiscountChange(idx, parseFloat(e.target.value) || 0)
+                            handleRowDiscountChange(idx, parseRupiahNumber(e.target.value))
                           }
                           onClick={(e) => e.stopPropagation()}
                           className="w-20 h-5 px-1 py-0 border border-slate-300 rounded text-right text-[11px] font-mono bg-white focus:outline-none focus:border-sky-500"
                         />
                       </td>
-                      <td className="py-1 px-2 text-right font-mono font-medium border-r border-slate-200">
+                      <td className="py-1 px-2 text-right font-mono font-semibold text-slate-900 border-r border-slate-200">
                         {formatCurrency(r.total)}
                       </td>
                       <td className="py-1 px-1.5 text-center border-r border-slate-200">
-                        <input
-                          type="checkbox"
-                          checked={r.is_pay}
-                          onChange={() => handleToggleRowPay(idx)}
-                          onClick={(e) => e.stopPropagation()}
-                          className="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 cursor-pointer"
-                        />
+                        <div className="flex items-center justify-center gap-1">
+                          <input
+                            type="checkbox"
+                            checked={r.is_pay}
+                            onChange={() => handleToggleRowPay(idx)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 cursor-pointer"
+                          />
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const maxPay = Math.max(0, r.remaining_amount - r.discount);
+                              handleRowPayAmountChange(idx, maxPay);
+                            }}
+                            className="px-1.5 py-0.5 rounded text-[9.5px] font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300"
+                            title="Bayar Lunas Baris Ini"
+                          >
+                            Bayar
+                          </button>
+                        </div>
                       </td>
-                      <td className="py-0.5 px-1 text-right">
+                      <td className="py-0.5 px-1 text-right border-r border-slate-200">
                         <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={r.pay_amount || ""}
+                          type="text"
+                          value={r.pay_amount ? formatRupiahNumber(r.pay_amount) : ""}
+                          placeholder="0"
                           onChange={(e) =>
-                            handleRowPayAmountChange(idx, parseFloat(e.target.value) || 0)
+                            handleRowPayAmountChange(idx, parseRupiahNumber(e.target.value))
                           }
                           onClick={(e) => e.stopPropagation()}
-                          className="w-24 h-5 px-1 py-0 border border-slate-300 rounded text-right text-[11px] font-mono font-bold text-emerald-700 bg-white focus:outline-none focus:border-sky-500"
+                          className="w-24 h-5 px-1.5 py-0 border border-slate-300 rounded text-right text-[11px] font-mono font-bold text-emerald-700 bg-white focus:outline-none focus:border-sky-500"
                         />
+                      </td>
+                      <td className="py-1 px-2 text-center whitespace-nowrap">
+                        {r.pay_amount >= r.total && r.total > 0 ? (
+                          <span className="inline-block px-1.5 py-0.2 rounded text-[9.5px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                            Langsung Lunas
+                          </span>
+                        ) : r.pay_amount > 0 ? (
+                          <span
+                            className="inline-block px-1.5 py-0.2 rounded text-[9.5px] font-bold bg-amber-100 text-amber-800 border border-amber-300"
+                            title={`Sisa: ${formatCurrency(r.total - r.pay_amount)}`}
+                          >
+                            Belum Lunas (Sisa: {formatCurrency(r.total - r.pay_amount)})
+                          </span>
+                        ) : (
+                          <span className="inline-block px-1.5 py-0.2 rounded text-[9.5px] text-slate-400">
+                            Belum Dibayar
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );

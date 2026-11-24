@@ -6,6 +6,66 @@ import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { useAuthStore } from "@/lib/auth-store";
 
+function TopProgressBar() {
+  const pathname = usePathname();
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (loading) {
+      setProgress(100);
+      const timer = setTimeout(() => {
+        setLoading(false);
+        setProgress(0);
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+  }, [pathname]);
+
+  useEffect(() => {
+    const handleDocumentClick = (e: MouseEvent) => {
+      const anchor = (e.target as HTMLElement)?.closest("a");
+      if (anchor && anchor.href && !anchor.target && !anchor.download) {
+        try {
+          const targetUrl = new URL(anchor.href, window.location.href);
+          if (
+            targetUrl.origin === window.location.origin &&
+            targetUrl.pathname !== window.location.pathname
+          ) {
+            setLoading(true);
+            setProgress(35);
+          }
+        } catch {}
+      }
+    };
+
+    document.addEventListener("click", handleDocumentClick);
+    return () => document.removeEventListener("click", handleDocumentClick);
+  }, []);
+
+  useEffect(() => {
+    if (!loading) return;
+    const interval = setInterval(() => {
+      setProgress((prev) => {
+        if (prev >= 88) return prev;
+        return prev + Math.random() * 12;
+      });
+    }, 150);
+    return () => clearInterval(interval);
+  }, [loading]);
+
+  if (!loading && progress === 0) return null;
+
+  return (
+    <div className="fixed top-0 left-0 right-0 z-50 h-0.5 pointer-events-none overflow-hidden bg-transparent">
+      <div
+        className="h-full bg-[#00c875] transition-all duration-200 ease-out shadow-[0_0_8px_#00c875]"
+        style={{ width: `${progress}%` }}
+      />
+    </div>
+  );
+}
+
 export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const pathname = usePathname();
@@ -47,6 +107,8 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
 
   return (
     <div className="h-screen bg-[#f8fafc] flex text-slate-800 overflow-hidden">
+      <TopProgressBar />
+
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -59,7 +121,7 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       {/* Main content body */}
-      <div className={`flex-1 ${sidebarOpen ? "md:pl-52" : "pl-0"} flex flex-col h-full min-w-0 transition-all duration-300 overflow-hidden`}>
+      <div className={`flex-1 ${sidebarOpen ? "md:pl-52" : "pl-0"} flex flex-col h-full min-w-0 transition-[padding] duration-200 ease-in-out overflow-hidden`}>
         <Header onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
         <main className="p-1 sm:p-2 flex-1 w-full flex flex-col min-h-0 mx-auto overflow-hidden">
           {children}

@@ -16,6 +16,7 @@ import {
   Undo2,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import SearchableAccountSelect from "@/components/common/SearchableAccountSelect";
 
 interface NoteItemRow {
   account_id: string;
@@ -433,25 +434,18 @@ export default function TransactionNotesPage() {
                             }`}
                           >
                             <td className="py-0.5 px-1 border-r border-slate-200">
-                              <select
+                              <SearchableAccountSelect
+                                accounts={accounts}
                                 value={item.account_id}
-                                onChange={(e) => {
-                                  const val = e.target.value;
+                                onChange={(val) => {
                                   setFormItems((prev) =>
                                     prev.map((row, i) =>
                                       i === idx ? { ...row, account_id: val } : row
                                     )
                                   );
                                 }}
-                                className="w-full border border-slate-200 rounded px-1.5 h-6 text-[11px] bg-white outline-none focus:border-emerald-500 font-medium text-slate-800"
-                              >
-                                <option value="">Select...</option>
-                                {accounts.map((acc: any) => (
-                                  <option key={acc.id} value={acc.id}>
-                                    {acc.code} - {acc.name}
-                                  </option>
-                                ))}
-                              </select>
+                                placeholder="Select / Cari Akun..."
+                              />
                             </td>
                             <td className="py-0.5 px-1 border-r border-slate-200 text-center">
                               <select

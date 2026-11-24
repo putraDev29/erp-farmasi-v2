@@ -15,14 +15,57 @@ import {
   X,
   AlertCircle,
   ChevronLeft as BackIcon,
+  Truck,
+  CheckCircle,
+  FileText,
+  Printer,
+  Eye,
+  Settings,
+  Calendar,
+  ShieldCheck,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { TableSortSelect, parseSortValue, sortTableData } from "@/components/common/TableSortSelect";
 import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
 import { CariObatSalesModal } from "@/components/sales/CariObatSalesModal";
+import { useAuthStore } from "@/lib/auth-store";
+
+const formatUserWithRole = (u: any) => {
+  if (!u) return "-";
+  const name = u.full_name || u.username || "-";
+  if (name.includes("(") && name.includes(")")) return name;
+  const role = u.roles?.[0]?.name || u.role?.name || u.role;
+  if (role) return `${name} (${role})`;
+  return name;
+};
 
 export default function SalesOrdersPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
+
+  const isGudang = Boolean(
+    user?.roles?.some((r: any) => {
+      const roleName = (typeof r === "string" ? r : r?.name || "").toUpperCase();
+      return roleName.includes("GUDANG");
+    }) || user?.username?.toLowerCase() === "gudang"
+  );
+
+  const isAdmin = Boolean(
+    !isGudang &&
+      (!user?.roles ||
+        user.roles.length === 0 ||
+        user.roles.some((r: any) => {
+          const roleName = (typeof r === "string" ? r : r?.name || "").toUpperCase();
+          return (
+            roleName.includes("ADMIN") ||
+            roleName.includes("SUPER") ||
+            roleName.includes("APOTEKER") ||
+            roleName.includes("KEUANGAN")
+          );
+        }) ||
+        user?.username?.toLowerCase() === "admin")
+  );
 
   // Filters matching Ketoko Spec (Image 1)
   const [keyword, setKeyword] = useState("");
@@ -32,7 +75,8 @@ export default function SalesOrdersPage() {
   const [orderFilter, setOrderFilter] = useState("Semua Pesanan");
   const [processStatus, setProcessStatus] = useState("Semua");
   const [orderStatus, setOrderStatus] = useState("");
-  const [sortBy, setSortBy] = useState("Tanggal");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
+  const [sortBy, setSortBy] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   // Selection & Pagination
@@ -173,6 +217,22 @@ export default function SalesOrdersPage() {
     },
   });
 
+  // Step 2 & 3: Verifikasi & Persetujuan Admin (Auto Konversi ke Menu Penjualan)
+  const approveMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return await api.put(`/sales/orders/${id}/approve`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sales-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["sales-invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["sales"] });
+      alert("✅ Pesanan penjualan berhasil disetujui Admin!\nDokumen otomatis masuk ke Menu Penjualan (menunggu Gudang menyiapkan & mengirim barang).");
+    },
+    onError: (err: any) => {
+      alert("Gagal menyetujui pesanan: " + (err.response?.data?.message || err.message));
+    },
+  });
+
   const resetForm = () => {
     setFormCustomerId(customers[0]?.id || "");
     setFormSalesRepId("");
@@ -270,96 +330,124 @@ export default function SalesOrdersPage() {
   const formTaxAmount = (formSubtotal - formDiscount) * (formTaxPercent / 100);
   const formTotalAmount = formSubtotal - formDiscount + formTaxAmount;
 
-  const totalPages = Math.max(1, Math.ceil(orders.length / pageSize));
-  const paginatedOrders = orders.slice((page - 1) * pageSize, page * pageSize);
+  const sortedOrders = sortTableData(orders, sortOption, {
+    getCode: (item: any) => item.order_no,
+    getName: (item: any) => item.customer?.name,
+    getDate: (item: any) => item.created_at || item.date,
+  });
+
+  const totalPages = Math.max(1, Math.ceil(sortedOrders.length / pageSize));
+  const paginatedOrders = sortedOrders.slice((page - 1) * pageSize, page * pageSize);
 
   // Render Toolbar Component (Used top and bottom as in screenshot)
-  const renderToolbar = () => (
-    <div className="flex items-center gap-1.5 py-1">
-      {/* Pagination pill */}
-      <div className="inline-flex items-center border border-slate-300 rounded bg-white text-[11px] text-slate-700 h-6">
-        <button
-          type="button"
-          disabled={page <= 1}
-          onClick={() => setPage((p) => Math.max(1, p - 1))}
-          className="px-2 h-full hover:bg-slate-100 disabled:opacity-40 border-r border-slate-200 transition"
-        >
-          <ChevronLeft className="w-3.5 h-3.5" />
-        </button>
-        <span className="font-semibold px-2.5 h-full flex items-center text-[11px]">
-          Hal {page} / {totalPages}
-        </span>
-        <button
-          type="button"
-          disabled={page >= totalPages}
-          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          className="px-2 h-full hover:bg-slate-100 disabled:opacity-40 border-l border-slate-200 transition"
-        >
-          <ChevronRight className="w-3.5 h-3.5" />
-        </button>
+  const renderToolbar = () => {
+    const selectedSO = orders.find((o: any) => o.id === selectedId);
+
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-1.5 py-1 w-full">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* Pagination pill */}
+          <div className="inline-flex items-center border border-slate-300 rounded bg-white text-[11px] text-slate-700 h-6">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="px-2 h-full hover:bg-slate-100 disabled:opacity-40 border-r border-slate-200 transition"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+            </button>
+            <span className="font-semibold px-2.5 h-full flex items-center text-[11px]">
+              Hal {page} / {totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className="px-2 h-full hover:bg-slate-100 disabled:opacity-40 border-l border-slate-200 transition"
+            >
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Cari button */}
+          <button
+            type="button"
+            onClick={() => queryClient.invalidateQueries({ queryKey: ["sales-orders"] })}
+            className="h-6 w-7 bg-white hover:bg-slate-50 border border-slate-300 text-sky-600 rounded flex items-center justify-center shadow-2xs"
+            title="Cari"
+          >
+            <Search className="w-3.5 h-3.5 stroke-[2.5]" />
+          </button>
+
+        {/* + Tambah button (Green) -> HANYA ADMIN */}
+        {isAdmin && (
+          <Link
+            href="/sales/orders/new"
+            className="h-6 px-2.5 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95"
+            title="Tambah Pesanan Penjualan Baru (Sales Order)"
+          >
+            <Plus className="w-3.5 h-3.5 stroke-[3]" />
+            <span>Tambah</span>
+          </Link>
+        )}
+
+        {/* ✏️ Ubah button (Blue) -> HANYA ADMIN */}
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => selectedId && router.push(`/sales/orders/${selectedId}/edit`)}
+            disabled={!selectedId}
+            className="h-6 px-2.5 bg-[#3b82f6] hover:bg-blue-600 text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40"
+          >
+            <Pencil className="w-3 h-3 stroke-[2.5]" />
+            <span>Ubah</span>
+          </button>
+        )}
+
+        {/* 🛡️ Verifikasi & Setujui Pesanan -> HANYA ADMIN */}
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => {
+              if (!selectedSO) return;
+              if (
+                confirm(
+                  `Verifikasi dan setujui pesanan ${selectedSO.order_no}?\n\nPesanan akan otomatis dikonversi masuk ke Menu Penjualan dan diteruskan ke Gudang untuk penyiapan obat.`
+                )
+              ) {
+                approveMutation.mutate(selectedSO.id);
+              }
+            }}
+            disabled={!selectedId || (selectedSO?.status !== "PENDING" && selectedSO?.status !== "DRAFT")}
+            className="h-6 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40 cursor-pointer"
+            title="Verifikasi ketersediaan stok, harga, & termin, lalu setujui pesanan (otomatis masuk Menu Penjualan)"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 stroke-[2.5]" />
+            <span>Setujui Pesanan</span>
+          </button>
+        )}
+
+        {/* 🗑️ Hapus button (Red) -> HANYA ADMIN */}
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={() => setDeleteConfirmOpen(true)}
+            disabled={!selectedId}
+            className="h-6 px-2.5 bg-[#ef4444] hover:bg-red-600 text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40"
+          >
+            <Trash2 className="w-3 h-3 stroke-[2.5]" />
+            <span>Hapus</span>
+          </button>
+        )}
       </div>
 
-      {/* Cari button */}
-      <button
-        type="button"
-        onClick={() => queryClient.invalidateQueries({ queryKey: ["sales-orders"] })}
-        className="h-6 w-7 bg-white hover:bg-slate-50 border border-slate-300 text-sky-600 rounded flex items-center justify-center shadow-2xs"
-        title="Cari"
-      >
-        <Search className="w-3.5 h-3.5 stroke-[2.5]" />
-      </button>
-
-      {/* + Tambah button (Green) -> Menuju Form Pesanan Penjualan Baru */}
-      <Link
-        href="/sales/orders/new"
-        className="h-6 px-2.5 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95"
-      >
-        <Plus className="w-3.5 h-3.5 stroke-[3]" />
-        <span>Tambah</span>
-      </Link>
-
-      {/* ✏️ Ubah button (Blue) */}
-      <button
-        type="button"
-        onClick={() => selectedId && router.push(`/sales/orders/${selectedId}/edit`)}
-        disabled={!selectedId}
-        className="h-6 px-2.5 bg-[#3b82f6] hover:bg-blue-600 text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40"
-      >
-        <Pencil className="w-3 h-3 stroke-[2.5]" />
-        <span>Ubah</span>
-      </button>
-
-      {/* 📎 Dokumen & Faktur PBF Asal button */}
-      <button
-        type="button"
-        onClick={() => {
-          if (!selectedId) {
-            alert("Silakan pilih baris pesanan penjualan terlebih dahulu.");
-            return;
-          }
-          setDocModalTargetId(selectedId);
-          setIsDocModalOpen(true);
-        }}
-        disabled={!selectedId}
-        className="h-6 px-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40"
-        title="Upload / Kelola Scan Surat Pesanan & Faktur Pembelian PBF Asal"
-      >
-        <span>📎</span>
-        <span>Dokumen & Faktur PBF Asal</span>
-      </button>
-
-      {/* 🗑️ Hapus button (Red) */}
-      <button
-        type="button"
-        onClick={() => setDeleteConfirmOpen(true)}
-        disabled={!selectedId}
-        className="h-6 px-2.5 bg-[#ef4444] hover:bg-red-600 text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40"
-      >
-        <Trash2 className="w-3 h-3 stroke-[2.5]" />
-        <span>Hapus</span>
-      </button>
+      {/* Counter right side matching Image 2 */}
+      <div className="text-[11px] text-slate-500 font-medium shrink-0 pr-1">
+        Total: <strong className="text-slate-800">{orders.length}</strong> pesanan ditemukan
+      </div>
     </div>
   );
+};
 
   return (
     <div className="flex flex-col h-full min-h-0 space-y-1 text-xs select-none">
@@ -477,26 +565,24 @@ export default function SalesOrdersPage() {
           </div>
           <div>
             <label className="block text-slate-600 font-semibold mb-0.5">Urut Berdasar :</label>
-            <div className="flex gap-1">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-emerald-500"
-              >
-                <option value="Tanggal">Tanggal</option>
-                <option value="No Transaksi">No Transaksi</option>
-                <option value="Pelanggan">Pelanggan</option>
-                <option value="Total">Total</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => setSortDir((prev) => (prev === "asc" ? "desc" : "asc"))}
-                className="h-6 w-6 flex items-center justify-center border border-slate-300 rounded hover:bg-slate-50 text-slate-600 shrink-0"
-                title={`Urutan: ${sortDir.toUpperCase()}`}
-              >
-                <ArrowUpDown className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            <select
+              value={sortOption}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSortOption(val);
+                const { sortBy: sb, sortDir: sd } = parseSortValue(val);
+                setSortBy(sb);
+                setSortDir(sd);
+                setPage(1);
+              }}
+              className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-emerald-500 font-medium shadow-2xs truncate cursor-pointer"
+            >
+              <option value="created_at_desc">1. Urutan sesuai waktu input paling atas</option>
+              <option value="code_asc">2. Kode (A - Z)</option>
+              <option value="code_desc">3. Kode (Z - A)</option>
+              <option value="name_asc">4. Nama (A - Z)</option>
+              <option value="name_desc">5. Nama (Z - A)</option>
+            </select>
           </div>
         </div>
       </div>
@@ -506,39 +592,48 @@ export default function SalesOrdersPage() {
         {renderToolbar()}
       </div>
 
-      {/* 4. TABLE SECTION (9 Columns Matching Image 1) */}
+      {/* 4. TABLE SECTION (13 Columns Matching Image 2 - Ketoko Format) */}
       <div className="flex-1 min-h-0 bg-white rounded border border-slate-200 overflow-auto shadow-2xs">
         <table className="w-full text-[11px] text-left border-collapse whitespace-nowrap">
           <thead className="bg-slate-50 text-slate-700 font-bold border-b border-slate-200 h-6 sticky top-0 z-10 shadow-2xs">
             <tr>
+              <th className="py-0.5 px-2 border-r border-slate-200 text-center w-24">Aksi</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">No Transaksi</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200">No Nota (Ketoko.store)</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">Tanggal</th>
+              <th className="py-0.5 px-2.5 border-r border-slate-200">Tanggal Kirim</th>
+              <th className="py-0.5 px-2.5 border-r border-slate-200">Dept/Gudang</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">Kode Pelanggan</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200">Nama</th>
+              <th className="py-0.5 px-2.5 border-r border-slate-200">Nama Pelanggan</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200 text-right">Jumlah Pesan</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200 text-right">Jumlah Terima</th>
+              <th className="py-0.5 px-2.5 border-r border-slate-200 text-right">Jumlah Terkirim</th>
+              <th className="py-0.5 px-2.5 border-r border-slate-200 text-right">Pajak</th>
+              <th className="py-0.5 px-2.5 border-r border-slate-200 text-right">Total</th>
+              <th className="py-0.5 px-2.5 border-r border-slate-200 text-center">Status</th>
+              <th className="py-0.5 px-2.5 border-r border-slate-200 text-center">Status Bayar</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">Keterangan</th>
-              <th className="py-0.5 px-2.5 text-right">Total</th>
+              <th className="py-0.5 px-2.5 border-r border-slate-200">User Buat</th>
+              <th className="py-0.5 px-2.5 border-r border-slate-200">User Ubah</th>
+              <th className="py-0.5 px-2.5">Komputer</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={9} className="text-center py-12 text-slate-400">
+                <td colSpan={17} className="text-center py-12 text-slate-400">
                   Memuat data pesanan penjualan...
                 </td>
               </tr>
             ) : paginatedOrders.length === 0 ? (
               <tr>
-                <td colSpan={9} className="text-center py-20 text-slate-400">
-                  No data
+                <td colSpan={17} className="text-center py-20 text-slate-400">
+                  Belum ada transaksi pesanan penjualan ditemukan
                 </td>
               </tr>
             ) : (
               paginatedOrders.map((so: any) => {
                 const isSelected = selectedId === so.id;
                 const totalQty = so.items?.reduce((sum: number, it: any) => sum + (it.qty || 0), 0) || 0;
+                const deliveredQty = so.items?.reduce((sum: number, it: any) => sum + (it.delivered_qty || 0), 0) || (so.status === "DIKIRIM" || so.status === "DITERIMA" || so.status === "SELESAI" ? totalQty : 0);
 
                 return (
                   <tr
@@ -546,36 +641,182 @@ export default function SalesOrdersPage() {
                     onClick={() => setSelectedId(isSelected ? null : so.id)}
                     className={`border-b border-slate-100 cursor-pointer h-6 transition-colors ${
                       isSelected
-                        ? "bg-sky-50 text-sky-900 font-medium"
+                        ? "bg-emerald-50/80 text-slate-900 font-medium"
                         : "hover:bg-slate-50/80"
                     }`}
                   >
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 font-semibold text-emerald-700">
-                      {so.order_no}
+                    {/* Aksi icons */}
+                    <td className="py-0.5 px-1.5 border-r border-slate-100 text-center" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-center gap-1">
+                        {/* Edit icon (Blue Pencil) -> Admin Only */}
+                        {isAdmin && (
+                          <Link
+                            href={`/sales/orders/${so.id}/edit`}
+                            className="p-0.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded"
+                            title="Ubah / Buka Pesanan"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Link>
+                        )}
+
+                        {/* Step 2: Verifikasi & Setujui Pesanan -> Admin Only */}
+                        {isAdmin && (so.status === "PENDING" || so.status === "DRAFT" || !so.status) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (
+                                confirm(
+                                  `Verifikasi & setujui pesanan ${so.order_no}?\n\nPesanan akan otomatis masuk ke Menu Penjualan dan diteruskan ke Gudang untuk penyiapan obat.`
+                                )
+                              ) {
+                                approveMutation.mutate(so.id);
+                              }
+                            }}
+                            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 transition cursor-pointer shadow-2xs inline-flex items-center gap-1"
+                            title="Verifikasi stok & syarat, lalu setujui pesanan (otomatis masuk Menu Penjualan)"
+                          >
+                            <ShieldCheck className="w-3 h-3" />
+                            <span>Setujui</span>
+                          </button>
+                        )}
+
+                        {(so.status === "APPROVED" || so.status === "DIPROSES") && (
+                          <span
+                            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-300 inline-flex items-center gap-1"
+                            title="Pesanan telah disetujui Admin dan masuk ke Menu Penjualan untuk proses pengiriman"
+                          >
+                            ✓ Masuk Penjualan
+                          </span>
+                        )}
+
+                        {so.status === "DIKIRIM" && (
+                          <span
+                            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-300 inline-flex items-center gap-1"
+                            title="Surat Jalan sudah dibuat, barang dalam pengiriman"
+                          >
+                            🚚 Dikirim
+                          </span>
+                        )}
+
+                        {so.status === "SELESAI" && (
+                          <span
+                            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-1"
+                            title="Barang telah diterima dan alur pesanan selesai"
+                          >
+                            ✓ Selesai
+                          </span>
+                        )}
+                      </div>
                     </td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-slate-500">
-                      -
+
+                    {/* No Transaksi */}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 font-bold text-slate-800">
+                      <Link href={`/sales/orders/${so.id}/edit`} className="hover:text-emerald-700 hover:underline">
+                        {so.order_no}
+                      </Link>
                     </td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100">
+
+                    {/* Tanggal */}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-slate-600">
                       {formatDate(so.date)}
                     </td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 font-mono text-slate-600">
-                      {so.customer?.code || "CUST-001"}
+
+                    {/* Tanggal Kirim */}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-slate-600">
+                      {so.delivery_date ? formatDate(so.delivery_date) : (so.expected_date ? formatDate(so.expected_date) : "-")}
                     </td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 font-medium">
+
+                    {/* Dept/Gudang */}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-slate-700">
+                      {so.warehouse?.name || "Gudang Utama Farmasi"}
+                    </td>
+
+                    {/* Kode Pelanggan */}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 font-mono text-slate-600">
+                      {so.customer?.code || "01"}
+                    </td>
+
+                    {/* Nama Pelanggan */}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 font-medium text-slate-800">
                       {so.customer?.name || "Pelanggan Umum"}
                     </td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-right">
-                      {totalQty.toFixed(2)}
+
+                    {/* Jumlah Pesan */}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-right font-medium text-slate-800">
+                      {Number(totalQty).toLocaleString("id-ID")}
                     </td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-right text-slate-500">
-                      0.00
+
+                    {/* Jumlah Terkirim */}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-right font-medium text-slate-800">
+                      {Number(deliveredQty).toLocaleString("id-ID")}
                     </td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 max-w-xs truncate text-slate-600">
+
+                    {/* Pajak */}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-right text-slate-600">
+                      {so.tax_amount > 0 ? formatCurrency(so.tax_amount) : "Rp 0"}
+                    </td>
+
+                    {/* Total (Bold Green matching Image 2) */}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-right font-bold text-emerald-700">
+                      {formatCurrency(so.total_amount)}
+                    </td>
+
+                    {/* Status badge */}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-center">
+                      <span
+                        className={`inline-block px-2 py-0.2 rounded text-[10px] font-bold ${
+                          so.status === "SELESAI"
+                            ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                            : so.status === "DITERIMA"
+                            ? "bg-teal-100 text-teal-800 border border-teal-300"
+                            : so.status === "DIKIRIM"
+                            ? "bg-indigo-100 text-indigo-800 border border-indigo-300"
+                            : so.status === "DIPROSES"
+                            ? "bg-sky-100 text-sky-800 border border-sky-300"
+                            : so.status === "BATAL"
+                            ? "bg-red-100 text-red-800 border border-red-300"
+                            : "bg-amber-100 text-amber-800 border border-amber-300"
+                        }`}
+                      >
+                        {so.status || "PENDING"}
+                      </span>
+                    </td>
+
+                    {/* Status Bayar badge */}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-center">
+                      {so.payment_status === "PAID" || (Number(so.remaining_amount) <= 0 && Number(so.total_amount) > 0) ? (
+                        <span className="inline-block px-2 py-0.2 rounded text-[10px] font-bold bg-[#ecfdf5] text-[#059669] border border-[#a7f3d0]">
+                          Lunas
+                        </span>
+                      ) : so.payment_status === "PARTIAL" || (Number(so.paid_amount) > 0 || Number(so.dp_amount) > 0) ? (
+                        <span className="inline-block px-2 py-0.2 rounded text-[10px] font-bold bg-[#fffbeb] text-[#d97706] border border-[#fde68a]">
+                          Sebagian
+                        </span>
+                      ) : (
+                        <span className="inline-block px-2 py-0.2 rounded text-[10px] font-bold bg-[#fef2f2] text-[#dc2626] border border-[#fecaca]">
+                          Tempo (0)
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Keterangan */}
+                    <td className="py-0.5 px-2.5 max-w-xs truncate text-slate-600 border-r border-slate-100">
                       {so.notes || "-"}
                     </td>
-                    <td className="py-0.5 px-2.5 text-right font-bold text-slate-800">
-                      {formatCurrency(so.total_amount)}
+
+                    {/* User Buat */}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-slate-700">
+                      {formatUserWithRole(so.user)}
+                    </td>
+
+                    {/* User Ubah */}
+                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-slate-500">
+                      {formatUserWithRole(so.modifier)}
+                    </td>
+
+                    {/* Komputer */}
+                    <td className="py-0.5 px-2.5 text-slate-700 font-mono text-[10.5px]">
+                      {so.computer_name || "ISB-SEWA11-S-NB"}
                     </td>
                   </tr>
                 );
@@ -594,7 +835,7 @@ export default function SalesOrdersPage() {
       {modalOpen && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-3">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl overflow-hidden border border-slate-200">
-            <div className="flex items-center justify-between px-4 py-2 border-b bg-emerald-600 text-white font-bold text-xs">
+            <div className="flex items-center justify-between px-4 py-2 border-b bg-[#00c875] text-white font-bold text-xs">
               <span>Tambah Pesanan Penjualan (SO)</span>
               <button onClick={() => setModalOpen(false)}>
                 <X className="w-4 h-4" />
@@ -722,8 +963,7 @@ export default function SalesOrdersPage() {
                     onClick={handleAddItemRow}
                     className="h-6 px-2.5 bg-[#00c875] hover:bg-[#00b066] text-white rounded text-[11px] font-bold flex items-center gap-1 shadow-2xs active:scale-95 transition"
                   >
-                    <Plus className="w-3.5 h-3.5 stroke-[3]" />
-                    <span>+ + Item (Cari Item...)</span>
+                    <span>+ Item (Cari Item...)</span>
                   </button>
                 </div>
                 <table className="w-full border text-[11px]">
@@ -863,7 +1103,7 @@ export default function SalesOrdersPage() {
       {editModalOpen && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-3">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl overflow-hidden border border-slate-200">
-            <div className="flex items-center justify-between px-4 py-2 border-b bg-sky-600 text-white font-bold text-xs">
+            <div className="flex items-center justify-between px-4 py-2 border-b bg-[#00c875] text-white font-bold text-xs">
               <span>Ubah Pesanan Penjualan (SO)</span>
               <button onClick={() => setEditModalOpen(false)}>
                 <X className="w-4 h-4" />
@@ -1038,15 +1278,15 @@ export default function SalesOrdersPage() {
       {isDocModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-2xs flex items-center justify-center p-3">
           <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-4xl max-h-[90vh] overflow-y-auto flex flex-col animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-4 py-2.5 bg-slate-100 border-b border-slate-200 flex justify-between items-center">
-              <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+            <div className="px-4 py-2.5 bg-[#00c875] text-white border-b border-emerald-600 flex justify-between items-center">
+              <span className="font-bold text-sm flex items-center gap-1.5">
                 <span>📎</span>
                 <span>Lampiran Dokumen Penjualan Farmasi / PBF (CDOB BPOM)</span>
               </span>
               <button
                 type="button"
                 onClick={() => setIsDocModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded"
+                className="p-1 text-white/80 hover:text-white hover:bg-white/20 rounded transition"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1072,6 +1312,8 @@ export default function SalesOrdersPage() {
         </div>
       )}
 
+
+
       {/* CARI ITEM MODAL */}
       <CariObatSalesModal
         isOpen={isItemModalOpen}
@@ -1080,6 +1322,7 @@ export default function SalesOrdersPage() {
         saleType="PBF"
         warehouseId={selectedWarehouse !== "all" ? selectedWarehouse : undefined}
       />
+
     </div>
   );
 }

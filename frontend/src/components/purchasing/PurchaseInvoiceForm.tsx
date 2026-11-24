@@ -21,6 +21,7 @@ import {
   Undo2,
   Building2,
   Package,
+  PackageCheck,
   Layers,
   Barcode,
 } from "lucide-react";
@@ -31,6 +32,7 @@ import { DetailItemModal } from "./DetailItemModal";
 import { IncludeBiayaModal } from "./IncludeBiayaModal";
 import { CariPesananModal } from "./CariPesananModal";
 import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
+import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
 export interface InvoiceItemRow {
   product_id: string;
@@ -69,6 +71,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
   const [isHargaJualModalOpen, setIsHargaJualModalOpen] = useState(false);
   const [isInfoRowModalOpen, setIsInfoRowModalOpen] = useState(false);
   const [isBayarModalOpen, setIsBayarModalOpen] = useState(false);
+  const [isSaveConfirmModalOpen, setIsSaveConfirmModalOpen] = useState(false);
   const [isIncludeBiayaModalOpen, setIsIncludeBiayaModalOpen] = useState(false);
   const [isPesananModalOpen, setIsPesananModalOpen] = useState(false);
   const [isDataSerialModalOpen, setIsDataSerialModalOpen] = useState(false);
@@ -102,6 +105,31 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
   const [isPbfDocModalOpen, setIsPbfDocModalOpen] = useState(false);
   const [pbfDocCount, setPbfDocCount] = useState(0);
 
+  // Persistent / Draft Purchase Invoice ID for linking documents before creation
+  const [draftInvoiceId] = useState<string>(() => {
+    if (invoiceId) return invoiceId;
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+    return "00000000-0000-0000-0000-000000000000";
+  });
+
+  // Query linked documents for this purchase
+  const { data: invoiceDocs = [], refetch: refetchInvoiceDocs } = useQuery({
+    queryKey: ["purchase-invoice-docs", draftInvoiceId],
+    queryFn: async () => {
+      const res = await api.get(`/documents?entity_type=purchase&entity_id=${draftInvoiceId}`);
+      return res.data?.data || [];
+    },
+    enabled: !!draftInvoiceId,
+  });
+
+  useEffect(() => {
+    if (invoiceDocs) {
+      setPbfDocCount(invoiceDocs.length);
+    }
+  }, [invoiceDocs]);
+
   // Table items state
   const [items, setItems] = useState<InvoiceItemRow[]>([]);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
@@ -122,6 +150,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
 
   // Payment / Bayar state matching Ketoko Image 2
   const [paidAmount, setPaidAmount] = useState<number>(0);
+  const [paymentStatus, setPaymentStatus] = useState("UNPAID");
   const [payAccount, setPayAccount] = useState("KAS");
   const [dpAmount, setDpAmount] = useState<number>(0);
   const [bayarTunai, setBayarTunai] = useState<number>(0);
@@ -129,6 +158,55 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
   const [bayarKredit, setBayarKredit] = useState<number>(0);
   const [cashAccountId, setCashAccountId] = useState("");
   const [isPrintAfterSave, setIsPrintAfterSave] = useState(false);
+
+  // Format number to Rupiah string e.g. "734.965"
+  const formatRupiahNumber = (num: number): string => {
+    if (!num && num !== 0) return "0";
+    if (Math.round(num) === num) {
+      return num.toLocaleString("id-ID");
+    }
+    return num.toLocaleString("id-ID", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  };
+
+  // Parse Rupiah string e.g. "734.965" -> 734965
+  const parseRupiahNumber = (str: string): number => {
+    if (!str) return 0;
+    const clean = str.replace(/[^0-9,-]/g, "").replace(",", ".");
+    const n = parseFloat(clean);
+    return isNaN(n) ? 0 : n;
+  };
+
+  const handleDpChange = (val: number) => {
+    setDpAmount(val);
+    let newBayarTunai = bayarTunai;
+    if (bayarTunai === grandTotal || (val > 0 && bayarTunai + val > grandTotal)) {
+      newBayarTunai = 0;
+      setBayarTunai(0);
+    }
+    const totalPaid = val + newBayarTunai + bayarDeposit;
+    const sisa = Math.max(0, grandTotal - totalPaid);
+    setBayarKredit(sisa);
+  };
+
+  const handleBayarTunaiChange = (val: number) => {
+    setBayarTunai(val);
+    const totalPaid = dpAmount + val + bayarDeposit;
+    const sisa = Math.max(0, grandTotal - totalPaid);
+    setBayarKredit(sisa);
+  };
+
+  const handleBayarDepositChange = (val: number) => {
+    setBayarDeposit(val);
+    const totalPaid = dpAmount + bayarTunai + val;
+    const sisa = Math.max(0, grandTotal - totalPaid);
+    setBayarKredit(sisa);
+  };
+
+  const handleBayarKreditChange = (val: number) => {
+    setBayarKredit(val);
+    const net = Math.max(0, grandTotal - dpAmount - bayarDeposit - val);
+    setBayarTunai(net);
+  };
 
   // Queries
   const { data: accountsList = [] } = useQuery({
@@ -180,6 +258,46 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
     enabled: isEdit && Boolean(invoiceId),
   });
 
+  // Status apakah faktur sudah diverifikasi / disetujui Admin
+  const isVerifiedByAdmin = Boolean(
+    existingInvoice && (
+      Boolean(existingInvoice.is_verified) ||
+      existingInvoice.verification_status === "APPROVED"
+    )
+  );
+
+  // Status apakah pembayaran sudah LUNAS
+  const isPaid = Boolean(
+    (existingInvoice && (
+      String(existingInvoice.payment_status).toUpperCase() === "PAID" ||
+      String(existingInvoice.payment_status).toUpperCase() === "LUNAS" ||
+      (Number(existingInvoice.total_amount) > 0 && Number(existingInvoice.remaining_amount) <= 0)
+    )) ||
+    paymentStatus === "PAID" ||
+    paymentStatus === "LUNAS"
+  );
+
+  // Status apakah pembayaran sudah pernah disubmit (DP / Sebagian / Lunas / Tempo kredit)
+  // Sesuai aturan: jika pembayaran sudah disubmit, tombol bayar didisable karena sisa hutang muncul di menu Bayar Hutang
+  const isPaymentSubmitted = Boolean(
+    isPaid ||
+    (existingInvoice && (
+      existingInvoice.payment_status === "PAID" ||
+      existingInvoice.payment_status === "PARTIAL" ||
+      existingInvoice.payment_status === "DP" ||
+      existingInvoice.payment_status === "TEMPO" ||
+      existingInvoice.payment_status === "KREDIT" ||
+      (Number(existingInvoice.paid_amount) || 0) > 0 ||
+      (Number(existingInvoice.dp_amount) || 0) > 0
+    )) ||
+    (paymentStatus === "PAID" ||
+      paymentStatus === "PARTIAL" ||
+      paymentStatus === "DP" ||
+      paymentStatus === "TEMPO" ||
+      paymentStatus === "KREDIT" ||
+      paidAmount > 0)
+  );
+
   useEffect(() => {
     if (existingInvoice) {
       setInvoiceNo(existingInvoice.invoice_no || "Auto");
@@ -214,10 +332,14 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
       setExtraFee(existingInvoice.shipping_fee || 0);
       setExtraFeeCheckbox((existingInvoice.shipping_fee || 0) > 0);
       const paid = Number(existingInvoice.paid_amount) || 0;
+      const dp = Number(existingInvoice.dp_amount) || 0;
       const total = Number(existingInvoice.total_amount) || 0;
       setPaidAmount(paid);
-      setBayarTunai(paid);
+      setDpAmount(dp);
+      setBayarTunai(Math.max(0, paid - dp));
       setBayarKredit(Math.max(0, total - paid));
+      if (existingInvoice.payment_status) setPaymentStatus(existingInvoice.payment_status);
+      if (existingInvoice.cash_account_id) setCashAccountId(existingInvoice.cash_account_id);
 
       if (existingInvoice.items && existingInvoice.items.length > 0) {
         const mappedItems: InvoiceItemRow[] = existingInvoice.items.map((it: any) => {
@@ -310,6 +432,17 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
     return Math.max(0, tot);
   }, [afterDiscount, taxAmount, ppnType, extraFee]);
 
+  // Sync payment amounts when grandTotal changes (e.g. discount added)
+  useEffect(() => {
+    if (!existingInvoice && !isPaymentSubmitted) {
+      if (bayarKredit === 0 && bayarTunai > 0) {
+        setBayarTunai(Math.max(0, grandTotal - dpAmount - bayarDeposit));
+      } else if (bayarKredit > 0) {
+        setBayarKredit(Math.max(0, grandTotal - dpAmount - bayarTunai - bayarDeposit));
+      }
+    }
+  }, [grandTotal, dpAmount, bayarDeposit, isPaymentSubmitted, existingInvoice]);
+
   // Selected item object for the right sidebar
   const selectedItemRow = selectedRowIndex !== null ? items[selectedRowIndex] : null;
 
@@ -343,7 +476,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
         unit_price: price,
         discount_percent: 0,
         line_total: price,
-        stock: product.stock || 0,
+        stock: Number(product.stock ?? product.total_stock ?? 0),
         rack: product.rack || "-",
         selling_price: product.selling_price || 0,
       };
@@ -369,9 +502,19 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
     if (po.items && po.items.length > 0) {
       const defaultUnit =
         units.find((u: any) => u.name === "Pcs / Buah" || u.code === "PCS") || units[0];
-      const imported: InvoiceItemRow[] = po.items.map((it: any) => {
+
+      // Filter items matching the supplier if selectedSupplier is already chosen
+      const targetSupplierId = selectedSupplier?.id || po.supplier_id;
+      const relevantItems = po.items.filter((it: any) => {
+        const itSupId = it.supplier_id || po.supplier_id;
+        return !targetSupplierId || itSupId === targetSupplierId;
+      });
+
+      const imported: InvoiceItemRow[] = (relevantItems.length > 0 ? relevantItems : po.items).map((it: any) => {
         const prod = it.product || {};
         const q = Number(it.qty) || 1;
+        const rec = Number(it.received_qty) || 0;
+        const remainingQty = Math.max(0, q - rec);
         const p = Number(it.unit_price) || 0;
         const d = Number(it.discount) || 0;
         const discPct = q * p > 0 ? (d / (q * p)) * 100 : 0;
@@ -384,13 +527,13 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
           name: prod.name || it.name || "-",
           brand_name: prod.brand?.name || "-",
           po_qty: q,
-          qty: q,
-          received_qty: q,
+          qty: remainingQty > 0 ? remainingQty : q,
+          received_qty: remainingQty > 0 ? remainingQty : q,
           unit_id: resolvedUnitId,
           unit_name: resolvedUnitName,
           unit_price: p,
           discount_percent: Math.round(discPct * 100) / 100,
-          line_total: q * p - d,
+          line_total: (remainingQty > 0 ? remainingQty : q) * p - d,
           stock: prod.stock || 0,
           rack: prod.rack || "-",
           selling_price: prod.selling_price || 0,
@@ -428,7 +571,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
   };
 
   // Save row edit (Detail Item matching Screenshot 2)
-  const handleSaveDetailItem = (updatedRow: any) => {
+  const handleSaveDetailItem = (updatedRow: any, splitRow?: any) => {
     if (selectedRowIndex === null) return;
     const updated = [...items];
     updated[selectedRowIndex] = {
@@ -440,6 +583,12 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
       discount_percent: updatedRow.discount_percent,
       line_total: updatedRow.line_total,
     };
+    if (splitRow) {
+      updated.splice(selectedRowIndex + 1, 0, {
+        ...updated[selectedRowIndex],
+        ...splitRow,
+      });
+    }
     setItems(updated);
     setIsEditRowModalOpen(false);
   };
@@ -526,7 +675,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
 
   // Save Invoice Mutation
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (shouldVerify: boolean = true) => {
       if (!selectedSupplier?.id) {
         throw new Error("Pilih Supplier terlebih dahulu.");
       }
@@ -549,8 +698,10 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
         tax_percent: taxPercent,
         discount: calculatedNominalDiscount,
         shipping_fee: Number(extraFee) || 0,
+        dp_amount: Number(dpAmount) || 0,
         paid_amount: (Number(bayarTunai) || 0) + (Number(dpAmount) || 0) + (Number(bayarDeposit) || 0),
         cash_account_id: cashAccountId || undefined,
+        is_verified: existingInvoice ? (Boolean(existingInvoice.is_verified) || existingInvoice.verification_status === "APPROVED") : false,
         items: items.map((it) => {
           let resolvedUnitId = it.unit_id;
           if (!resolvedUnitId || resolvedUnitId.length < 20) {
@@ -568,6 +719,8 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
             qty: it.qty,
             unit_price: it.unit_price,
             discount: (it.qty * it.unit_price * it.discount_percent) / 100,
+            batch_number: (it as any).batch_number || undefined,
+            expired_date: (it as any).expired_date || undefined,
           };
         }),
       };
@@ -575,16 +728,22 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
       if (isEdit && invoiceId) {
         return await api.put(`/purchases/${invoiceId}`, payload);
       }
-      return await api.post("/purchases", payload);
+      return await api.post("/purchases", {
+        ...payload,
+        id: draftInvoiceId,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["purchases"] });
       queryClient.invalidateQueries({ queryKey: ["inventory-balances"] });
       queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      setIsBayarModalOpen(false);
+      setIsSaveConfirmModalOpen(false);
       alert(
-        isEdit
-          ? "Faktur Pembelian berhasil diperbarui!"
-          : "Faktur Pembelian baru berhasil disimpan & stok bertambah!"
+        "✅ Faktur pembelian berhasil dicatat!\n\n" +
+          "• Status: Menunggu Penerimaan Fisik oleh Petugas Gudang.\n" +
+          "• Petugas Gudang akan memeriksa fisik barang, mencatat nomor batch & expired date.\n" +
+          "• Stok obat, hutang supplier, dan jurnal akuntansi akan otomatis dibukukan setelah Admin menyetujui (approval)."
       );
       if (isPrintAfterSave) {
         setTimeout(() => window.print(), 300);
@@ -593,6 +752,24 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
     },
     onError: (err: any) => {
       alert("Gagal menyimpan Pembelian: " + (err.response?.data?.message || err.message));
+    },
+  });
+
+  // Verify Draft Invoice Mutation
+  const verifyMutation = useMutation({
+    mutationFn: async () => {
+      if (!invoiceId) throw new Error("ID Faktur tidak ditemukan");
+      return await api.put(`/purchases/${invoiceId}/verify`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["purchases"] });
+      queryClient.invalidateQueries({ queryKey: ["purchase-invoice-detail", invoiceId] });
+      queryClient.invalidateQueries({ queryKey: ["inventory-balances"] });
+      queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      alert("✅ Faktur Pembelian berhasil diverifikasi! Stok obat telah masuk ke gudang dan jurnal akuntansi telah dibukukan.");
+    },
+    onError: (err: any) => {
+      alert("Gagal verifikasi faktur: " + (err.response?.data?.message || err.message));
     },
   });
 
@@ -655,6 +832,41 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
         </div>
       </div>
 
+      {/* Verification Status Banner */}
+      {isEdit && existingInvoice && (
+        <div
+          className={`shrink-0 px-3 py-1.5 rounded-lg border flex items-center justify-between text-xs ${
+            isVerifiedByAdmin
+              ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+              : "bg-amber-50 border-amber-300 text-amber-950"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <span className="font-bold">
+              {isVerifiedByAdmin
+                ? "🟢 STATUS: TERVERIFIKASI & DISETUJUI ADMIN (Stok Obat Masuk Gudang & Jurnal Akuntansi Tercatat - Transaksi Terkunci)"
+                : "🟡 STATUS: DRAFT (Belum Diverifikasi - Stok Belum Masuk & Jurnal Belum Dibukukan)"}
+            </span>
+            {isVerifiedByAdmin && (existingInvoice.admin_approver || existingInvoice.verifier) && (
+              <span className="text-[11px] text-emerald-700">
+                • Disetujui oleh: {existingInvoice.admin_approver?.full_name || existingInvoice.admin_approver?.username || existingInvoice.verifier?.full_name || existingInvoice.verifier?.username}
+              </span>
+            )}
+          </div>
+          {!isVerifiedByAdmin && (
+            <button
+              type="button"
+              onClick={() => verifyMutation.mutate()}
+              disabled={verifyMutation.isPending}
+              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded text-xs flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-50"
+            >
+              <Check className="w-3.5 h-3.5 stroke-[3]" />
+              <span>{verifyMutation.isPending ? "Memverifikasi..." : "Verifikasi & Masuk Stok Sekarang"}</span>
+            </button>
+          )}
+        </div>
+      )}
+
       {/* 2. Top Header Form matching Screenshot 1 (2 Rows) */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-1.5 shrink-0 bg-slate-50/40 p-1 rounded border border-slate-200/80 text-[11px]">
         {/* ROW 1: No Transaksi (col-3) | Tanggal (col-3) | Supplier (col-6) */}
@@ -678,8 +890,15 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
           <label className="block text-slate-600 text-[10px] mb-0.5 font-medium">Supplier :</label>
           <div className="flex gap-1">
             <div
-              onClick={() => setIsSupplierModalOpen(true)}
-              className="flex-1 h-6 px-2 flex items-center border border-slate-300 rounded bg-white text-slate-800 text-[11px] cursor-pointer hover:border-sky-500 truncate"
+              onClick={() => {
+                if (isVerifiedByAdmin) return;
+                setIsSupplierModalOpen(true);
+              }}
+              className={`flex-1 h-6 px-2 flex items-center border border-slate-300 rounded text-[11px] truncate ${
+                isVerifiedByAdmin
+                  ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                  : "bg-white text-slate-800 cursor-pointer hover:border-sky-500"
+              }`}
             >
               {selectedSupplier ? (
                 <span className="font-semibold text-slate-900">
@@ -691,9 +910,10 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
             </div>
             <button
               type="button"
+              disabled={isVerifiedByAdmin}
               onClick={() => setIsSupplierModalOpen(true)}
-              className="h-6 w-6 border border-slate-300 rounded bg-white hover:bg-slate-100 flex items-center justify-center text-slate-600 shrink-0"
-              title="Cari Supplier"
+              className="h-6 w-6 border border-slate-300 rounded bg-white hover:bg-slate-100 flex items-center justify-center text-slate-600 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+              title={isVerifiedByAdmin ? "Faktur sudah disetujui Admin" : "Cari Supplier"}
             >
               <Search className="w-3 h-3" />
             </button>
@@ -707,8 +927,13 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
           </label>
           <select
             value={warehouseId}
+            disabled={isVerifiedByAdmin}
             onChange={(e) => setWarehouseId(e.target.value)}
-            className="w-full h-6 px-1.5 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500 cursor-pointer truncate"
+            className={`w-full h-6 px-1.5 border border-slate-300 rounded text-[11px] truncate ${
+              isVerifiedByAdmin
+                ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                : "bg-white focus:outline-none focus:border-sky-500 cursor-pointer"
+            }`}
           >
             {warehouses.map((w: any) => (
               <option key={w.id} value={w.id}>
@@ -722,8 +947,13 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
           <label className="block text-slate-600 text-[10px] mb-0.5 font-medium">PPN :</label>
           <select
             value={ppnType}
+            disabled={isVerifiedByAdmin}
             onChange={(e) => setPpnType(e.target.value as any)}
-            className="w-full h-6 px-1.5 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500 cursor-pointer"
+            className={`w-full h-6 px-1.5 border border-slate-300 rounded text-[11px] ${
+              isVerifiedByAdmin
+                ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                : "bg-white focus:outline-none focus:border-sky-500 cursor-pointer"
+            }`}
           >
             <option value="Non">Non</option>
             <option value="Include">Include</option>
@@ -737,8 +967,15 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
           </label>
           <div className="flex gap-1">
             <div
-              onClick={() => setIsPesananModalOpen(true)}
-              className="flex-1 h-6 px-2 flex items-center border border-dashed border-slate-300 rounded bg-white text-slate-800 text-[11px] cursor-pointer hover:border-sky-500 truncate"
+              onClick={() => {
+                if (isVerifiedByAdmin) return;
+                setIsPesananModalOpen(true);
+              }}
+              className={`flex-1 h-6 px-2 flex items-center border border-dashed border-slate-300 rounded text-[11px] truncate ${
+                isVerifiedByAdmin
+                  ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                  : "bg-white text-slate-800 cursor-pointer hover:border-sky-500"
+              }`}
             >
               {selectedPO ? (
                 <span className="font-semibold text-emerald-700">
@@ -748,7 +985,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                 <span className="text-slate-400">Select...</span>
               )}
             </div>
-            {selectedPO && (
+            {selectedPO && !isVerifiedByAdmin && (
               <button
                 type="button"
                 onClick={() => setSelectedPO(null)}
@@ -760,9 +997,10 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
             )}
             <button
               type="button"
+              disabled={isVerifiedByAdmin}
               onClick={() => setIsPesananModalOpen(true)}
-              className="h-6 w-6 border border-slate-300 rounded bg-white hover:bg-slate-100 flex items-center justify-center text-slate-600 shrink-0"
-              title="Cari Pesanan Pembelian"
+              className="h-6 w-6 border border-slate-300 rounded bg-white hover:bg-slate-100 flex items-center justify-center text-slate-600 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+              title={isVerifiedByAdmin ? "Faktur sudah disetujui Admin" : "Cari Pesanan Pembelian"}
             >
               <Search className="w-3 h-3" />
             </button>
@@ -776,10 +1014,15 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
           </label>
           <input
             type="text"
+            disabled={isVerifiedByAdmin}
             value={pbfInvoiceNo}
             onChange={(e) => setPbfInvoiceNo(e.target.value)}
             placeholder="Contoh: INV-PBF/2026/089"
-            className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500 font-mono"
+            className={`w-full h-6 px-2 border border-slate-300 rounded text-[11px] font-mono ${
+              isVerifiedByAdmin
+                ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                : "bg-white focus:outline-none focus:border-sky-500"
+            }`}
           />
         </div>
 
@@ -789,10 +1032,15 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
           </label>
           <input
             type="text"
+            disabled={isVerifiedByAdmin}
             value={pbfDeliveryOrderNo}
             onChange={(e) => setPbfDeliveryOrderNo(e.target.value)}
             placeholder="Contoh: DO/2026/XI/124"
-            className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500 font-mono"
+            className={`w-full h-6 px-2 border border-slate-300 rounded text-[11px] font-mono ${
+              isVerifiedByAdmin
+                ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                : "bg-white focus:outline-none focus:border-sky-500"
+            }`}
           />
         </div>
 
@@ -802,10 +1050,15 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
           </label>
           <input
             type="text"
+            disabled={isVerifiedByAdmin}
             value={taxInvoiceNo}
             onChange={(e) => setTaxInvoiceNo(e.target.value)}
             placeholder="Contoh: 010.002-26.12345678"
-            className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500 font-mono"
+            className={`w-full h-6 px-2 border border-slate-300 rounded text-[11px] font-mono ${
+              isVerifiedByAdmin
+                ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                : "bg-white focus:outline-none focus:border-sky-500"
+            }`}
           />
         </div>
 
@@ -978,19 +1231,31 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
       <div className="flex flex-wrap items-center gap-1.5 shrink-0 py-0.5">
         <button
           type="button"
-          onClick={() => setIsItemModalOpen(true)}
-          className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded text-[11px] font-medium flex items-center gap-1 shadow-2xs transition active:scale-95"
+          onClick={() => {
+            if (isVerifiedByAdmin) return;
+            setIsItemModalOpen(true);
+          }}
+          disabled={isVerifiedByAdmin}
+          className={`h-6 px-2.5 rounded text-[11px] font-medium flex items-center gap-1 shadow-2xs transition active:scale-95 ${
+            isVerifiedByAdmin
+              ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-50"
+              : "bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 cursor-pointer"
+          }`}
+          title={isVerifiedByAdmin ? "Faktur sudah disetujui Admin" : "Tambah Item"}
         >
-          <Plus className="w-3 h-3 text-emerald-600 stroke-[2.5]" />
           <span>+ Item</span>
         </button>
 
         <button
           type="button"
           onClick={handleOpenEditRow}
-          disabled={selectedRowIndex === null}
-          className="w-6 h-6 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded flex items-center justify-center shadow-2xs transition active:scale-95 disabled:opacity-40"
-          title="Ubah Item Baris (Detail Item)"
+          disabled={selectedRowIndex === null || isVerifiedByAdmin}
+          className={`w-6 h-6 rounded flex items-center justify-center shadow-2xs transition active:scale-95 ${
+            selectedRowIndex === null || isVerifiedByAdmin
+              ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-40"
+              : "bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 cursor-pointer"
+          }`}
+          title={isVerifiedByAdmin ? "Faktur sudah disetujui Admin" : "Ubah Item Baris (Detail Item)"}
         >
           <Pencil className="w-3 h-3 text-sky-600" />
         </button>
@@ -998,9 +1263,13 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
         <button
           type="button"
           onClick={handleDeleteRow}
-          disabled={selectedRowIndex === null}
-          className="w-6 h-6 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded flex items-center justify-center shadow-2xs transition active:scale-95 disabled:opacity-40"
-          title="Hapus Item Terpilih"
+          disabled={selectedRowIndex === null || isVerifiedByAdmin}
+          className={`w-6 h-6 rounded flex items-center justify-center shadow-2xs transition active:scale-95 ${
+            selectedRowIndex === null || isVerifiedByAdmin
+              ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-40"
+              : "bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 cursor-pointer"
+          }`}
+          title={isVerifiedByAdmin ? "Faktur sudah disetujui Admin" : "Hapus Item Terpilih"}
         >
           <Trash2 className="w-3 h-3 text-rose-500" />
         </button>
@@ -1049,10 +1318,15 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
             </label>
             <input
               type="text"
+              disabled={isVerifiedByAdmin}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Catatan faktur pembelian..."
-              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500"
+              className={`w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] ${
+                isVerifiedByAdmin
+                  ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                  : "bg-white text-slate-800 focus:outline-none focus:border-sky-500"
+              }`}
             />
           </div>
 
@@ -1094,6 +1368,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
               <input
                 type="number"
                 step="any"
+                disabled={isVerifiedByAdmin}
                 value={taxPercent || ""}
                 placeholder="0"
                 onChange={(e) => {
@@ -1106,10 +1381,15 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                     setPpnType("Non");
                   }
                 }}
-                className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white text-right font-mono focus:outline-none focus:border-sky-500"
+                className={`w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-right font-mono ${
+                  isVerifiedByAdmin
+                    ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                    : "bg-white text-slate-800 focus:outline-none focus:border-sky-500"
+                }`}
               />
               <input
                 type="checkbox"
+                disabled={isVerifiedByAdmin}
                 checked={taxCheckbox}
                 onChange={(e) => {
                   const checked = e.target.checked;
@@ -1122,7 +1402,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                     setPpnType("Non");
                   }
                 }}
-                className="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 cursor-pointer"
+                className="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
               />
             </div>
           </div>
@@ -1144,6 +1424,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
               />
               <input
                 type="checkbox"
+                disabled={isVerifiedByAdmin}
                 checked={taxCheckbox}
                 onChange={(e) => {
                   const checked = e.target.checked;
@@ -1156,7 +1437,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                     setPpnType("Non");
                   }
                 }}
-                className="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 cursor-pointer"
+                className="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
               />
             </div>
           </div>
@@ -1172,12 +1453,17 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
             <input
               type="number"
               step="0.01"
+              disabled={isVerifiedByAdmin}
               value={discountPercent || ""}
               placeholder="0"
               onChange={(e) => {
                 setDiscountPercent(Number(e.target.value) || 0);
               }}
-              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white text-right font-mono focus:outline-none focus:border-sky-500"
+              className={`w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-right font-mono ${
+                isVerifiedByAdmin
+                  ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                  : "bg-white text-slate-800 focus:outline-none focus:border-sky-500"
+              }`}
             />
           </div>
 
@@ -1189,12 +1475,17 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
             <input
               type="number"
               step="0.01"
+              disabled={isVerifiedByAdmin}
               value={notaDiscountPercent || ""}
               placeholder="0"
               onChange={(e) => {
                 setNotaDiscountPercent(Number(e.target.value) || 0);
               }}
-              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white text-right font-mono focus:outline-none focus:border-sky-500"
+              className={`w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-right font-mono ${
+                isVerifiedByAdmin
+                  ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                  : "bg-white text-slate-800 focus:outline-none focus:border-sky-500"
+              }`}
             />
           </div>
 
@@ -1205,6 +1496,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
             </label>
             <input
               type="text"
+              disabled={isVerifiedByAdmin}
               value={
                 calculatedNominalDiscount > 0
                   ? calculatedNominalDiscount.toLocaleString("id-ID")
@@ -1217,7 +1509,11 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                 setDiscountPercent(0);
                 setNotaDiscountPercent(0);
               }}
-              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white text-right font-mono focus:outline-none focus:border-sky-500"
+              className={`w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-right font-mono ${
+                isVerifiedByAdmin
+                  ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                  : "bg-white text-slate-800 focus:outline-none focus:border-sky-500"
+              }`}
             />
           </div>
 
@@ -1230,6 +1526,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
               <input
                 type="text"
                 placeholder="0"
+                disabled={isVerifiedByAdmin}
                 value={extraFee > 0 ? extraFee.toLocaleString("id-ID") : "0"}
                 onChange={(e) => {
                   const raw = e.target.value.replace(/[^0-9]/g, "");
@@ -1240,13 +1537,18 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                     setExtraFeeCheckbox(true);
                   }
                 }}
-                className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white text-right font-mono focus:outline-none focus:border-sky-500"
+                className={`w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-right font-mono ${
+                  isVerifiedByAdmin
+                    ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                    : "bg-white text-slate-800 focus:outline-none focus:border-sky-500"
+                }`}
               />
               <button
                 type="button"
+                disabled={isVerifiedByAdmin}
                 onClick={() => setIsIncludeBiayaModalOpen(true)}
-                className="w-6 h-6 border border-slate-300 rounded bg-white hover:bg-slate-100 flex items-center justify-center text-slate-600 shrink-0"
-                title="Include Biaya Tambahan"
+                className="w-6 h-6 border border-slate-300 rounded bg-white hover:bg-slate-100 flex items-center justify-center text-slate-600 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                title={isVerifiedByAdmin ? "Faktur sudah disetujui Admin" : "Include Biaya Tambahan"}
               >
                 <DollarSign className="w-3 h-3 text-slate-600" />
               </button>
@@ -1283,10 +1585,14 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
             <span>Tambah</span>
           </button>
 
-          {/* [💾 Simpan] */}
+          {/* [💾 Simpan Draft] */}
           <button
             type="button"
             onClick={() => {
+              if (isVerifiedByAdmin) {
+                alert("Faktur pembelian sudah diverifikasi & disetujui Admin. Tidak boleh ada perubahan.");
+                return;
+              }
               if (!selectedSupplier?.id) {
                 alert("Pilih Supplier terlebih dahulu.");
                 return;
@@ -1295,27 +1601,73 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                 alert("Tabel item pembelian masih kosong. Silakan klik [+ Item].");
                 return;
               }
-              if (bayarTunai === 0 && bayarKredit === 0 && grandTotal > 0) {
-                setBayarTunai(grandTotal);
-                setBayarKredit(0);
-              }
-              setIsBayarModalOpen(true);
+              saveMutation.mutate(false);
             }}
-            disabled={saveMutation.isPending}
-            className="h-6 px-3 bg-[#009b62] hover:bg-[#008754] text-white font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-50"
-            title="Simpan Faktur Pembelian"
+            disabled={saveMutation.isPending || isVerifiedByAdmin}
+            className={`h-6 px-2.5 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 ${
+              isVerifiedByAdmin
+                ? "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed opacity-50"
+                : "bg-slate-600 hover:bg-slate-700 text-white disabled:opacity-50"
+            }`}
+            title={
+              isVerifiedByAdmin
+                ? "Faktur sudah diverifikasi/disetujui Admin (Tidak boleh ada perubahan)"
+                : "Simpan sebagai Draft (Belum Masuk Stok & Akuntansi)"
+            }
           >
             <Save className="w-3 h-3" />
-            <span>{saveMutation.isPending ? "Menyimpan..." : "Simpan"}</span>
+            <span>Simpan Draft</span>
+          </button>
+
+          {/* [💾 Simpan Pembelian] (Membuka Modal Persetujuan Simpan) */}
+          <button
+            type="button"
+            disabled={saveMutation.isPending || isVerifiedByAdmin}
+            onClick={() => {
+              if (isVerifiedByAdmin) {
+                alert("Faktur pembelian sudah diverifikasi & disetujui Admin. Tidak boleh ada perubahan.");
+                return;
+              }
+              if (!selectedSupplier?.id) {
+                alert("Pilih Supplier terlebih dahulu.");
+                return;
+              }
+              if (items.length === 0) {
+                alert("Tabel item pembelian masih kosong. Silakan klik [+ Item].");
+                return;
+              }
+              setIsSaveConfirmModalOpen(true);
+            }}
+            className={`h-6 px-3 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 ${
+              isVerifiedByAdmin
+                ? "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed opacity-50"
+                : "bg-[#009b62] hover:bg-[#008754] text-white disabled:opacity-50 cursor-pointer"
+            }`}
+            title={
+              isVerifiedByAdmin
+                ? "Faktur sudah diverifikasi/disetujui Admin (Tidak boleh ada perubahan)"
+                : "Simpan faktur pembelian (diteruskan ke Petugas Gudang untuk pemeriksaan fisik barang)"
+            }
+          >
+            <Save className="w-3 h-3 stroke-[2.5]" />
+            <span>Simpan Pembelian</span>
           </button>
 
           {/* [🗑️ Hapus] */}
           <button
             type="button"
             onClick={handleDeleteInvoice}
-            disabled={!isEdit}
-            className="h-6 px-2.5 bg-white hover:bg-rose-50 border border-slate-300 text-rose-600 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-40"
-            title="Hapus Faktur Pembelian"
+            disabled={!isEdit || isVerifiedByAdmin}
+            className={`h-6 px-2.5 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 ${
+              !isEdit || isVerifiedByAdmin
+                ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-50"
+                : "bg-white hover:bg-rose-50 border border-slate-300 text-rose-600 cursor-pointer"
+            }`}
+            title={
+              isVerifiedByAdmin
+                ? "Faktur sudah diverifikasi/disetujui Admin (Tidak dapat dihapus)"
+                : "Hapus Faktur Pembelian"
+            }
           >
             <Trash2 className="w-3 h-3" />
             <span>Hapus</span>
@@ -1325,33 +1677,99 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
           <button
             type="button"
             onClick={() => window.print()}
-            className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95"
+            className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
             title="Cetak Faktur Pembelian"
           >
             <Printer className="w-3 h-3" />
             <span>Cetak</span>
           </button>
 
-          {/* [💳 Bayar] */}
+          {/* [💳 Bayar] (Membuka Modal Pembayaran) */}
           <button
             type="button"
+            disabled={isPaid || isPaymentSubmitted}
             onClick={() => {
+              if (isPaid) {
+                alert("Faktur pembelian ini sudah Lunas. Tidak perlu pembayaran lagi.");
+                return;
+              }
+              if (isPaymentSubmitted) {
+                alert("Pembayaran faktur telah disubmit. Sisa tagihan hutang diproses melalui menu Bayar Hutang.");
+                return;
+              }
+              if (!selectedSupplier?.id) {
+                alert("Pilih Supplier terlebih dahulu sebelum melakukan pembayaran.");
+                return;
+              }
+              if (items.length === 0) {
+                alert("Tabel item pembelian masih kosong. Silakan klik [+ Item].");
+                return;
+              }
+              const netPayable = Math.max(0, grandTotal - dpAmount - bayarDeposit);
               if (bayarTunai === 0 && bayarKredit === 0 && grandTotal > 0) {
-                setBayarTunai(grandTotal);
+                setBayarTunai(netPayable);
                 setBayarKredit(0);
+              } else if (bayarKredit === 0 && bayarTunai > 0) {
+                setBayarTunai(netPayable);
+              } else if (bayarKredit > 0) {
+                setBayarKredit(Math.max(0, grandTotal - dpAmount - bayarTunai - bayarDeposit));
               }
               setIsBayarModalOpen(true);
             }}
-            className="h-6 px-2.5 bg-white hover:bg-amber-50 border border-amber-400 text-amber-700 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95"
-            title="Bayar Faktur Pembelian"
+            className={`h-6 px-2.5 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 ${
+              isPaid || isPaymentSubmitted
+                ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60"
+                : "bg-white hover:bg-amber-50 border border-amber-400 text-amber-700 cursor-pointer"
+            }`}
+            title={
+              isPaid
+                ? "Faktur pembelian sudah Lunas (LUNAS)"
+                : isPaymentSubmitted
+                ? "Pembayaran faktur telah disubmit (DP / Sebagian / Tempo). Sisa tagihan hutang diproses melalui menu Bayar Hutang."
+                : "Bayar Faktur Pembelian"
+            }
           >
-            <CreditCard className="w-3 h-3 text-amber-600" />
+            <CreditCard className={`w-3 h-3 ${isPaid || isPaymentSubmitted ? "text-slate-400" : "text-amber-600"}`} />
             <span>Bayar</span>
           </button>
         </div>
 
-        <div className="text-[10px] text-slate-400">
-          Status Pembelian: <strong className={paidAmount >= grandTotal && grandTotal > 0 ? "text-emerald-600 font-bold" : paidAmount > 0 ? "text-amber-600 font-bold" : "text-slate-600 font-bold"}>{paidAmount >= grandTotal && grandTotal > 0 ? "LUNAS" : paidAmount > 0 ? "SEBAGIAN" : "BELUM LUNAS"}</strong>
+        <div className="text-[10px] text-slate-400 flex flex-wrap items-center gap-2">
+          <div>
+            Status Pembelian:{" "}
+            <strong
+              className={
+                paidAmount >= grandTotal && grandTotal > 0
+                  ? "text-emerald-600 font-bold"
+                  : paidAmount > 0
+                  ? "text-amber-600 font-bold"
+                  : paymentStatus === "TEMPO"
+                  ? "text-sky-600 font-bold"
+                  : "text-slate-600 font-bold"
+              }
+            >
+              {paidAmount >= grandTotal && grandTotal > 0
+                ? "LUNAS"
+                : paidAmount > 0
+                ? "SEBAGIAN"
+                : paymentStatus === "TEMPO"
+                ? "TEMPO / KREDIT (Bayar Rp 0)"
+                : "BELUM LUNAS"}
+            </strong>
+          </div>
+
+          {isPaymentSubmitted && paidAmount < grandTotal && (
+            <div className="text-slate-600 font-normal flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+              <span>💡 Sisa tagihan hutang diproses di menu</span>
+              <button
+                type="button"
+                onClick={() => router.push("/purchasing/payments/new")}
+                className="text-sky-600 hover:text-sky-700 underline font-semibold cursor-pointer"
+              >
+                Bayar Hutang
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -1373,6 +1791,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
         onClose={() => setIsItemModalOpen(false)}
         onSelect={handleItemChosen}
         supplierCode={selectedSupplier?.code || ""}
+        defaultWarehouseId={warehouseId}
       />
 
       {/* MODAL 3: DETAIL ITEM EDIT (Screenshot 2) */}
@@ -1381,6 +1800,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
         onClose={() => setIsEditRowModalOpen(false)}
         item={editingRow}
         onSave={handleSaveDetailItem}
+        mainSupplier={selectedSupplier}
       />
 
       {/* MODAL 4: CARI PESANAN (PO) */}
@@ -1541,15 +1961,15 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
       {isPbfDocModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-2xs p-3">
           <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-4xl max-h-[90vh] overflow-y-auto flex flex-col animate-in fade-in zoom-in-95 duration-150">
-            <div className="px-4 py-2.5 bg-slate-100 border-b border-slate-200 flex justify-between items-center">
-              <span className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
+            <div className="px-4 py-2.5 bg-[#00c875] text-white flex justify-between items-center">
+              <span className="font-bold text-white text-sm flex items-center gap-1.5">
                 <span>📎</span>
                 <span>Lampiran Dokumen Pembelian PBF (CDOB BPOM)</span>
               </span>
               <button
                 type="button"
                 onClick={() => setIsPbfDocModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded"
+                className="p-1 text-white/80 hover:text-white rounded"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1557,10 +1977,13 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
             <div className="p-4">
               <PbfDocumentUpload
                 entityType="purchase"
-                entityId={invoiceId || "temp"}
+                entityId={draftInvoiceId}
                 title={`Dokumen Pembelian Faktur: ${invoiceNo || "Faktur Pembelian"}`}
                 subtitle="Unggah Faktur Asli PBF, Surat Jalan, e-Faktur Pajak, dan CoA mutu bets farmasi"
-                onUploadedCountChange={setPbfDocCount}
+                onUploadedCountChange={(cnt) => {
+                  setPbfDocCount(cnt);
+                  refetchInvoiceDocs();
+                }}
               />
             </div>
             <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex justify-end">
@@ -1601,10 +2024,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
               <div className="bg-[#fce7f3] border-2 border-dashed border-pink-300 rounded-lg px-4 py-3 flex items-center justify-between shadow-2xs">
                 <span className="text-base font-bold text-slate-800 tracking-wide">Total :</span>
                 <span className="text-3xl font-black font-mono text-slate-900 tracking-tight">
-                  {Number(grandTotal).toLocaleString("en-US", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  Rp {formatRupiahNumber(grandTotal)}
                 </span>
               </div>
 
@@ -1616,29 +2036,26 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                     DP PO/Pesanan :
                   </label>
                   <div className="flex-1 relative flex items-center">
+                    <span className="absolute left-2.5 text-xs text-slate-400 font-bold select-none">Rp</span>
                     <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={dpAmount === 0 ? "" : dpAmount}
-                      placeholder="0.00"
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setDpAmount(val);
-                        setBayarKredit(Math.max(0, grandTotal - (val + bayarTunai + bayarDeposit)));
-                      }}
-                      className="w-full h-7 px-2.5 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                      type="text"
+                      value={formatRupiahNumber(dpAmount)}
+                      placeholder="0"
+                      onChange={(e) => handleDpChange(parseRupiahNumber(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      className="w-full h-7 pl-9 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
                     />
                     <button
                       type="button"
                       tabIndex={-1}
                       onClick={() => {
-                        const poDp = Number(selectedPO?.total_amount || 0) * 0.3;
+                        const poDp = Math.round(Number(selectedPO?.total_amount || grandTotal) * 0.3);
                         setDpAmount(poDp);
-                        setBayarKredit(Math.max(0, grandTotal - (poDp + bayarTunai + bayarDeposit)));
+                        setBayarTunai(0);
+                        setBayarKredit(Math.max(0, grandTotal - (poDp + bayarDeposit)));
                       }}
-                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50"
-                      title="Hitung DP PO"
+                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50 cursor-pointer"
+                      title="Hitung DP PO (30%)"
                     >
                       <Calculator className="w-3 h-3" />
                     </button>
@@ -1650,17 +2067,15 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                   <label className="w-32 text-right font-medium text-slate-700 shrink-0">
                     Kas / Bank :
                   </label>
-                  <select
-                    value={cashAccountId}
-                    onChange={(e) => setCashAccountId(e.target.value)}
-                    className="flex-1 h-7 px-2 border border-slate-300 rounded text-xs font-semibold focus:border-sky-500 focus:outline-none bg-white font-mono"
-                  >
-                    {accountsList.map((a: any) => (
-                      <option key={a.id} value={a.id}>
-                        {a.code} - {a.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex-1">
+                    <SearchableAccountSelect
+                      accounts={accountsList}
+                      value={cashAccountId}
+                      onChange={(val) => setCashAccountId(val)}
+                      placeholder="Pilih Akun Kas / Bank..."
+                      buttonClassName="h-7 text-xs font-semibold font-mono"
+                    />
+                  </div>
                 </div>
 
                 {/* Bayar Tunai */}
@@ -1670,19 +2085,15 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                       Bayar Tunai :
                     </label>
                     <div className="flex-1 relative flex items-center">
+                      <span className="absolute left-2.5 text-xs text-slate-400 font-bold select-none">Rp</span>
                       <input
-                        type="number"
-                        step="any"
-                        min="0"
+                        type="text"
                         autoFocus
-                        value={bayarTunai === 0 ? "" : bayarTunai}
-                        placeholder="0.00"
-                        onChange={(e) => {
-                          const val = parseFloat(e.target.value) || 0;
-                          setBayarTunai(val);
-                          setBayarKredit(Math.max(0, grandTotal - (dpAmount + val + bayarDeposit)));
-                        }}
-                        className="w-full h-7 px-2.5 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                        value={formatRupiahNumber(bayarTunai)}
+                        placeholder="0"
+                        onChange={(e) => handleBayarTunaiChange(parseRupiahNumber(e.target.value))}
+                        onFocus={(e) => e.target.select()}
+                        className="w-full h-7 pl-9 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
                       />
                       <button
                         type="button"
@@ -1692,7 +2103,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                           setBayarTunai(fullCash);
                           setBayarKredit(0);
                         }}
-                        className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50"
+                        className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50 cursor-pointer"
                         title="Isi Tunai Penuh"
                       >
                         <Calculator className="w-3 h-3" />
@@ -1717,7 +2128,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                       type="button"
                       onClick={() => {
                         const net = Math.max(0, grandTotal - dpAmount - bayarDeposit);
-                        const half = Math.round(net * 0.5 * 100) / 100;
+                        const half = Math.round(net * 0.5);
                         setBayarTunai(half);
                         setBayarKredit(Math.max(0, net - half));
                       }}
@@ -1744,18 +2155,14 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                     Bayar Deposit :
                   </label>
                   <div className="flex-1 relative flex items-center">
+                    <span className="absolute left-2.5 text-xs text-slate-400 font-bold select-none">Rp</span>
                     <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={bayarDeposit === 0 ? "" : bayarDeposit}
-                      placeholder="0.00"
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setBayarDeposit(val);
-                        setBayarKredit(Math.max(0, grandTotal - (dpAmount + bayarTunai + val)));
-                      }}
-                      className="w-full h-7 px-2.5 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                      type="text"
+                      value={formatRupiahNumber(bayarDeposit)}
+                      placeholder="0"
+                      onChange={(e) => handleBayarDepositChange(parseRupiahNumber(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      className="w-full h-7 pl-9 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
                     />
                     <button
                       type="button"
@@ -1764,7 +2171,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                         setBayarDeposit(0);
                         setBayarKredit(Math.max(0, grandTotal - (dpAmount + bayarTunai)));
                       }}
-                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50"
+                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50 cursor-pointer"
                       title="Reset Deposit"
                     >
                       <Calculator className="w-3 h-3" />
@@ -1778,18 +2185,14 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                     Bayar Kredit :
                   </label>
                   <div className="flex-1 relative flex items-center">
+                    <span className="absolute left-2.5 text-xs text-slate-400 font-bold select-none">Rp</span>
                     <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={bayarKredit === 0 ? "" : bayarKredit}
-                      placeholder="0.00"
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value) || 0;
-                        setBayarKredit(val);
-                        setBayarTunai(Math.max(0, grandTotal - (dpAmount + bayarDeposit + val)));
-                      }}
-                      className="w-full h-7 px-2.5 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                      type="text"
+                      value={formatRupiahNumber(bayarKredit)}
+                      placeholder="0"
+                      onChange={(e) => handleBayarKreditChange(parseRupiahNumber(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      className="w-full h-7 pl-9 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
                     />
                     <button
                       type="button"
@@ -1799,7 +2202,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                         setBayarTunai(0);
                         setBayarKredit(fullKredit);
                       }}
-                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50"
+                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50 cursor-pointer"
                       title="Jadikan Hutang Penuh"
                     >
                       <Calculator className="w-3 h-3" />
@@ -1812,10 +2215,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
               <div className="bg-[#22c55e] text-white rounded-lg px-4 py-2 flex items-center justify-between shadow-2xs">
                 <span className="text-sm font-bold tracking-wide">Total :</span>
                 <span className="text-2xl font-black font-mono tracking-tight">
-                  {((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0)).toLocaleString("en-US", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  Rp {formatRupiahNumber((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0))}
                 </span>
               </div>
 
@@ -1823,13 +2223,10 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
               <div className="bg-[#f97316] text-white rounded-lg px-4 py-2 flex items-center justify-between shadow-2xs">
                 <span className="text-sm font-bold tracking-wide">Sisa :</span>
                 <span className="text-2xl font-black font-mono tracking-tight">
-                  {Math.max(
+                  Rp {formatRupiahNumber(Math.max(
                     0,
                     grandTotal - ((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0))
-                  ).toLocaleString("en-US", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  ))}
                 </span>
               </div>
             </div>
@@ -1841,13 +2238,13 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                 type="button"
                 onClick={() => {
                   setIsPrintAfterSave(false);
-                  saveMutation.mutate();
+                  saveMutation.mutate(true);
                 }}
                 disabled={saveMutation.isPending}
                 className="h-7 px-3.5 bg-white hover:bg-emerald-50 border border-slate-300 text-slate-700 font-semibold rounded text-xs inline-flex items-center gap-1.5 shadow-2xs transition active:scale-95 disabled:opacity-50"
               >
                 <Save className="w-3.5 h-3.5 text-sky-600" />
-                <span>Simpan</span>
+                <span>Simpan &amp; Verifikasi</span>
               </button>
 
               {/* [🖨️ Simpan + Cetak] */}
@@ -1855,7 +2252,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                 type="button"
                 onClick={() => {
                   setIsPrintAfterSave(true);
-                  saveMutation.mutate();
+                  saveMutation.mutate(true);
                 }}
                 disabled={saveMutation.isPending}
                 className="h-7 px-3.5 bg-white hover:bg-sky-50 border border-slate-300 text-slate-700 font-semibold rounded text-xs inline-flex items-center gap-1.5 shadow-2xs transition active:scale-95 disabled:opacity-50"
@@ -1872,6 +2269,98 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
               >
                 <Undo2 className="w-3.5 h-3.5 text-amber-600" />
                 <span>Kembali</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PERSETUJUAN SIMPAN (Bukan Modal Pembayaran) */}
+      {isSaveConfirmModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-2xs p-3 animate-in fade-in duration-150">
+          <div className="bg-white rounded-lg shadow-2xl border border-slate-300 w-full max-w-md overflow-hidden">
+            {/* Header Ketoko Green */}
+            <div className="px-4 py-2.5 bg-[#00c875] text-white flex justify-between items-center">
+              <span className="font-bold text-sm flex items-center gap-1.5">
+                <Check className="w-4 h-4 text-white stroke-[3]" />
+                <span>Konfirmasi Simpan Faktur Pembelian</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsSaveConfirmModalOpen(false)}
+                className="p-1 text-white/80 hover:text-white rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-4 space-y-3 text-xs">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-emerald-700">
+                  <PackageCheck className="w-5 h-5 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-800 text-sm">Simpan Faktur Pembelian?</h4>
+                  <p className="text-slate-500 text-[11px] mt-0.5">
+                    Faktur akan disimpan dengan status <strong>Menunggu Penerimaan Gudang</strong>.
+                  </p>
+                </div>
+              </div>
+
+              {/* Ringkasan Dokumen */}
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5 text-[11px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">No. Faktur :</span>
+                  <span className="font-mono font-bold text-slate-800">{invoiceNo || "Auto"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Tanggal :</span>
+                  <span className="text-slate-700">{invoiceDate}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Supplier :</span>
+                  <span className="font-semibold text-slate-800">{selectedSupplier?.name || "-"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Jumlah Item :</span>
+                  <span className="font-medium text-slate-800">{items.length} item obat</span>
+                </div>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 text-xs font-bold">
+                  <span className="text-slate-700">Total Tagihan :</span>
+                  <span className="text-emerald-700">{formatCurrency(grandTotal)}</span>
+                </div>
+              </div>
+
+              <div className="p-2.5 bg-sky-50 border border-sky-200 rounded text-[11px] text-sky-900 leading-relaxed">
+                <strong>Alur Verifikasi Pembelian (CDOB):</strong>
+                <ol className="list-decimal list-inside space-y-0.5 text-[10.5px] mt-1 text-sky-800">
+                  <li>Petugas Gudang memverifikasi fisik barang, nomor batch, ED, dan surat jalan.</li>
+                  <li>Admin melakukan verifikasi faktur tagihan PBF dan memberikan persetujuan (approval).</li>
+                  <li>Stok obat bertambah, hutang tercatat, dan jurnal akuntansi otomatis dibukukan setelah Admin menyetujui.</li>
+                </ol>
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setIsSaveConfirmModalOpen(false)}
+                className="h-7 px-3.5 border border-slate-300 rounded hover:bg-slate-100 text-slate-700 font-medium transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={saveMutation.isPending}
+                onClick={() => {
+                  saveMutation.mutate(false);
+                }}
+                className="h-7 px-4 bg-[#00c875] hover:bg-[#00b066] text-white font-bold rounded shadow-2xs transition active:scale-95 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5 stroke-[3]" />
+                <span>{saveMutation.isPending ? "Menyimpan..." : "Ya, Simpan Pembelian"}</span>
               </button>
             </div>
           </div>

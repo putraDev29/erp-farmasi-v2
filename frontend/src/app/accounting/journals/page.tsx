@@ -16,6 +16,8 @@ import {
   PlusCircle,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { TableSortSelect, sortTableData } from "@/components/common/TableSortSelect";
+import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
 type JournalTab =
   | "Semua"
@@ -49,7 +51,8 @@ export default function JournalsPage() {
   const [startDate, setStartDate] = useState("2026-11-01");
   const [endDate, setEndDate] = useState("2026-11-30");
   const [statusFilter, setStatusFilter] = useState("Semua");
-  const [sortBy, setSortBy] = useState("Tanggal");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
+  const [sortBy, setSortBy] = useState("created_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
@@ -96,17 +99,12 @@ export default function JournalsPage() {
 
   // Sorting
   const sortedJournals = useMemo(() => {
-    return [...journals].sort((a: any, b: any) => {
-      if (sortBy === "Tanggal") {
-        const da = new Date(a.date).getTime();
-        const db = new Date(b.date).getTime();
-        return sortOrder === "asc" ? da - db : db - da;
-      }
-      const na = a.ref_no || a.doc_no || "";
-      const nb = b.ref_no || b.doc_no || "";
-      return sortOrder === "asc" ? na.localeCompare(nb) : nb.localeCompare(na);
+    return sortTableData(journals, sortOption, {
+      getCode: (j: any) => j.ref_no || j.doc_no || j.journal_no,
+      getName: (j: any) => j.description || j.notes,
+      getDate: (j: any) => j.created_at || j.date,
     });
-  }, [journals, sortBy, sortOrder]);
+  }, [journals, sortOption]);
 
   const totalPages = Math.max(1, Math.ceil(sortedJournals.length / pageSize));
   const paginated = sortedJournals.slice((page - 1) * pageSize, page * pageSize);
@@ -297,26 +295,22 @@ export default function JournalsPage() {
             </select>
           </div>
 
-          <div className="flex items-end gap-1">
-            <div className="flex-1">
-              <label className="block text-slate-600 font-semibold mb-0.5">Urut Berdasar :</label>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500"
-              >
-                <option value="Tanggal">Tanggal</option>
-                <option value="No Transaksi">No Transaksi</option>
-              </select>
-            </div>
-            <button
-              type="button"
-              onClick={() => setSortOrder((o) => (o === "asc" ? "desc" : "asc"))}
-              className="h-6 w-7 bg-white hover:bg-slate-50 border border-slate-300 rounded flex items-center justify-center text-slate-600"
-              title="Balik Urutan"
+          <div>
+            <label className="block text-slate-600 font-semibold mb-0.5">Urut Berdasar :</label>
+            <select
+              value={sortOption}
+              onChange={(e) => {
+                setSortOption(e.target.value);
+                setPage(1);
+              }}
+              className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500 font-medium shadow-2xs truncate cursor-pointer"
             >
-              <ArrowUpDown className="w-3 h-3" />
-            </button>
+              <option value="created_at_desc">1. Urutan sesuai waktu input paling atas</option>
+              <option value="code_asc">2. Kode (A - Z)</option>
+              <option value="code_desc">3. Kode (Z - A)</option>
+              <option value="name_asc">4. Nama (A - Z)</option>
+              <option value="name_desc">5. Nama (Z - A)</option>
+            </select>
           </div>
         </div>
       </div>
@@ -521,22 +515,16 @@ export default function JournalsPage() {
                     {manualEntries.map((row, idx) => (
                       <tr key={idx} className="h-7">
                         <td className="py-0.5 px-1.5 border-r border-slate-200">
-                          <select
+                          <SearchableAccountSelect
+                            accounts={leafAccounts}
                             value={row.account_code}
-                            onChange={(e) => {
+                            onChange={(val, acc) => {
                               const copy = [...manualEntries];
-                              copy[idx].account_code = e.target.value;
+                              copy[idx].account_code = acc?._code || val;
                               setManualEntries(copy);
                             }}
-                            className="w-full h-6 px-1.5 border border-slate-300 rounded bg-white text-[11px]"
-                          >
-                            <option value="">Select...</option>
-                            {leafAccounts.map((a: any) => (
-                              <option key={a.id} value={a.code}>
-                                {a.code} - {a.name}
-                              </option>
-                            ))}
-                          </select>
+                            placeholder="Select / Cari Akun..."
+                          />
                         </td>
                         <td className="py-0.5 px-1.5 border-r border-slate-200">
                           <input

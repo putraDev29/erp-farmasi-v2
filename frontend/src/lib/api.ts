@@ -16,6 +16,8 @@ api.interceptors.request.use((config) => {
       config.headers.Authorization = `Bearer ${token}`;
     }
   }
+  config.headers["X-Computer-Name"] = "ISB-SEWA11-S-NB";
+  config.headers["X-Real-IP"] = "192.168.100.93";
   return config;
 });
 
@@ -52,4 +54,13 @@ export const formatDate = (dateStr: string): string => {
     hour: "2-digit",
     minute: "2-digit",
   });
+};
+
+export const resolveAssetUrl = (url?: string | null): string => {
+  if (!url) return "";
+  if (url.startsWith("data:") || url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+  const backendOrigin = API_BASE_URL.replace(/\/api\/v1\/?$/, "");
+  return `${backendOrigin}${url.startsWith("/") ? "" : "/"}${url}`;
 };

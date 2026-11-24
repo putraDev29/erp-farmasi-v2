@@ -3,7 +3,10 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"farmasi/backend/database"
 	"farmasi/backend/models"
@@ -47,6 +50,36 @@ func (h *CompanyHandler) UpdateCompany(c *gin.Context) {
 
 	database.DB.Save(&comp)
 	utils.SendSuccess(c, "Perusahaan berhasil diperbarui", comp)
+}
+
+func (h *CompanyHandler) UploadAsset(c *gin.Context) {
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		utils.SendError(c, http.StatusBadRequest, "File tidak ditemukan", err.Error())
+		return
+	}
+
+	uploadDir := filepath.Join(".", "uploads", "company")
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		utils.SendError(c, http.StatusInternalServerError, "Gagal membuat direktori upload", err.Error())
+		return
+	}
+
+	origName := filepath.Base(fileHeader.Filename)
+	cleanExt := strings.ToLower(filepath.Ext(origName))
+	storedFileName := fmt.Sprintf("asset_%d%s", time.Now().UnixNano(), cleanExt)
+	destPath := filepath.Join(uploadDir, storedFileName)
+
+	if err := c.SaveUploadedFile(fileHeader, destPath); err != nil {
+		utils.SendError(c, http.StatusInternalServerError, "Gagal menyimpan file", err.Error())
+		return
+	}
+
+	webPath := fmt.Sprintf("/uploads/company/%s", storedFileName)
+	utils.SendSuccess(c, "File berhasil diunggah", gin.H{
+		"url":      webPath,
+		"filename": storedFileName,
+	})
 }
 
 // Branches

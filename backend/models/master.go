@@ -122,6 +122,7 @@ type Product struct {
 	Discounts                []ItemDiscount   `gorm:"foreignKey:ProductID" json:"discounts,omitempty"`
 	Images                   []ProductImage   `gorm:"foreignKey:ProductID" json:"images,omitempty"`
 	StockBalances            []StockBalance   `gorm:"foreignKey:ProductID" json:"stock_balances,omitempty"`
+	Stock                    float64          `gorm:"-" json:"stock"`
 	TotalStock               float64          `gorm:"-" json:"total_stock"`
 	AvgCost                  float64          `gorm:"-" json:"avg_cost"`
 }
@@ -199,6 +200,7 @@ type SubTerritory struct {
 type Customer struct {
 	BaseModel
 	CompanyID         uuid.UUID  `gorm:"type:uuid;not null;index" json:"company_id"`
+	UserID            *uuid.UUID `gorm:"type:uuid;index" json:"user_id"`
 	Code              string     `gorm:"size:50;not null;index" json:"code"`
 	Name              string     `gorm:"size:150;not null;index" json:"name"`
 	CustomerGroupID   *uuid.UUID `gorm:"type:uuid;index" json:"customer_group_id"`
@@ -215,6 +217,7 @@ type Customer struct {
 	LastVisit         string     `gorm:"size:50" json:"last_visit"`
 	Notes             string     `gorm:"type:text" json:"notes"`
 	CreditLimit       float64    `gorm:"type:numeric(15,2);default:0" json:"credit_limit"`
+	CreditBalance     float64    `gorm:"type:numeric(15,2);default:0" json:"credit_balance"`
 	TermOfPaymentDays int        `gorm:"default:0" json:"term_of_payment_days"`
 	Points            int64      `gorm:"default:0" json:"points"`
 	IsActive          bool       `gorm:"default:true" json:"is_active"`
@@ -242,6 +245,7 @@ type Customer struct {
 
 	CustomerGroup *CustomerGroup `gorm:"foreignKey:CustomerGroupID" json:"customer_group,omitempty"`
 	Territory     *Territory     `gorm:"foreignKey:TerritoryID" json:"territory,omitempty"`
+	User          *User          `gorm:"foreignKey:UserID" json:"user,omitempty"`
 }
 
 type Supplier struct {
@@ -260,7 +264,8 @@ type Supplier struct {
 	BankName          string    `gorm:"size:50" json:"bank_name"`
 	BankAccount       string    `gorm:"size:50" json:"bank_account"`
 	BankHolder        string    `gorm:"size:100" json:"bank_holder"`
-	IsActive          bool      `gorm:"default:true" json:"is_active"`
+	CreditBalance         float64    `gorm:"type:numeric(15,2);default:0" json:"credit_balance"`
+	IsActive              bool       `gorm:"default:true" json:"is_active"`
 
 	// PBF Compliance
 	IsPBF                 bool       `gorm:"default:false" json:"is_pbf"`

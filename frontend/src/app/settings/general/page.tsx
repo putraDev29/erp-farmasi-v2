@@ -18,6 +18,7 @@ import {
   Settings,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import SearchableAccountSelect from "@/components/common/SearchableAccountSelect";
 
 type TabKey = "umum" | "transaksi" | "penjualan_kasir" | "desimal" | "timbangan" | "terminal";
 
@@ -46,6 +47,8 @@ export default function GeneralSettingsPage() {
   const [showImageTransaction, setShowImageTransaction] = useState(false);
   const [confirmPriceBelowHpp, setConfirmPriceBelowHpp] = useState(true);
   const [minProfitPercent, setMinProfitPercent] = useState("0");
+  const [autoUpdateSellingPriceFromMargin, setAutoUpdateSellingPriceFromMargin] = useState(true);
+  const [isApplyingMargin, setIsApplyingMargin] = useState(false);
   const [enableBrandColumn, setEnableBrandColumn] = useState(false);
   const [enableInfoColumn, setEnableInfoColumn] = useState(false);
   const [enableExpProdColumn, setEnableExpProdColumn] = useState(true);
@@ -102,6 +105,34 @@ export default function GeneralSettingsPage() {
   const [terminalShowStock, setTerminalShowStock] = useState(false);
   const [terminalShowImage, setTerminalShowImage] = useState(false);
 
+  // Akun Potongan Harga (Faktur) & Keringanan (Hutang / Piutang)
+  const [purchPriceDiscountAccountId, setPurchPriceDiscountAccountId] = useState("");
+  const [purchDiscountAccountId, setPurchDiscountAccountId] = useState("");
+  const [salesPriceDiscountAccountId, setSalesPriceDiscountAccountId] = useState("");
+  const [salesDiscountAccountId, setSalesDiscountAccountId] = useState("");
+
+  // Fetch Accounts for COA selection
+  const { data: accounts = [] } = useQuery({
+    queryKey: ["accounts"],
+    queryFn: async () => {
+      const res = await api.get("/accounting/accounts");
+      return res.data?.data || [];
+    },
+  });
+
+  const detailAccounts = React.useMemo(() => {
+    return (accounts || []).filter((a: any) => !a.is_header && a.is_active !== false);
+  }, [accounts]);
+
+  // Fetch Account Settings
+  const { data: serverAccountSettings = [] } = useQuery({
+    queryKey: ["account-settings"],
+    queryFn: async () => {
+      const res = await api.get("/accounting/account-settings");
+      return res.data?.data || [];
+    },
+  });
+
   // Load settings from backend
   const { data: settings = {}, isLoading } = useQuery({
     queryKey: ["settings-general"],
@@ -133,6 +164,9 @@ export default function GeneralSettingsPage() {
       if (settings.show_image_transaction !== undefined) setShowImageTransaction(settings.show_image_transaction === "true");
       if (settings.confirm_price_below_hpp !== undefined) setConfirmPriceBelowHpp(settings.confirm_price_below_hpp === "true");
       if (settings.min_profit_percent !== undefined) setMinProfitPercent(settings.min_profit_percent);
+      if (settings.auto_update_selling_price_from_margin !== undefined) {
+        setAutoUpdateSellingPriceFromMargin(settings.auto_update_selling_price_from_margin === "true");
+      }
       if (settings.enable_brand_column !== undefined) setEnableBrandColumn(settings.enable_brand_column === "true");
       if (settings.enable_info_column !== undefined) setEnableInfoColumn(settings.enable_info_column === "true");
       if (settings.enable_exp_prod_column !== undefined) setEnableExpProdColumn(settings.enable_exp_prod_column === "true");
@@ -191,12 +225,73 @@ export default function GeneralSettingsPage() {
     }
   }, [settings]);
 
+  useEffect(() => {
+    if (serverAccountSettings && serverAccountSettings.length > 0) {
+      // 1. Potongan Harga Pembelian (Faktur)
+      const purchPriceSetting = serverAccountSettings.find((s: any) => s.key === "purch_price_discount");
+      if (purchPriceSetting?.account_id) {
+        setPurchPriceDiscountAccountId(purchPriceSetting.account_id);
+      }
+      // 2. Keringanan Hutang (Pelunasan Hutang)
+      const purchSetting = serverAccountSettings.find((s: any) => s.key === "ap_discount" || s.key === "purch_discount");
+      if (purchSetting?.account_id) {
+        setPurchDiscountAccountId(purchSetting.account_id);
+      }
+      // 3. Potongan Harga Penjualan (Faktur/Kasir)
+      const salesPriceSetting = serverAccountSettings.find((s: any) => s.key === "sales_price_discount");
+      if (salesPriceSetting?.account_id) {
+        setSalesPriceDiscountAccountId(salesPriceSetting.account_id);
+      }
+      // 4. Keringanan Piutang (Pelunasan Piutang)
+      const salesSetting = serverAccountSettings.find((s: any) => s.key === "ar_discount" || (s.key === "sales_discount" && s.account?.code === "4-1400"));
+      if (salesSetting?.account_id) {
+        setSalesDiscountAccountId(salesSetting.account_id);
+      }
+    }
+  }, [serverAccountSettings]);
+
+  useEffect(() => {
+    if (detailAccounts.length > 0) {
+      if (!purchPriceDiscountAccountId) {
+        const found = detailAccounts.find(
+          (a: any) =>
+            a.code === "5-1100" ||
+            a.name?.toUpperCase().includes("POTONGAN PEMBELIAN")
+        );
+        if (found) setPurchPriceDiscountAccountId(found.id);
+      }
+      if (!purchDiscountAccountId) {
+        const found = detailAccounts.find(
+          (a: any) => a.code === "5-2100" || a.name?.toUpperCase().includes("KERINGANAN HUTANG")
+        );
+        if (found) setPurchDiscountAccountId(found.id);
+      }
+      if (!salesPriceDiscountAccountId) {
+        const found = detailAccounts.find(
+          (a: any) =>
+            a.code === "4-1200" ||
+            a.name?.toUpperCase().includes("POTONGAN PENJUALAN")
+        );
+        if (found) setSalesPriceDiscountAccountId(found.id);
+      }
+      if (!salesDiscountAccountId) {
+        const found = detailAccounts.find(
+          (a: any) => a.code === "4-1400" || a.name?.toUpperCase().includes("KERINGANAN PIUTANG")
+        );
+        if (found) setSalesDiscountAccountId(found.id);
+      }
+    }
+  }, [detailAccounts, purchPriceDiscountAccountId, purchDiscountAccountId, salesPriceDiscountAccountId, salesDiscountAccountId]);
+
   const saveMutation = useMutation({
     mutationFn: async (payload: Record<string, string>) => {
       return await api.put("/settings/groups/GENERAL", payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings-general"] });
+      queryClient.invalidateQueries({ queryKey: ["settings-general"] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      queryClient.invalidateQueries({ queryKey: ["products-list"] });
       showToast("success", "Pengaturan umum berhasil disimpan!");
     },
     onError: (err: any) => {
@@ -207,6 +302,42 @@ export default function GeneralSettingsPage() {
   const showToast = (type: "success" | "error", text: string) => {
     setToastMsg({ type, text });
     setTimeout(() => setToastMsg(null), 3500);
+  };
+
+  const handleApplyMarginNow = async () => {
+    const margin = parseFloat(minProfitPercent);
+    if (isNaN(margin) || margin <= 0) {
+      alert("Silakan tentukan persentase Margin Profit yang valid (lebih dari 0%).");
+      return;
+    }
+
+    if (
+      !confirm(
+        `Apakah Anda yakin ingin memperbarui harga jual SELURUH OBAT otomatis dengan Margin Profit ${margin}%?\n\nRumus: Harga Jual = Harga Pokok (HPP) + (${margin}% × Harga Pokok).\nAnda tidak perlu mengatur harga jual satu-per-satu lagi.`
+      )
+    ) {
+      return;
+    }
+
+    setIsApplyingMargin(true);
+    try {
+      const res = await api.post("/settings/apply-margin-profit", {
+        margin_percent: margin,
+        round_nearest: 0,
+        update_locked: false,
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["settings-general"] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      queryClient.invalidateQueries({ queryKey: ["products-list"] });
+      showToast("success", res.data?.message || `Harga jual seluruh obat berhasil diperbarui dengan margin ${margin}%!`);
+      alert(res.data?.message || `Berhasil memperbarui harga jual seluruh obat sesuai margin profit ${margin}%!`);
+    } catch (err: any) {
+      showToast("error", err.response?.data?.message || "Gagal memperbarui harga obat");
+      alert("Gagal: " + (err.response?.data?.message || err.message));
+    } finally {
+      setIsApplyingMargin(false);
+    }
   };
 
   const handleSaveAll = (e?: React.FormEvent) => {
@@ -232,6 +363,7 @@ export default function GeneralSettingsPage() {
       show_image_transaction: String(showImageTransaction),
       confirm_price_below_hpp: String(confirmPriceBelowHpp),
       min_profit_percent: minProfitPercent,
+      auto_update_selling_price_from_margin: String(autoUpdateSellingPriceFromMargin),
       enable_brand_column: String(enableBrandColumn),
       enable_info_column: String(enableInfoColumn),
       enable_exp_prod_column: String(enableExpProdColumn),
@@ -288,6 +420,54 @@ export default function GeneralSettingsPage() {
       terminal_show_stock: String(terminalShowStock),
       terminal_show_image: String(terminalShowImage),
     };
+
+    // Also save discount account settings
+    if (purchPriceDiscountAccountId || purchDiscountAccountId || salesPriceDiscountAccountId || salesDiscountAccountId) {
+      const batchSettings: { key: string; account_id: string; description: string }[] = [];
+      if (purchPriceDiscountAccountId) {
+        batchSettings.push({
+          key: "purch_price_discount",
+          account_id: purchPriceDiscountAccountId,
+          description: "Akun Potongan Pembelian (POTONGAN PEMBELIAN)",
+        });
+      }
+      if (purchDiscountAccountId) {
+        batchSettings.push({
+          key: "purch_discount",
+          account_id: purchDiscountAccountId,
+          description: "Akun Keringanan Hutang (KERINGANAN HUTANG)",
+        });
+        batchSettings.push({
+          key: "ap_discount",
+          account_id: purchDiscountAccountId,
+          description: "Akun Potongan Hutang (KERINGANAN HUTANG)",
+        });
+      }
+      if (salesPriceDiscountAccountId) {
+        batchSettings.push({
+          key: "sales_price_discount",
+          account_id: salesPriceDiscountAccountId,
+          description: "Akun Potongan Penjualan (POTONGAN PENJUALAN)",
+        });
+      }
+      if (salesDiscountAccountId) {
+        batchSettings.push({
+          key: "sales_discount",
+          account_id: salesDiscountAccountId,
+          description: "Akun Keringanan Piutang (KERINGANAN PIUTANG)",
+        });
+        batchSettings.push({
+          key: "ar_discount",
+          account_id: salesDiscountAccountId,
+          description: "Akun Potongan Piutang (KERINGANAN PIUTANG)",
+        });
+      }
+      api.post("/accounting/account-settings/batch", batchSettings).then(() => {
+        queryClient.invalidateQueries({ queryKey: ["account-settings"] });
+      }).catch((err) => {
+        console.error("Gagal menyimpan akun setting potongan:", err);
+      });
+    }
 
     saveMutation.mutate(payload);
   };
@@ -637,6 +817,107 @@ export default function GeneralSettingsPage() {
             {activeTab === "transaksi" && (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Akun Potongan Harga & Keringanan (Simple, Compact, & Tidak Memakan Tempat) */}
+                  <div className="md:col-span-2 p-3 bg-white border border-slate-200 rounded-xl space-y-2.5 shadow-2xs">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span className="font-bold text-slate-800 text-xs">
+                          Kode Akun Potongan Transaksi &amp; Pelunasan
+                        </span>
+                      </div>
+                      <span className="text-[10px] bg-slate-100 text-slate-600 font-semibold px-2 py-0.5 rounded">
+                        Pencatatan Jurnal Otomatis
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-5 gap-y-2">
+                      {/* Kolom Pembelian */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                          <span>Pembelian &amp; Hutang :</span>
+                        </div>
+
+                        <div className="space-y-0.5">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Potongan Pembelian (Faktur) :
+                            </label>
+                            <span className="text-[9px] px-1 py-0.2 bg-blue-50 text-blue-700 rounded font-mono">
+                              Diskon Faktur
+                            </span>
+                          </div>
+                          <SearchableAccountSelect
+                            accounts={detailAccounts}
+                            value={purchPriceDiscountAccountId}
+                            onChange={(val) => setPurchPriceDiscountAccountId(val)}
+                            placeholder="-- Pilih Akun Potongan Pembelian (5-1100) --"
+                          />
+                        </div>
+
+                        <div className="space-y-0.5">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Potongan Hutang (Keringanan Hutang) :
+                            </label>
+                            <span className="text-[9px] px-1 py-0.2 bg-amber-50 text-amber-700 rounded font-mono">
+                              Bayar Hutang
+                            </span>
+                          </div>
+                          <SearchableAccountSelect
+                            accounts={detailAccounts}
+                            value={purchDiscountAccountId}
+                            onChange={(val) => setPurchDiscountAccountId(val)}
+                            placeholder="-- Pilih Akun Keringanan Hutang (5-2100) --"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Kolom Penjualan */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                          <span>Penjualan &amp; Piutang :</span>
+                        </div>
+
+                        <div className="space-y-0.5">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Potongan Penjualan (Faktur/Kasir) :
+                            </label>
+                            <span className="text-[9px] px-1 py-0.2 bg-emerald-50 text-emerald-700 rounded font-mono">
+                              Diskon Jual
+                            </span>
+                          </div>
+                          <SearchableAccountSelect
+                            accounts={detailAccounts}
+                            value={salesPriceDiscountAccountId}
+                            onChange={(val) => setSalesPriceDiscountAccountId(val)}
+                            placeholder="-- Pilih Akun Potongan Penjualan (4-1200) --"
+                          />
+                        </div>
+
+                        <div className="space-y-0.5">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-medium text-slate-700">
+                              Potongan Piutang (Keringanan Piutang) :
+                            </label>
+                            <span className="text-[9px] px-1 py-0.2 bg-purple-50 text-purple-700 rounded font-mono">
+                              Bayar Piutang
+                            </span>
+                          </div>
+                          <SearchableAccountSelect
+                            accounts={detailAccounts}
+                            value={salesDiscountAccountId}
+                            onChange={(val) => setSalesDiscountAccountId(val)}
+                            placeholder="-- Pilih Akun Keringanan Piutang (4-1400) --"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Left Column */}
                   <div className="space-y-3">
                     <label className="flex items-center gap-2 cursor-pointer">
@@ -649,38 +930,75 @@ export default function GeneralSettingsPage() {
                       <span className="font-semibold text-slate-700">Tampil Gambar pada Transaksi</span>
                     </label>
 
-                    {/* CRITICAL SETTING: Min. Profit & Konfirmasi Harga Pokok */}
-                    <div className="p-3 bg-amber-50/70 border border-amber-300 rounded space-y-2.5">
-                      <label className="flex items-center gap-2 cursor-pointer">
+                    {/* CRITICAL SETTING: Min. Profit & Otomatis Update Harga Jual Obat */}
+                    <div className="p-3 bg-emerald-50/80 border-2 border-emerald-400 rounded-lg space-y-3 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={confirmPriceBelowHpp}
+                            onChange={(e) => setConfirmPriceBelowHpp(e.target.checked)}
+                            className="w-4 h-4 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                          />
+                          <span className="font-bold text-emerald-950 text-xs">
+                            Tampil Konfirmasi Harga Jual lebih Kecil dari Harga Pokok
+                          </span>
+                        </label>
+                        <span className="text-[10px] bg-emerald-200/80 text-emerald-800 font-bold px-2 py-0.5 rounded-full">
+                          Kunci Margin &amp; Harga Obat
+                        </span>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="block text-[11px] font-bold text-slate-800">
+                          Margin Profit / Min. Profit Obat (%) :
+                        </label>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="relative">
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              value={minProfitPercent}
+                              onChange={(e) => setMinProfitPercent(e.target.value)}
+                              className="w-28 h-8 px-2.5 pr-6 text-xs border-2 border-emerald-500 rounded font-bold text-emerald-900 focus:outline-none focus:border-emerald-600 bg-white"
+                              placeholder="20"
+                            />
+                            <span className="absolute right-2 top-2 text-xs font-bold text-emerald-600">%</span>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={isApplyingMargin || parseFloat(minProfitPercent) <= 0}
+                            onClick={handleApplyMarginNow}
+                            className="h-8 px-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded text-xs flex items-center gap-1.5 shadow transition active:scale-95 cursor-pointer"
+                            title="Hitung dan perbarui langsung harga jual seluruh obat di database sesuai margin profit ini"
+                          >
+                            <span>{isApplyingMargin ? "Memproses..." : "⚡ Terapkan & Update Harga Semua Obat"}</span>
+                          </button>
+                        </div>
+                        <p className="text-[10.5px] text-slate-600">
+                          Margin keuntungan yang diterapkan langsung ke seluruh obat. Anda tidak perlu mengatur harga obat satu-per-satu.
+                        </p>
+                      </div>
+
+                      {/* Auto Update Checkbox */}
+                      <label className="flex items-start gap-2 pt-1.5 border-t border-emerald-200/70 cursor-pointer">
                         <input
                           type="checkbox"
-                          checked={confirmPriceBelowHpp}
-                          onChange={(e) => setConfirmPriceBelowHpp(e.target.checked)}
-                          className="w-4 h-4 rounded border-amber-400 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                          checked={autoUpdateSellingPriceFromMargin}
+                          onChange={(e) => setAutoUpdateSellingPriceFromMargin(e.target.checked)}
+                          className="w-4 h-4 mt-0.5 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
                         />
-                        <span className="font-bold text-amber-900">
-                          Tampil Konfirmasi Harga Jual lebih Kecil dari Harga Pokok
-                        </span>
-                      </label>
-
-                      <div>
-                        <label className="block text-[11px] font-bold text-slate-800 mb-1">
-                          Min. Profit (%) :
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            step="0.1"
-                            min="0"
-                            value={minProfitPercent}
-                            onChange={(e) => setMinProfitPercent(e.target.value)}
-                            className="w-32 h-8 px-2.5 text-xs border border-amber-400 rounded font-bold text-slate-800 focus:outline-none focus:border-amber-600 bg-white"
-                          />
-                          <span className="text-[11px] text-slate-600">
-                            (Margin keuntungan minimal per item pada Penjualan &amp; Kasir)
+                        <div className="text-[11px]">
+                          <span className="font-bold text-slate-800 block">
+                            Otomatis Update Harga Jual Saat Margin Diubah atau Barang Masuk
+                          </span>
+                          <span className="text-slate-500 block text-[10.5px]">
+                            Ketika pengaturan disimpan atau saat verifikasi faktur pembelian baru, sistem otomatis menghitung ulang Harga Jual = Harga Pokok + Margin %.
                           </span>
                         </div>
-                      </div>
+                      </label>
                     </div>
 
                     <label className="flex items-center gap-2 cursor-pointer">

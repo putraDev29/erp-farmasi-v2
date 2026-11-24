@@ -14,12 +14,14 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { MasterToolbarButtons } from "@/components/common/MasterToolbarButtons";
+import { TableSortSelect, sortTableData } from "@/components/common/TableSortSelect";
 
 export default function CategoriesPage() {
   const queryClient = useQueryClient();
 
   const [keyword, setKeyword] = useState("");
   const [searchParam, setSearchParam] = useState("");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
   const [page, setPage] = useState(1);
   const pageSize = 15;
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -120,8 +122,13 @@ export default function CategoriesPage() {
     setPage(1);
   };
 
-  const totalPages = Math.max(1, Math.ceil(categories.length / pageSize));
-  const paginatedData = categories.slice((page - 1) * pageSize, page * pageSize);
+  const sortedCategories = sortTableData(categories, sortOption, {
+    getCode: (c: any) => c.code,
+    getName: (c: any) => c.name,
+    getDate: (c: any) => c.created_at,
+  });
+  const totalPages = Math.max(1, Math.ceil(sortedCategories.length / pageSize));
+  const paginatedData = sortedCategories.slice((page - 1) * pageSize, page * pageSize);
 
   const renderToolbar = () => (
     <div className="flex items-center gap-1.5 py-1">
@@ -173,7 +180,7 @@ export default function CategoriesPage() {
 
       {/* Filter Bar */}
       <div className="shrink-0 bg-white border border-slate-200 rounded p-2 shadow-2xs space-y-1.5">
-        <div className="flex items-center gap-3 text-xs">
+        <div className="flex flex-wrap items-center gap-3 text-xs">
           <label className="text-slate-700 font-medium">Kata Kunci :</label>
           <input
             type="text"
@@ -181,8 +188,18 @@ export default function CategoriesPage() {
             onChange={(e) => setKeyword(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
             placeholder="Cari jenis barang atau keterangan..."
-            className="flex-1 max-w-md h-6 px-2.5 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs"
+            className="flex-1 max-w-xs h-6 px-2.5 rounded border border-slate-300 focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs"
           />
+          <div className="w-56">
+            <TableSortSelect
+              value={sortOption}
+              onChange={(val) => {
+                setSortOption(val);
+                setPage(1);
+              }}
+              compact
+            />
+          </div>
           <button
             onClick={handleSearch}
             className="h-6 px-4 bg-sky-500 hover:bg-sky-600 text-white font-medium rounded flex items-center gap-1.5 shadow-xs transition text-xs"

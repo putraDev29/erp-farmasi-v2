@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -19,6 +19,8 @@ import {
   Clock,
   X,
   ExternalLink,
+  Truck,
+  Search,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -34,6 +36,9 @@ import { api, formatCurrency, formatDate } from "@/lib/api";
 
 export default function DashboardPage() {
   const [showExpiryModal, setShowExpiryModal] = useState(false);
+  const [purchaseSearch, setPurchaseSearch] = useState("");
+  const [purchaseTab, setPurchaseTab] = useState<string>("ALL");
+  const [purchasePageSize, setPurchasePageSize] = useState<number>(8);
 
   const { data, isLoading } = useQuery({
     queryKey: ["dashboard-summary"],
@@ -53,6 +58,50 @@ export default function DashboardPage() {
       }
     }
   }, [data?.expiring_critical_count]);
+
+  const inProgressPurchases = data?.in_progress_purchases || {};
+  const inProgressItems: any[] = inProgressPurchases.items || [];
+
+  const inTransitCount = useMemo(() => {
+    return inProgressItems.filter(
+      (item: any) =>
+        item.status === "DALAM_PENGIRIMAN" ||
+        item.status === "SEBAGIAN_DIKIRIM" ||
+        item.status === "MENUNGGU_PENERIMAAN"
+    ).length;
+  }, [inProgressItems]);
+
+  const warehouseCount = useMemo(() => {
+    return inProgressItems.filter((item: any) => item.status === "VERIFIKASI_GUDANG").length;
+  }, [inProgressItems]);
+
+  const filteredPurchaseItems = useMemo(() => {
+    return inProgressItems.filter((item: any) => {
+      const q = purchaseSearch.toLowerCase().trim();
+      const matchSearch =
+        q === "" ||
+        (item.product_name && item.product_name.toLowerCase().includes(q)) ||
+        (item.product_code && item.product_code.toLowerCase().includes(q)) ||
+        (item.doc_no && item.doc_no.toLowerCase().includes(q)) ||
+        (item.supplier_name && item.supplier_name.toLowerCase().includes(q)) ||
+        (item.warehouse_name && item.warehouse_name.toLowerCase().includes(q));
+
+      if (!matchSearch) return false;
+
+      if (purchaseTab === "ALL") return true;
+      if (purchaseTab === "DALAM_PENGIRIMAN") {
+        return (
+          item.status === "DALAM_PENGIRIMAN" ||
+          item.status === "SEBAGIAN_DIKIRIM" ||
+          item.status === "MENUNGGU_PENERIMAAN"
+        );
+      }
+      if (purchaseTab === "VERIFIKASI_GUDANG") {
+        return item.status === "VERIFIKASI_GUDANG";
+      }
+      return true;
+    });
+  }, [inProgressItems, purchaseSearch, purchaseTab]);
 
   if (isLoading) {
     return (
@@ -150,7 +199,7 @@ export default function DashboardPage() {
 
       <div className="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
         {/* KPI Cards Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-4">
           {/* Sales */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
             <div>
@@ -170,7 +219,7 @@ export default function DashboardPage() {
           {/* Purchases */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
             <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Pengadaan (PO)</p>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Pengadaan (Faktur Selesai)</p>
               <h3 className="text-xl font-bold text-slate-900 mt-1">
                 {formatCurrency(data?.purchase_summary?.total_amount)}
               </h3>
@@ -180,6 +229,36 @@ export default function DashboardPage() {
             </div>
             <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 shrink-0">
               <TrendingDown className="w-6 h-6" />
+            </div>
+          </div>
+
+          {/* Barang Pembelian Masih Proses / Pengiriman */}
+          <div
+            onClick={() => {
+              document.getElementById("in-progress-purchases-section")?.scrollIntoView({ behavior: "smooth" });
+            }}
+            className="bg-white p-5 rounded-2xl border border-sky-200/90 hover:border-sky-400 shadow-sm flex items-center justify-between cursor-pointer transition hover:shadow-md group relative overflow-hidden"
+          >
+            <div className="absolute top-0 left-0 w-1.5 h-full bg-sky-500 rounded-l-2xl"></div>
+            <div>
+              <p className="text-xs font-semibold text-sky-700 uppercase tracking-wider flex items-center gap-1.5">
+                <Truck className="w-3.5 h-3.5 text-sky-600" />
+                <span>Pengadaan Dlm Pengiriman &amp; Proses</span>
+              </p>
+              <h3 className="text-xl font-bold text-slate-900 mt-1">
+                {inProgressPurchases.total_items || 0} <span className="text-xs font-semibold text-slate-500">Item Barang</span>
+              </h3>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="text-[11px] font-bold text-sky-600">
+                  {formatCurrency(inProgressPurchases.total_amount)}
+                </span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-sky-50 text-sky-700 border border-sky-200">
+                  {inProgressPurchases.total_docs || 0} Dokumen
+                </span>
+              </div>
+            </div>
+            <div className="w-12 h-12 bg-sky-50 group-hover:bg-sky-100 rounded-xl flex items-center justify-center text-sky-600 shrink-0 transition">
+              <Truck className="w-6 h-6" />
             </div>
           </div>
 
@@ -345,6 +424,255 @@ export default function DashboardPage() {
               Lihat Laporan Penjualan Lengkap
             </Link>
           </div>
+        </div>
+
+        {/* ======================================================== */}
+        {/* CARD DATA BARANG PEMBELIAN MASIH PROSES & DALAM PENGIRIMAN */}
+        {/* ======================================================== */}
+        <div
+          id="in-progress-purchases-section"
+          className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm space-y-4"
+        >
+          {/* Header Card */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-sky-50 border border-sky-200 flex items-center justify-center text-sky-600 shrink-0">
+                <Truck className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm sm:text-base font-bold text-slate-800">
+                    Barang Pembelian Dalam Proses &amp; Pengiriman
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-sky-100 text-sky-800 border border-sky-300">
+                    {inProgressPurchases.total_items || 0} Item ({inProgressPurchases.total_docs || 0} Dokumen)
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Monitoring faktur pembelian ke distributor PBF yang sedang dalam perjalanan atau menunggu pemeriksaan gudang.
+                </p>
+              </div>
+            </div>
+
+            {/* Search & Links */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Cari obat, PBF, No. Faktur..."
+                  value={purchaseSearch}
+                  onChange={(e) => setPurchaseSearch(e.target.value)}
+                  className="pl-8 pr-7 py-1.5 border border-slate-200 rounded-xl text-xs w-48 sm:w-60 focus:outline-none focus:border-sky-500 bg-slate-50 focus:bg-white transition"
+                />
+                {purchaseSearch && (
+                  <button
+                    onClick={() => setPurchaseSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              <Link
+                href="/purchasing/invoices"
+                className="px-2.5 py-1.5 text-xs font-semibold rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 transition shrink-0"
+              >
+                Faktur Pembelian &rarr;
+              </Link>
+            </div>
+          </div>
+
+          {/* Filter Tabs */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setPurchaseTab("ALL")}
+              className={`px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                purchaseTab === "ALL"
+                  ? "bg-sky-600 text-white shadow-xs"
+                  : "bg-slate-100 hover:bg-slate-200 text-slate-600"
+              }`}
+            >
+              Semua ({inProgressItems.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setPurchaseTab("DALAM_PENGIRIMAN")}
+              className={`px-3 py-1 rounded-lg text-xs font-semibold transition flex items-center gap-1 cursor-pointer ${
+                purchaseTab === "DALAM_PENGIRIMAN"
+                  ? "bg-blue-600 text-white shadow-xs"
+                  : "bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200"
+              }`}
+            >
+              <Truck className="w-3.5 h-3.5" />
+              <span>Dalam Pengiriman PBF ({inTransitCount})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setPurchaseTab("VERIFIKASI_GUDANG")}
+              className={`px-3 py-1 rounded-lg text-xs font-semibold transition flex items-center gap-1 cursor-pointer ${
+                purchaseTab === "VERIFIKASI_GUDANG"
+                  ? "bg-purple-600 text-white shadow-xs"
+                  : "bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200"
+              }`}
+            >
+              <Boxes className="w-3.5 h-3.5" />
+              <span>Pemeriksaan Gudang ({warehouseCount})</span>
+            </button>
+          </div>
+
+          {/* Table */}
+          <div className="overflow-x-auto border border-slate-100 rounded-xl">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 text-slate-600 uppercase font-semibold text-[11px] border-b border-slate-200/70">
+                <tr>
+                  <th className="py-2.5 px-3">No. Dokumen</th>
+                  <th className="py-2.5 px-3">Tanggal</th>
+                  <th className="py-2.5 px-3">Distributor / PBF</th>
+                  <th className="py-2.5 px-3">Nama Obat / Barang</th>
+                  <th className="py-2.5 px-3 text-center">Qty Belum Datang</th>
+                  <th className="py-2.5 px-3">Gudang Tujuan</th>
+                  <th className="py-2.5 px-3 text-right">Nilai Estimasi</th>
+                  <th className="py-2.5 px-3 text-center">Status Alur</th>
+                  <th className="py-2.5 px-3 text-right">Aksi</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredPurchaseItems.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="py-8 text-center text-slate-400">
+                      <div className="flex flex-col items-center justify-center gap-1.5">
+                        <Truck className="w-8 h-8 text-slate-300" />
+                        <span className="font-medium">Tidak ada barang pembelian yang sedang dalam proses pengiriman saat ini.</span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredPurchaseItems.slice(0, purchasePageSize).map((item: any, idx: number) => {
+                    return (
+                      <tr key={item.id || idx} className="hover:bg-slate-50/80 transition">
+                        {/* No Dokumen */}
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200">
+                              FAKTUR
+                            </span>
+                            <span className="font-bold text-slate-800">{item.doc_no}</span>
+                          </div>
+                        </td>
+
+                        {/* Tanggal */}
+                        <td className="py-2.5 px-3 whitespace-nowrap text-slate-500">
+                          {formatDate(item.date)}
+                        </td>
+
+                        {/* PBF */}
+                        <td className="py-2.5 px-3 font-medium text-slate-700 whitespace-nowrap max-w-[180px] truncate" title={item.supplier_name}>
+                          {item.supplier_name}
+                        </td>
+
+                        {/* Nama Barang */}
+                        <td className="py-2.5 px-3">
+                          <div className="font-bold text-slate-900 leading-tight">{item.product_name}</div>
+                          <div className="text-[10px] text-slate-400 flex items-center gap-2 mt-0.5">
+                            <span>Kode: {item.product_code || "-"}</span>
+                          </div>
+                        </td>
+
+                        {/* Qty Belum Datang */}
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          <span className="px-2 py-0.5 rounded-md font-bold text-xs bg-sky-50 text-sky-700 border border-sky-200">
+                            {item.pending_qty} {item.unit_name}
+                          </span>
+                        </td>
+
+                        {/* Gudang */}
+                        <td className="py-2.5 px-3 text-slate-600 whitespace-nowrap">
+                          {item.warehouse_name || "Gudang Utama"}
+                        </td>
+
+                        {/* Nilai Estimasi */}
+                        <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-800 whitespace-nowrap">
+                          {formatCurrency(item.total_amount)}
+                        </td>
+
+                        {/* Status Alur */}
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                          {item.status === "DALAM_PENGIRIMAN" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                              <Truck className="w-3 h-3" />
+                              <span>Dalam Pengiriman PBF</span>
+                            </span>
+                          ) : item.status === "SEBAGIAN_DIKIRIM" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                              <Clock className="w-3 h-3" />
+                              <span>Dikirim Sebagian</span>
+                            </span>
+                          ) : item.status === "VERIFIKASI_GUDANG" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                              <Boxes className="w-3 h-3" />
+                              <span>Pemeriksaan Gudang</span>
+                            </span>
+                          ) : item.status === "MENUNGGU_PENERIMAAN" ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                              <Clock className="w-3 h-3" />
+                              <span>Menunggu Penerimaan</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                              <span>Pemesanan Baru</span>
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Aksi */}
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                          <Link
+                            href={`/purchasing/invoices?search=${encodeURIComponent(item.doc_no)}`}
+                            className="inline-flex items-center gap-1 px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-slate-700 font-semibold text-[11px] transition shadow-2xs"
+                          >
+                            <span>Buka Transaksi</span>
+                            <ArrowUpRight className="w-3 h-3 text-slate-400" />
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Footer Controls */}
+          {filteredPurchaseItems.length > 8 && (
+            <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
+              <div>
+                Menampilkan{" "}
+                <strong>{Math.min(purchasePageSize, filteredPurchaseItems.length)}</strong> dari{" "}
+                <strong>{filteredPurchaseItems.length}</strong> item barang
+              </div>
+              <div className="flex items-center gap-2">
+                {purchasePageSize < filteredPurchaseItems.length ? (
+                  <button
+                    type="button"
+                    onClick={() => setPurchasePageSize((prev) => prev + 12)}
+                    className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold transition cursor-pointer"
+                  >
+                    Tampilkan Lebih Banyak ({filteredPurchaseItems.length - purchasePageSize} lagi)
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setPurchasePageSize(8)}
+                    className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-semibold transition cursor-pointer"
+                  >
+                    Tampilkan Lebih Ringkas (8 Item)
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Recent Transactions Table */}

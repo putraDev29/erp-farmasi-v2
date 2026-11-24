@@ -16,6 +16,7 @@ import {
   PlusCircle,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
 interface CashItemRow {
   account_id: string;
@@ -105,11 +106,21 @@ export default function CashOutPage() {
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!keluarDariAkunId) {
-        throw new Error("Pilih akun sumber kas (Keluar dari Akun)");
+        throw new Error("Pilih kode akun sumber kas (Keluar dari Akun) terlebih dahulu.");
       }
       const validItems = items.filter((it) => it.account_id && it.amount > 0);
       if (validItems.length === 0) {
         throw new Error("Tambahkan minimal 1 rincian akun pengeluaran dengan jumlah > 0");
+      }
+      if (totalAmount <= 0) {
+        throw new Error("Total pembayaran kas keluar harus lebih besar dari Rp 0.");
+      }
+      if (currentSaldoKas <= 0 || totalAmount > currentSaldoKas) {
+        throw new Error(
+          `Pembayaran tidak dapat dilakukan karena melebihi saldo akun kas yang tersedia (Saldo: ${formatCurrency(
+            currentSaldoKas
+          )}).`
+        );
       }
 
       return await api.post("/accounting/cash-transactions", {
@@ -160,19 +171,12 @@ export default function CashOutPage() {
       `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}:${String(now.getSeconds()).padStart(2, "0")}`
     );
     setKeterangan("");
-    if (cashBankAccounts.length > 0) {
-      setKeluarDariAkunId(cashBankAccounts[0].id);
-    } else {
-      setKeluarDariAkunId("");
-    }
+    setKeluarDariAkunId("");
     setItems([{ account_id: "", notes: "", amount: 0 }]);
   };
 
   const handleOpenCreate = () => {
     resetForm();
-    if (cashBankAccounts.length > 0) {
-      setKeluarDariAkunId(cashBankAccounts[0].id);
-    }
     setViewMode("form");
   };
 
@@ -333,18 +337,13 @@ export default function CashOutPage() {
 
               <div>
                 <label className="block text-slate-600 font-semibold mb-0.5">Keluar Dari :</label>
-                <select
+                <SearchableAccountSelect
+                  accounts={cashBankAccounts}
                   value={selectedAccountFilter}
-                  onChange={(e) => setSelectedAccountFilter(e.target.value)}
-                  className="w-full h-6 px-1.5 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500"
-                >
-                  <option value="all">Semua Akun Kas / Bank</option>
-                  {cashBankAccounts.map((a: any) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} - {a.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setSelectedAccountFilter(val || "all")}
+                  placeholder="Semua Akun Kas / Bank"
+                  allowClear={true}
+                />
               </div>
 
               <div>
@@ -497,18 +496,12 @@ export default function CashOutPage() {
 
             <div>
               <label className="block text-slate-600 font-semibold mb-0.5">Keluar dari Akun :</label>
-              <select
+              <SearchableAccountSelect
+                accounts={cashBankAccounts}
                 value={keluarDariAkunId}
-                onChange={(e) => setKeluarDariAkunId(e.target.value)}
-                className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-[11px] focus:outline-none focus:border-sky-500"
-              >
-                <option value="">Select...</option>
-                {cashBankAccounts.map((a: any) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} - {a.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setKeluarDariAkunId(val)}
+                placeholder="-- Pilih / Cari Akun Kas/Bank --"
+              />
             </div>
 
             <div>
@@ -551,18 +544,12 @@ export default function CashOutPage() {
                       {idx + 1}
                     </td>
                     <td className="py-0.5 px-1.5 border-r border-slate-200">
-                      <select
+                      <SearchableAccountSelect
+                        accounts={expenseOppositeAccounts}
                         value={row.account_id}
-                        onChange={(e) => handleItemChange(idx, "account_id", e.target.value)}
-                        className="w-full h-6 px-1.5 border border-slate-300 rounded bg-white text-[11px]"
-                      >
-                        <option value="">Select...</option>
-                        {expenseOppositeAccounts.map((a: any) => (
-                          <option key={a.id} value={a.id}>
-                            {a.code} - {a.name}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(val) => handleItemChange(idx, "account_id", val)}
+                        placeholder="-- Pilih / Cari Kode Akun Biaya --"
+                      />
                     </td>
                     <td className="py-0.5 px-1.5 border-r border-slate-200">
                       <input

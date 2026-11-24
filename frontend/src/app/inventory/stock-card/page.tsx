@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   Search,
@@ -17,6 +18,7 @@ import { api, formatCurrency, formatDate } from "@/lib/api";
 import { BarcodeScannerModal } from "@/components/common/BarcodeScannerModal";
 
 export default function StockCardPage() {
+  const router = useRouter();
   const [productCodeInput, setProductCodeInput] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [warehouseID, setWarehouseID] = useState("");
@@ -124,6 +126,26 @@ export default function StockCardPage() {
   const handleCodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     handleBarcodeScanned(productCodeInput);
+  };
+
+  const handleRowClick = async (m: any) => {
+    if (m.purchase_id) {
+      router.push(`/purchasing/invoices/${m.purchase_id}/edit`);
+      return;
+    }
+    if (m.doc_type === "PURCHASE" || (m.doc_no && m.doc_no.startsWith("PI/"))) {
+      try {
+        const res = await api.get(`/purchases?search=${encodeURIComponent(m.doc_no)}`);
+        const purchases = res.data?.data || [];
+        const match = purchases.find((p: any) => p.invoice_no === m.doc_no) || purchases[0];
+        if (match?.id) {
+          router.push(`/purchasing/invoices/${match.id}/edit`);
+          return;
+        }
+      } catch (e) {
+        console.error("Gagal membuka faktur pembelian:", e);
+      }
+    }
   };
 
   return (
@@ -279,6 +301,8 @@ export default function StockCardPage() {
             <thead className="bg-slate-100 border-b border-slate-300 text-slate-700 font-semibold sticky top-0 z-10 shadow-2xs">
               <tr>
                 <th className="py-2 px-3 border-r border-slate-300">No Transaksi</th>
+                <th className="py-2 px-3 border-r border-slate-300">No. Batch</th>
+                <th className="py-2 px-3 border-r border-slate-300">Expired Date</th>
                 <th className="py-2 px-3 border-r border-slate-300">Kantor</th>
                 <th className="py-2 px-3 border-r border-slate-300">Tanggal</th>
                 <th className="py-2 px-3 border-r border-slate-300">Tipe</th>
@@ -292,14 +316,14 @@ export default function StockCardPage() {
             <tbody>
               {isLoading ? (
                 <tr>
-                  <td colSpan={9} className="py-16 text-center text-slate-500">
+                  <td colSpan={11} className="py-16 text-center text-slate-500">
                     <div className="w-6 h-6 border-2 border-sky-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
                     <span>Memuat kartu stok...</span>
                   </td>
                 </tr>
               ) : movements.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-20 text-center text-slate-400 font-medium">
+                  <td colSpan={11} className="py-20 text-center text-slate-400 font-medium">
                     No data
                   </td>
                 </tr>
@@ -307,10 +331,46 @@ export default function StockCardPage() {
                 movements.map((m: any, idx: number) => {
                   const qtyIn = m.movement_type === "IN" ? m.qty : 0;
                   const qtyOut = m.movement_type === "OUT" ? m.qty : 0;
+                  const isPurchase =
+                    Boolean(m.purchase_id) ||
+                    m.doc_type === "PURCHASE" ||
+                    (m.doc_no && m.doc_no.startsWith("PI/"));
                   return (
-                    <tr key={m.id || idx} className="border-b border-slate-200 hover:bg-slate-50 transition-colors">
+                    <tr
+                      key={m.id || idx}
+                      onClick={() => handleRowClick(m)}
+                      className={`border-b border-slate-200 transition-colors ${
+                        isPurchase
+                          ? "cursor-pointer hover:bg-sky-50/80"
+                          : "hover:bg-slate-50"
+                      }`}
+                      title={
+                        isPurchase
+                          ? "Klik untuk membuka / edit faktur pembelian"
+                          : undefined
+                      }
+                    >
                       <td className="py-1.5 px-3 border-r border-slate-200 font-mono font-medium text-slate-800">
-                        {m.doc_no}
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className={
+                              isPurchase
+                                ? "text-blue-600 underline font-semibold hover:text-blue-800"
+                                : ""
+                            }
+                          >
+                            {m.doc_no}
+                          </span>
+                          {isPurchase && (
+                            <ExternalLink className="w-3 h-3 text-blue-500 opacity-70" />
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-1.5 px-3 border-r border-slate-200 font-mono font-semibold text-slate-700">
+                        {m.batch_number || "-"}
+                      </td>
+                      <td className="py-1.5 px-3 border-r border-slate-200 font-mono text-slate-700">
+                        {m.expired_date ? formatDate(m.expired_date) : "-"}
                       </td>
                       <td className="py-1.5 px-3 border-r border-slate-200 text-slate-600">
                         {m.branch?.name || "UTAMA"}

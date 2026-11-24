@@ -13,10 +13,12 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { MasterToolbarButtons } from "@/components/common/MasterToolbarButtons";
+import { TableSortSelect, sortTableData } from "@/components/common/TableSortSelect";
 
 export default function CustomerGroupsPage() {
   const queryClient = useQueryClient();
 
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
   const [page, setPage] = useState(1);
   const pageSize = 15;
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -120,8 +122,13 @@ export default function CustomerGroupsPage() {
     }
   };
 
-  const totalPages = Math.max(1, Math.ceil(groups.length / pageSize));
-  const paginatedData = groups.slice((page - 1) * pageSize, page * pageSize);
+  const sortedGroups = sortTableData(groups, sortOption, {
+    getCode: (g: any) => g.code,
+    getName: (g: any) => g.name,
+    getDate: (g: any) => g.created_at,
+  });
+  const totalPages = Math.max(1, Math.ceil(sortedGroups.length / pageSize));
+  const paginatedData = sortedGroups.slice((page - 1) * pageSize, page * pageSize);
 
   const renderToolbar = () => (
     <div className="flex items-center gap-1.5 py-1">
@@ -169,6 +176,22 @@ export default function CustomerGroupsPage() {
           <ChevronLeft className="w-5 h-5" />
         </button>
         <h1 className="text-base font-semibold text-slate-800 tracking-tight">Daftar Grup Pelanggan</h1>
+      </div>
+
+      {/* Filter Bar */}
+      <div className="shrink-0 bg-white border border-slate-200 rounded p-2 shadow-2xs">
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <div className="w-64">
+            <TableSortSelect
+              value={sortOption}
+              onChange={(val) => {
+                setSortOption(val);
+                setPage(1);
+              }}
+              compact
+            />
+          </div>
+        </div>
       </div>
 
       {/* Top Toolbar */}

@@ -41,15 +41,15 @@ export const CariSupplierModal: React.FC<CariSupplierModalProps> = ({
     <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-2xs flex items-center justify-center p-3 sm:p-4">
       <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-xs">
         {/* Header */}
-        <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+        <div className="px-4 py-2.5 bg-[#00c875] text-white flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Building2 className="w-4 h-4 text-emerald-600" />
-            <h3 className="font-bold text-slate-800 text-sm">Pilih Supplier...</h3>
+            <Building2 className="w-4 h-4 text-white" />
+            <h3 className="font-bold text-white text-sm">Pilih Supplier...</h3>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 rounded transition"
+            className="p-1 text-white/80 hover:text-white hover:bg-white/10 rounded transition"
           >
             <X className="w-4 h-4" />
           </button>

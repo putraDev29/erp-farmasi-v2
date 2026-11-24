@@ -14,6 +14,7 @@ import {
   ChevronLeft as BackIcon,
 } from "lucide-react";
 import { api, formatDate } from "@/lib/api";
+import { sortTableData } from "@/components/common/TableSortSelect";
 
 export default function TransferOrdersListPage() {
   const router = useRouter();
@@ -25,7 +26,8 @@ export default function TransferOrdersListPage() {
   const [endDate, setEndDate] = useState("2026-11-30");
   const [processStatus, setProcessStatus] = useState("Semua");
   const [orderStatus, setOrderStatus] = useState("");
-  const [sortBy, setSortBy] = useState("Tanggal");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
+  const [sortBy, setSortBy] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -42,8 +44,6 @@ export default function TransferOrdersListPage() {
       endDate,
       processStatus,
       orderStatus,
-      sortBy,
-      sortDir,
     ],
     queryFn: async () => {
       const params = new URLSearchParams();
@@ -53,8 +53,6 @@ export default function TransferOrdersListPage() {
       if (endDate) params.append("end_date", endDate);
       if (orderStatus && orderStatus !== "Semua") params.append("status", orderStatus);
       if (processStatus && processStatus !== "Semua") params.append("process_status", processStatus);
-      params.append("sort_by", sortBy);
-      params.append("sort_dir", sortDir);
 
       const res = await api.get(`/inventory/transfer-orders?${params.toString()}`);
       return res.data?.data || [];
@@ -83,8 +81,13 @@ export default function TransferOrdersListPage() {
     },
   });
 
-  const totalPages = Math.max(1, Math.ceil(orders.length / pageSize));
-  const paginated = orders.slice((page - 1) * pageSize, page * pageSize);
+  const sortedOrders = sortTableData(orders, sortOption, {
+    getCode: (o: any) => o.order_no,
+    getName: (o: any) => o.from_warehouse?.name || o.to_warehouse?.name,
+    getDate: (o: any) => o.created_at || o.order_date,
+  });
+  const totalPages = Math.max(1, Math.ceil(sortedOrders.length / pageSize));
+  const paginated = sortedOrders.slice((page - 1) * pageSize, page * pageSize);
 
   const renderToolbar = () => (
     <div className="flex items-center gap-1.5 py-1">
@@ -257,24 +260,20 @@ export default function TransferOrdersListPage() {
           </div>
           <div>
             <label className="block text-slate-600 font-semibold mb-0.5">Urut Berdasar :</label>
-            <div className="flex gap-1">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-emerald-500"
-              >
-                <option value="Tanggal">Tanggal</option>
-                <option value="No Transaksi">No Transaksi</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
-                className="h-6 w-7 border border-slate-300 rounded flex items-center justify-center hover:bg-slate-100 bg-white"
-                title="Arah Urutan"
-              >
-                <ArrowUpDown className="w-3.5 h-3.5 text-slate-600" />
-              </button>
-            </div>
+            <select
+              value={sortOption}
+              onChange={(e) => {
+                setSortOption(e.target.value);
+                setPage(1);
+              }}
+              className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-emerald-500 font-medium shadow-2xs truncate cursor-pointer"
+            >
+              <option value="created_at_desc">1. Urutan sesuai waktu input paling atas</option>
+              <option value="code_asc">2. Kode (A - Z)</option>
+              <option value="code_desc">3. Kode (Z - A)</option>
+              <option value="name_asc">4. Nama (A - Z)</option>
+              <option value="name_desc">5. Nama (Z - A)</option>
+            </select>
           </div>
         </div>
       </div>

@@ -90,6 +90,15 @@ func (h *MasterHandler) GetProducts(c *gin.Context) {
 		query = query.Where("is_sold_in_pharmacy = true AND distribution_channel != 'PBF_ONLY'")
 	}
 
+	// Filter Khusus Penjualan Kasir Retail OTC:
+	// Hanya menampilkan Obat Bebas, Obat Bebas Terbatas, Alkes, dan Lainnya (Vitamin/Herbal).
+	// Obat Keras, Narkotika, Psikotropika, Prekursor, OOT, dan Khusus RS TIDAK DITAMPILKAN.
+	retailOnly := c.Query("retail_only")
+	if retailOnly == "true" {
+		query = query.Where("is_sold_in_pharmacy = true AND distribution_channel != 'PBF_ONLY' AND sales_status = 'MASIH_DIJUAL'")
+		query = query.Where("drug_classification IN ('OBAT_BEBAS', 'OBAT_BEBAS_TERBATAS', 'ALKES', 'LAINNYA', 'BEBAS', 'BEBAS_TERBATAS')")
+	}
+
 	// Order by clause
 	direction := "ASC"
 	if strings.ToLower(sortDir) == "desc" {
@@ -105,8 +114,12 @@ func (h *MasterHandler) GetProducts(c *gin.Context) {
 		orderClause = "selling_price " + direction
 	case "rack":
 		orderClause = "rack " + direction
-	default:
+	case "created_at", "waktu_input", "terbaru":
+		orderClause = "created_at " + direction
+	case "code", "kode":
 		orderClause = "code " + direction
+	default:
+		orderClause = "created_at DESC"
 	}
 
 	var total int64
@@ -121,7 +134,7 @@ func (h *MasterHandler) GetProducts(c *gin.Context) {
 		var totalCost float64
 		var countBalance float64
 		for _, sb := range products[i].StockBalances {
-			if warehouseID == "" || sb.WarehouseID.String() == warehouseID {
+			if warehouseID == "" || warehouseID == "all" || warehouseID == "Semua" || sb.WarehouseID.String() == warehouseID {
 				totalQty += sb.Qty
 				if sb.AvgCost > 0 {
 					totalCost += sb.AvgCost
@@ -130,6 +143,7 @@ func (h *MasterHandler) GetProducts(c *gin.Context) {
 			}
 		}
 		products[i].TotalStock = totalQty
+		products[i].Stock = totalQty
 		if countBalance > 0 {
 			products[i].AvgCost = totalCost / countBalance
 		} else {
@@ -179,7 +193,7 @@ func (h *MasterHandler) GetProductByID(c *gin.Context) {
 	var product models.Product
 	if err := database.DB.
 		Preload("Category").Preload("SubCategory").Preload("Brand").Preload("BaseUnit").
-		Preload("Supplier").Preload("ShareWarehouse").
+		Preload("Supplier").Preload("ShareWarehouse").Preload("StockBalances").
 		Preload("CogsAccount").Preload("SalesAccount").Preload("ServiceRevenueAccount").
 		Preload("InventoryAccount").Preload("NonInventoryAccount").Preload("WipAccount").
 		Preload("AssemblyLaborAccount").Preload("AssemblyOverheadAccount").
@@ -189,6 +203,13 @@ func (h *MasterHandler) GetProductByID(c *gin.Context) {
 		utils.SendError(c, http.StatusNotFound, "Produk tidak ditemukan", err.Error())
 		return
 	}
+
+	var totalQty float64
+	for _, sb := range product.StockBalances {
+		totalQty += sb.Qty
+	}
+	product.TotalStock = totalQty
+	product.Stock = totalQty
 
 	utils.SendSuccess(c, "Detail produk", product)
 }
@@ -511,14 +532,20 @@ func (h *MasterHandler) GetSuppliers(c *gin.Context) {
 			searchPattern, searchPattern, searchPattern, searchPattern, searchPattern)
 	}
 
-	orderClause := "name ASC"
+	orderClause := "created_at DESC"
 	switch sortBy {
 	case "code":
 		orderClause = "code " + sortDir
 	case "city":
 		orderClause = "city " + sortDir
+	case "created_at", "waktu_input", "terbaru":
+		orderClause = "created_at " + sortDir
 	default:
-		orderClause = "name " + sortDir
+		if sortBy == "name" {
+			orderClause = "name " + sortDir
+		} else {
+			orderClause = "created_at DESC"
+		}
 	}
 
 	var suppliers []models.Supplier
@@ -570,9 +597,38 @@ func (h *MasterHandler) DeleteSupplier(c *gin.Context) {
 	utils.SendSuccess(c, "Pemasok berhasil dihapus", nil)
 }
 
+// SyncCompanyCustomersSpending updates all customers' total_spent and total_orders based on active sales
+func SyncCompanyCustomersSpending(companyID uuid.UUID) {
+	database.DB.Exec(`
+		UPDATE customers c
+		SET 
+			total_spent = COALESCE(s.total_spent, 0),
+			total_orders = COALESCE(s.total_orders, 0)
+		FROM (
+			SELECT customer_id, COUNT(id)::numeric as total_orders, COALESCE(SUM(total_amount), 0)::numeric as total_spent
+			FROM sales
+			WHERE company_id = ? AND status != 'CANCELLED'
+			GROUP BY customer_id
+		) s
+		WHERE c.id = s.customer_id AND c.company_id = ?
+	`, companyID, companyID)
+
+	database.DB.Exec(`
+		UPDATE customers
+		SET total_spent = 0, total_orders = 0
+		WHERE company_id = ? AND id NOT IN (
+			SELECT DISTINCT customer_id FROM sales WHERE company_id = ? AND status != 'CANCELLED'
+		) AND (total_spent != 0 OR total_orders != 0)
+	`, companyID, companyID)
+}
+
 // Customers
 func (h *MasterHandler) GetCustomers(c *gin.Context) {
 	companyID := c.MustGet("company_id").(uuid.UUID)
+
+	// Sinkronkan total belanja dan transaksi pelanggan dari riwayat penjualan nyata
+	SyncCompanyCustomersSpending(companyID)
+
 	search := c.Query("search")
 	if search == "" {
 		search = c.Query("q")
@@ -587,14 +643,20 @@ func (h *MasterHandler) GetCustomers(c *gin.Context) {
 			searchPattern, searchPattern, searchPattern, searchPattern, searchPattern)
 	}
 
-	orderClause := "name ASC"
+	orderClause := "created_at DESC"
 	switch sortBy {
 	case "code":
 		orderClause = "code " + sortDir
 	case "total_spent":
 		orderClause = "total_spent " + sortDir
+	case "created_at", "waktu_input", "terbaru":
+		orderClause = "created_at " + sortDir
 	default:
-		orderClause = "name " + sortDir
+		if sortBy == "name" {
+			orderClause = "name " + sortDir
+		} else {
+			orderClause = "created_at DESC"
+		}
 	}
 
 	var customers []models.Customer
@@ -724,6 +786,18 @@ func (h *MasterHandler) CreateCustomer(c *gin.Context) {
 	utils.SendCreated(c, "Pelanggan berhasil dibuat", cust)
 }
 
+func (h *MasterHandler) GetCustomerByID(c *gin.Context) {
+	id := c.Param("id")
+	companyID := c.MustGet("company_id").(uuid.UUID)
+	var cust models.Customer
+	if err := database.DB.Where("id = ? AND company_id = ?", id, companyID).
+		Preload("CustomerGroup").Preload("Territory").First(&cust).Error; err != nil {
+		utils.SendError(c, http.StatusNotFound, "Pelanggan tidak ditemukan", err.Error())
+		return
+	}
+	utils.SendSuccess(c, "Detail pelanggan", cust)
+}
+
 func (h *MasterHandler) UpdateCustomer(c *gin.Context) {
 	id := c.Param("id")
 	var cust models.Customer
@@ -806,9 +880,27 @@ func (h *MasterHandler) VerifyCustomer(c *gin.Context) {
 	if cust.IsVerified {
 		cust.VerifiedAt = &now
 		cust.VerifiedNotes = "Diverifikasi & Disetujui oleh Apoteker Penanggung Jawab (APJ)"
+		cust.CustomerStatus = "Terverifikasi"
+
+		// Also approve any PENDING documents for this customer
+		userIDVal, hasUser := c.Get("user_id")
+		var approverID *uuid.UUID
+		if hasUser {
+			uid := userIDVal.(uuid.UUID)
+			approverID = &uid
+		}
+		database.DB.Model(&models.DocumentAttachment{}).
+			Where("company_id = ? AND entity_type = 'customer' AND entity_id = ? AND approval_status = 'PENDING'", cust.CompanyID, cust.ID).
+			Updates(map[string]interface{}{
+				"approval_status": "APPROVED",
+				"approval_notes":  "Disetujui bersamaan dengan verifikasi legalitas sarana pelanggan oleh APJ",
+				"approved_by":     approverID,
+				"approved_at":     &now,
+			})
 	} else {
 		cust.VerifiedAt = nil
 		cust.VerifiedNotes = ""
+		cust.CustomerStatus = "Menunggu Verifikasi"
 	}
 
 	if err := database.DB.Save(&cust).Error; err != nil {
@@ -830,8 +922,8 @@ func (h *MasterHandler) GetSalesReps(c *gin.Context) {
 	if search == "" {
 		search = c.Query("q")
 	}
-	sortBy := c.DefaultQuery("sort_by", "name")
-	sortDir := c.DefaultQuery("sort_dir", "asc")
+	sortBy := c.DefaultQuery("sort_by", "created_at")
+	sortDir := c.DefaultQuery("sort_dir", "desc")
 
 	query := database.DB.Where("company_id = ?", companyID)
 	if search != "" {
@@ -840,9 +932,11 @@ func (h *MasterHandler) GetSalesReps(c *gin.Context) {
 			searchPattern, searchPattern, searchPattern, searchPattern)
 	}
 
-	orderClause := "name " + sortDir
+	orderClause := "created_at " + sortDir
 	if sortBy == "code" {
 		orderClause = "code " + sortDir
+	} else if sortBy == "name" {
+		orderClause = "name " + sortDir
 	} else if sortBy == "city" {
 		orderClause = "city " + sortDir
 	}

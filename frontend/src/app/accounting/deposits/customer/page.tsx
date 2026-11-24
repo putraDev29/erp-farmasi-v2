@@ -16,6 +16,7 @@ import {
   X,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
 export default function DepositCustomerPage() {
   const router = useRouter();
@@ -446,18 +447,12 @@ export default function DepositCustomerPage() {
             <div className="grid grid-cols-3 items-center gap-2">
               <label className="text-slate-600 font-semibold">Masuk ke Akun Kas :</label>
               <div className="col-span-2">
-                <select
+                <SearchableAccountSelect
+                  accounts={cashBankAccounts}
                   value={cashAccountId}
-                  onChange={(e) => setCashAccountId(e.target.value)}
-                  className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-[11px] focus:outline-none focus:border-sky-500"
-                >
-                  <option value="">Select...</option>
-                  {cashBankAccounts.map((a: any) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} - {a.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setCashAccountId(val)}
+                  placeholder="Select / Cari Akun Kas..."
+                />
               </div>
             </div>
 
@@ -478,18 +473,12 @@ export default function DepositCustomerPage() {
             <div className="grid grid-cols-3 items-center gap-2">
               <label className="text-slate-600 font-semibold">Kode Akun Deposit :</label>
               <div className="col-span-2">
-                <select
+                <SearchableAccountSelect
+                  accounts={depositAccounts}
                   value={depositAccId}
-                  onChange={(e) => setDepositAccId(e.target.value)}
-                  className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-[11px] focus:outline-none focus:border-sky-500"
-                >
-                  <option value="">Select...</option>
-                  {depositAccounts.map((a: any) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} - {a.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setDepositAccId(val)}
+                  placeholder="Select / Cari Akun Deposit..."
+                />
               </div>
             </div>
 

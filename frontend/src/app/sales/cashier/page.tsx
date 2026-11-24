@@ -14,9 +14,11 @@ import {
   ArrowUpDown,
   Wallet,
   FileBarChart,
+  Printer,
   ChevronLeft as BackIcon,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { StrukKasirThermalModal } from "@/components/sales/StrukKasirThermalModal";
 
 export default function CashierListPage() {
   const router = useRouter();
@@ -38,6 +40,8 @@ export default function CashierListPage() {
 
   // Modals
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [isPrintReceiptOpen, setIsPrintReceiptOpen] = useState(false);
+  const [printReceiptSaleId, setPrintReceiptSaleId] = useState<string | null>(null);
 
   // Queries
   const { data: sales = [], isLoading } = useQuery({
@@ -123,20 +127,21 @@ export default function CashierListPage() {
         <Search className="w-3.5 h-3.5 stroke-[2.5]" />
       </button>
 
-      {/* + Tambah button (Opens POS Kasir) */}
-      {/* <Link
-        href="/pos"
+      {/* + Tambah button (Opens Penjualan Kasir Baru) */}
+      <Link
+        href="/sales/cashier/new"
         className="h-6 px-2.5 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95"
-        title="Buka Kasir POS"
+        title="Buka Penjualan Kasir Baru (Retail OTC)"
       >
         <Plus className="w-3.5 h-3.5 stroke-[3]" />
         <span>Tambah</span>
-      </Link> */}
+      </Link>
 
       {/* ✏️ Ubah button */}
       <button
         type="button"
         disabled={!selectedId}
+        onClick={() => selectedId && router.push(`/sales/cashier/${selectedId}/edit`)}
         className="h-6 px-2.5 bg-[#3b82f6] hover:bg-blue-600 text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40"
       >
         <Pencil className="w-3 h-3 stroke-[2.5]" />
@@ -154,6 +159,23 @@ export default function CashierListPage() {
         <span>Hapus</span>
       </button>
 
+      {/* 🖨️ Cetak Struk button */}
+      <button
+        type="button"
+        disabled={!selectedId}
+        onClick={() => {
+          if (selectedId) {
+            setPrintReceiptSaleId(selectedId);
+            setIsPrintReceiptOpen(true);
+          }
+        }}
+        className="h-6 px-2.5 bg-slate-700 hover:bg-slate-800 text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40"
+        title="Cetak Struk Kasir Thermal (58mm / 80mm)"
+      >
+        <Printer className="w-3 h-3 stroke-[2.5]" />
+        <span>Cetak Struk</span>
+      </button>
+
       {/* Laporan button */}
       <Link
         href="/reports/sales"
@@ -166,11 +188,11 @@ export default function CashierListPage() {
       {/* Kas Laci button */}
       <button
         type="button"
-        onClick={() => alert("Informasi Kas Laci Kasir: Saldo saat ini Rp 1.500.000")}
+        onClick={() => alert("Informasi Kas Laci Kasir (1-1110 KAS KECIL):\nSemua transaksi kasir otomatis masuk ke Akun Kas Kecil.")}
         className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition"
       >
         <Wallet className="w-3.5 h-3.5 text-amber-600" />
-        <span>Kas Laci</span>
+        <span>Kas Laci (Kas Kecil)</span>
       </button>
     </div>
   );
@@ -337,14 +359,37 @@ export default function CashierListPage() {
                   <tr
                     key={s.id}
                     onClick={() => setSelectedId(isSelected ? null : s.id)}
+                    onDoubleClick={() => router.push(`/sales/cashier/${s.id}/edit`)}
                     className={`border-b border-slate-100 cursor-pointer h-6 transition-colors ${
                       isSelected ? "bg-sky-50 text-sky-900 font-medium" : "hover:bg-slate-50/80"
                     }`}
                   >
-                    <td className="py-0.5 px-2 border-r border-slate-100 text-center">
-                      <button className="text-sky-600 hover:text-sky-800">
-                        <Pencil className="w-3 h-3" />
-                      </button>
+                    <td className="py-0.5 px-2 border-r border-slate-100 text-center whitespace-nowrap">
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            router.push(`/sales/cashier/${s.id}/edit`);
+                          }}
+                          className="text-sky-600 hover:text-sky-800 p-0.5"
+                          title="Ubah / Lihat Transaksi"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPrintReceiptSaleId(s.id);
+                            setIsPrintReceiptOpen(true);
+                          }}
+                          className="text-emerald-600 hover:text-emerald-800 p-0.5"
+                          title="Cetak Struk Kasir Thermal"
+                        >
+                          <Printer className="w-3 h-3" />
+                        </button>
+                      </div>
                     </td>
                     <td className="py-0.5 px-2.5 border-r border-slate-100 font-semibold text-emerald-700">
                       {s.invoice_no}
@@ -429,6 +474,16 @@ export default function CashierListPage() {
           </div>
         </div>
       )}
+
+      {/* MODAL CETAK STRUK KASIR THERMAL */}
+      <StrukKasirThermalModal
+        isOpen={isPrintReceiptOpen}
+        onClose={() => {
+          setIsPrintReceiptOpen(false);
+          setPrintReceiptSaleId(null);
+        }}
+        saleId={printReceiptSaleId}
+      />
     </div>
   );
 }

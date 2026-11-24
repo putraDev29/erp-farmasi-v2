@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
 import ItemSearchModal from "@/components/inventory/ItemSearchModal";
+import SearchableAccountSelect from "@/components/common/SearchableAccountSelect";
 
 export default function CostCorrectionPage() {
   const router = useRouter();
@@ -205,23 +206,12 @@ export default function CostCorrectionPage() {
         {/* Kode Akun : */}
         <div>
           <label className="block text-slate-600 font-medium mb-0.5">Kode Akun :</label>
-          <select
+          <SearchableAccountSelect
+            accounts={accounts}
             value={accountCode}
-            onChange={(e) => setAccountCode(e.target.value)}
-            className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500 cursor-pointer text-slate-700"
-          >
-            <option value="">Select...</option>
-            <option value="5-2300 - BEBAN SELISIH NILAI PERSEDIAAN">
-              5-2300 - BEBAN SELISIH NILAI PERSEDIAAN
-            </option>
-            <option value="5-2200 - PENGATURAN STOK">5-2200 - PENGATURAN STOK</option>
-            <option value="1-1301 - PERSEDIAAN OBAT">1-1301 - PERSEDIAAN OBAT</option>
-            {accounts.map((acc: any) => (
-              <option key={acc.id} value={`${acc.code} - ${acc.name}`}>
-                {acc.code} - {acc.name}
-              </option>
-            ))}
-          </select>
+            onChange={(val, item) => setAccountCode(item ? `${item.code || item.account_code} - ${item.name || item.account_name}` : val)}
+            placeholder="Select / Cari Kode Akun..."
+          />
         </div>
 
         {/* Gudang : */}

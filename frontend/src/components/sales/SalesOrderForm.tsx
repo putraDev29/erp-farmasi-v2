@@ -22,11 +22,17 @@ import {
   Bell,
   User,
   Package,
+  Calculator,
+  Undo2,
+  FileText,
+  Truck,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { useAuthStore } from "@/lib/auth-store";
 import { CariObatSalesModal } from "./CariObatSalesModal";
 import { CariPelangganModal } from "./CariPelangganModal";
 import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
+import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
 export interface SalesOrderItemRow {
   product_id: string;
@@ -40,6 +46,8 @@ export interface SalesOrderItemRow {
   unit_price: number;
   discount_percent: number;
   line_total: number;
+  purchase_price?: number;
+  margin_profit?: number;
   stock?: number;
   rack?: string;
   drug_classification?: string;
@@ -59,6 +67,14 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
 }) => {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
+
+  const isGudang = Boolean(
+    user?.roles?.some((r: any) => {
+      const roleName = (typeof r === "string" ? r : r?.name || "").toUpperCase();
+      return roleName.includes("GUDANG");
+    }) || user?.username?.toLowerCase() === "gudang"
+  );
 
   // Modals state
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
@@ -67,7 +83,63 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
   const [isHargaJualModalOpen, setIsHargaJualModalOpen] = useState(false);
   const [isInfoRowModalOpen, setIsInfoRowModalOpen] = useState(false);
   const [isPbfDocModalOpen, setIsPbfDocModalOpen] = useState(false);
+  const [isBayarModalOpen, setIsBayarModalOpen] = useState(false);
+  const [isSaveConfirmModalOpen, setIsSaveConfirmModalOpen] = useState(false);
   const [pbfDocCount, setPbfDocCount] = useState(0);
+
+  // Payment states matching Ketoko Payment Modal (Image 1)
+  const [dpAmount, setDpAmount] = useState<number>(0);
+  const [cashAccountId, setCashAccountId] = useState("");
+  const [bayarTunai, setBayarTunai] = useState<number>(0);
+  const [bayarDeposit, setBayarDeposit] = useState<number>(0);
+  const [bayarKredit, setBayarKredit] = useState<number>(0);
+
+  const formatRupiahNumber = (num: number): string => {
+    if (!num && num !== 0) return "0";
+    if (Math.round(num) === num) {
+      return num.toLocaleString("id-ID");
+    }
+    return num.toLocaleString("id-ID", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  };
+
+  const parseRupiahNumber = (str: string): number => {
+    if (!str) return 0;
+    const clean = str.replace(/[^0-9,-]/g, "").replace(",", ".");
+    const n = parseFloat(clean);
+    return isNaN(n) ? 0 : n;
+  };
+
+  const handleDpChange = (val: number) => {
+    setDpAmount(val);
+    let newBayarTunai = bayarTunai;
+    if (bayarTunai === totalAkhir || (val > 0 && bayarTunai + val > totalAkhir)) {
+      newBayarTunai = 0;
+      setBayarTunai(0);
+    }
+    const totalPaid = val + newBayarTunai + bayarDeposit;
+    const sisa = Math.max(0, totalAkhir - totalPaid);
+    setBayarKredit(sisa);
+  };
+
+  const handleBayarTunaiChange = (val: number) => {
+    setBayarTunai(val);
+    const totalPaid = dpAmount + val + bayarDeposit;
+    const sisa = Math.max(0, totalAkhir - totalPaid);
+    setBayarKredit(sisa);
+  };
+
+  const handleBayarDepositChange = (val: number) => {
+    setBayarDeposit(val);
+    const totalPaid = dpAmount + bayarTunai + val;
+    const sisa = Math.max(0, totalAkhir - totalPaid);
+    setBayarKredit(sisa);
+  };
+
+  const handleBayarKreditChange = (val: number) => {
+    setBayarKredit(val);
+    const net = Math.max(0, totalAkhir - dpAmount - bayarDeposit - val);
+    setBayarTunai(net);
+  };
 
   // Persistent / Draft Order ID for linking documents
   const [draftOrderId] = useState<string>(() => {
@@ -91,6 +163,7 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
   const [selectedCustomer, setSelectedCustomer] = useState<any | null>(null);
   const [orderStatus, setOrderStatus] = useState("Select...");
   const [warehouseId, setWarehouseId] = useState("");
+  const [salesRepId, setSalesRepId] = useState("");
   const [ppnType, setPpnType] = useState<"Non" | "Include" | "Exclude">("Non");
 
   // PBF Surat Pesanan (SP) & BPOM Compliance Fields
@@ -135,6 +208,14 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
     },
   });
 
+  const { data: salesReps = [] } = useQuery({
+    queryKey: ["sales-reps-so-select"],
+    queryFn: async () => {
+      const res = await api.get("/sales-reps");
+      return res.data?.data || [];
+    },
+  });
+
   const { data: units = [] } = useQuery({
     queryKey: ["units-so-select"],
     queryFn: async () => {
@@ -142,6 +223,42 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
       return res.data?.data || [];
     },
   });
+
+  const { data: accountsList = [] } = useQuery({
+    queryKey: ["cash-bank-accounts-so-select"],
+    queryFn: async () => {
+      const res = await api.get("/accounting/accounts");
+      return (
+        res.data?.data?.filter(
+          (a: any) =>
+            !a.is_header &&
+            (a.subtype === "CASH_BANK" || (a.code && a.code.startsWith("1-11")))
+        ) || []
+      );
+    },
+  });
+
+  // Query General Settings for Margin Profit & HPP Confirmations
+  const { data: generalSettings = {} } = useQuery<Record<string, string>>({
+    queryKey: ["settings-general"],
+    queryFn: async () => {
+      const res = await api.get("/settings/groups/GENERAL");
+      return res.data?.data || {};
+    },
+  });
+
+  // Default cash account
+  useEffect(() => {
+    if (accountsList.length > 0 && !cashAccountId) {
+      const defaultAcc = accountsList.find(
+        (a: any) =>
+          a.code === "1-1110" ||
+          a.code === "1-1121" ||
+          a.name?.toUpperCase().includes("KAS")
+      );
+      setCashAccountId(defaultAcc ? defaultAcc.id : accountsList[0].id);
+    }
+  }, [accountsList, cashAccountId]);
 
   // Query linked documents for this sales order
   const { data: orderDocs = [], refetch: refetchOrderDocs } = useQuery({
@@ -184,6 +301,21 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
     enabled: isEdit && Boolean(orderId),
   });
 
+  // Status apakah pembayaran / DP sudah disubmit
+  // Sesuai aturan: jika pembayaran sudah disubmit, tombol bayar didisable karena pelunasan piutang dilakukan melalui menu Bayar Piutang
+  const isPaymentSubmitted = Boolean(
+    (existingSO && (
+      existingSO.payment_status === "PAID" ||
+      existingSO.payment_status === "PARTIAL" ||
+      existingSO.payment_status === "DP" ||
+      existingSO.payment_status === "TEMPO" ||
+      (Number(existingSO.paid_amount) || 0) > 0 ||
+      (Number(existingSO.dp_amount) || 0) > 0 ||
+      (Number(existingSO.remaining_amount) || 0) > 0
+    )) ||
+    (orderStatus === "SELESAI" || (isEdit && Boolean(orderId)))
+  );
+
   useEffect(() => {
     if (existingSO) {
       setOrderNo(existingSO.order_no || "Auto");
@@ -205,6 +337,20 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
           setPpnType("Exclude");
           setTaxCheckbox(true);
         }
+      }
+      if (existingSO.warehouse_id) {
+        setWarehouseId(existingSO.warehouse_id);
+      }
+      if (existingSO.sales_rep_id) {
+        setSalesRepId(existingSO.sales_rep_id);
+      }
+      if (existingSO.paid_amount !== undefined) {
+        setDpAmount(existingSO.paid_amount);
+        setBayarTunai(existingSO.paid_amount);
+      }
+      if (existingSO.shipping_fee !== undefined && existingSO.shipping_fee > 0) {
+        setExtraFee(existingSO.shipping_fee);
+        setExtraFeeCheckbox(true);
       }
       if (existingSO.discount !== undefined) {
         setNominalDiscount(existingSO.discount);
@@ -300,9 +446,20 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
   const handleSelectItem = (prod: any) => {
     const existingIndex = items.findIndex((it) => it.product_id === prod.id);
     const price = Number(prod.selling_price || prod.unit_price || 0);
+    const purchasePrice = Number(prod.purchase_price || prod.avg_cost || 0);
     const unitName = prod.base_unit?.name || prod.unit_name || "PCS";
     const unitId = prod.base_unit_id || prod.unit_id || (units[0]?.id || "");
     const brand = prod.brand?.name || prod.brand_name || prod.manufacturer || "-";
+
+    const margin = purchasePrice > 0 ? ((price - purchasePrice) / purchasePrice) * 100 : 0;
+    const confirmBelowHpp = generalSettings?.confirm_price_below_hpp === "true";
+    const minProfit = parseFloat(generalSettings?.min_profit_percent || "0");
+
+    if (purchasePrice > 0 && confirmBelowHpp && price < purchasePrice) {
+      alert(`⚠️ Peringatan: Harga jual item "${prod.name}" (Rp ${price.toLocaleString()}) lebih kecil dari Harga Pokok / HPP (Rp ${purchasePrice.toLocaleString()})!`);
+    } else if (purchasePrice > 0 && minProfit > 0 && margin < minProfit) {
+      alert(`⚠️ Peringatan: Margin keuntungan item "${prod.name}" (${margin.toFixed(1)}%) di bawah batas Minimum Profit (${minProfit}%)!`);
+    }
 
     if (existingIndex >= 0) {
       const updated = [...items];
@@ -311,6 +468,8 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
       const lineDisc = (cur.unit_price * (cur.discount_percent / 100)) * newQty;
       cur.qty = newQty;
       cur.line_total = cur.unit_price * newQty - lineDisc;
+      cur.purchase_price = purchasePrice;
+      cur.margin_profit = margin;
       setItems(updated);
       setSelectedRowIndex(existingIndex);
     } else {
@@ -326,6 +485,8 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
         unit_price: price,
         discount_percent: 0,
         line_total: price,
+        purchase_price: purchasePrice,
+        margin_profit: margin,
         stock: Number(prod.total_stock || prod.stock || 0),
         rack: prod.rack || "-",
         drug_classification: prod.drug_classification || "Obat Bebas",
@@ -351,9 +512,68 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
         const updated = { ...item, [field]: value };
         const disc = (updated.unit_price * (updated.discount_percent / 100)) * updated.qty;
         updated.line_total = Math.max(0, updated.unit_price * updated.qty - disc);
+
+        if (field === "unit_price" && updated.purchase_price && updated.purchase_price > 0) {
+          const margin = ((value - updated.purchase_price) / updated.purchase_price) * 100;
+          updated.margin_profit = margin;
+          const confirmBelowHpp = generalSettings?.confirm_price_below_hpp === "true";
+          const minProfit = parseFloat(generalSettings?.min_profit_percent || "0");
+          if (confirmBelowHpp && value < updated.purchase_price) {
+            alert(`⚠️ Peringatan: Harga jual item "${item.name}" (Rp ${value.toLocaleString()}) lebih kecil dari Harga Pokok / HPP (Rp ${updated.purchase_price.toLocaleString()})!`);
+          } else if (minProfit > 0 && margin < minProfit) {
+            alert(`⚠️ Peringatan: Margin keuntungan item "${item.name}" (${margin.toFixed(1)}%) di bawah batas Minimum Profit (${minProfit}%)!`);
+          }
+        }
         return updated;
       })
     );
+  };
+
+  const validateMarginAndHpp = (): boolean => {
+    const confirmBelowHpp = generalSettings?.confirm_price_below_hpp === "true";
+    const minProfit = parseFloat(generalSettings?.min_profit_percent || "0");
+
+    if (confirmBelowHpp) {
+      const belowHpp = items.filter(
+        (it) => it.purchase_price && it.purchase_price > 0 && it.unit_price < it.purchase_price
+      );
+      if (belowHpp.length > 0) {
+        const itemNames = belowHpp
+          .map((it) => `- ${it.name} (Jual: Rp ${it.unit_price.toLocaleString()}, HPP: Rp ${it.purchase_price?.toLocaleString()})`)
+          .join("\n");
+        if (
+          !confirm(
+            `⚠️ Peringatan:\nTerdapat item dengan harga jual di bawah Harga Pokok (HPP):\n${itemNames}\n\nApakah Anda yakin ingin melanjutkan penyimpanan Pesanan Penjualan?`
+          )
+        ) {
+          return false;
+        }
+      }
+    }
+
+    if (minProfit > 0) {
+      const belowMargin = items.filter((it) => {
+        if (!it.purchase_price || it.purchase_price <= 0) return false;
+        const m = ((it.unit_price - it.purchase_price) / it.purchase_price) * 100;
+        return m < minProfit;
+      });
+      if (belowMargin.length > 0) {
+        const itemNames = belowMargin
+          .map((it) => {
+            const m = (((it.unit_price - (it.purchase_price || 0)) / (it.purchase_price || 1)) * 100).toFixed(1);
+            return `- ${it.name} (Margin: ${m}%, Batas Min: ${minProfit}%)`;
+          })
+          .join("\n");
+        if (
+          !confirm(
+            `⚠️ Peringatan:\nTerdapat item dengan margin keuntungan di bawah batas Minimum Profit (${minProfit}%):\n${itemNames}\n\nApakah Anda yakin ingin melanjutkan penyimpanan Pesanan Penjualan?`
+          )
+        ) {
+          return false;
+        }
+      }
+    }
+    return true;
   };
 
   // Remove item row
@@ -403,7 +623,7 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
         throw new Error("Pilih Pelanggan terlebih dahulu.");
       }
       if (items.length === 0) {
-        throw new Error("Tabel item pesanan masih kosong. Silakan klik [+ + Item].");
+        throw new Error("Tabel item pesanan masih kosong. Silakan klik [+ Item].");
       }
 
       const defaultUnit =
@@ -421,10 +641,15 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
       }
 
       const payload = {
+        warehouse_id: warehouseId || undefined,
         customer_id: selectedCustomer.id,
+        sales_rep_id: salesRepId || undefined,
         notes: notes,
         tax_percent: ppnType === "Non" ? 0 : taxPercent,
         discount: calculatedNominalDiscount,
+        shipping_fee: extraFeeCheckbox ? extraFee : 0,
+        paid_amount: dpAmount > 0 ? dpAmount : bayarTunai,
+        cash_account_id: cashAccountId || undefined,
         status: orderStatus !== "Select..." ? orderStatus : "PENDING",
         customer_sp_number: spNumber,
         customer_sp_date: deliveryDate ? new Date(deliveryDate) : undefined,
@@ -461,6 +686,8 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["sales-orders"] });
+      setIsBayarModalOpen(false);
+      setIsSaveConfirmModalOpen(false);
       alert(
         isEdit
           ? "Pesanan Penjualan berhasil diperbarui!"
@@ -470,6 +697,29 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
     },
     onError: (err: any) => {
       alert("Gagal menyimpan Pesanan Penjualan: " + (err.response?.data?.message || err.message));
+    },
+  });
+
+  const convertMutation = useMutation({
+    mutationFn: async () => {
+      if (!orderId) {
+        throw new Error("Silakan simpan pesanan penjualan terlebih dahulu.");
+      }
+      const res = await api.post(`/sales/orders/${orderId}/convert-to-invoice`);
+      return res.data?.data;
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["sales-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["sales"] });
+      alert("Faktur Penjualan berhasil dibuat dan stok dikeluarkan sesuai aturan FEFO!");
+      if (data?.id) {
+        router.push(`/sales/invoices/${data.id}/edit`);
+      } else {
+        router.push("/sales/invoices");
+      }
+    },
+    onError: (err: any) => {
+      alert("Gagal membuat Faktur Penjualan: " + (err.response?.data?.message || err.message));
     },
   });
 
@@ -588,10 +838,10 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
           </div>
         </div>
 
-        {/* ROW 2: Masuk Ke | PPN | Jenis SP Farmasi */}
+        {/* ROW 2: Gudang | Salesman | PPN | Jenis SP Farmasi */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-1.5 items-end">
           {/* Gudang */}
-          <div className="md:col-span-5">
+          <div className="md:col-span-4">
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
               Gudang :
             </label>
@@ -608,8 +858,27 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
             </select>
           </div>
 
-          {/* PPN */}
+          {/* Salesman (Kode Sales) */}
           <div className="md:col-span-3">
+            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
+              Salesman (Kode Sales) :
+            </label>
+            <select
+              value={salesRepId}
+              onChange={(e) => setSalesRepId(e.target.value)}
+              className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 cursor-pointer font-medium"
+            >
+              <option value="">-- Tanpa Sales --</option>
+              {salesReps.map((sr: any) => (
+                <option key={sr.id} value={sr.id}>
+                  {sr.code ? `[${sr.code}] ` : ""}{sr.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* PPN */}
+          <div className="md:col-span-2">
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
               PPN :
             </label>
@@ -625,7 +894,7 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
           </div>
 
           {/* Jenis SP Farmasi (BPOM) */}
-          <div className="md:col-span-4">
+          <div className="md:col-span-3">
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
               Jenis SP Farmasi (BPOM) :
             </label>
@@ -880,7 +1149,7 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
           onClick={() => setIsItemModalOpen(true)}
           className="h-6 px-3 bg-[#e2f8ec] hover:bg-[#c9f1dc] text-[#00a862] border border-[#a2e8c2] font-bold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95"
         >
-          <span className="text-sm font-bold leading-none">+ +</span>
+          <span className="text-sm font-bold leading-none">+</span>
           <span>Item</span>
         </button>
 
@@ -1163,12 +1432,28 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
             <span>Tambah</span>
           </button>
 
-          {/* 💾 Simpan */}
+          {/* 💾 Simpan (Membuka Modal Persetujuan Simpan) */}
           <button
             type="button"
-            disabled={saveMutation.isPending}
-            onClick={() => saveMutation.mutate()}
-            className="h-6 px-3 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-50"
+            disabled={saveMutation.isPending || isGudang}
+            onClick={() => {
+              if (isGudang) {
+                alert("Akses ditolak: Petugas Gudang tidak berwenang mencatat atau mengubah Pesanan Penjualan.");
+                return;
+              }
+              if (!selectedCustomer?.id) {
+                alert("Pilih Pelanggan terlebih dahulu.");
+                return;
+              }
+              if (items.length === 0) {
+                alert("Tabel item pesanan masih kosong. Silakan klik [+ Item].");
+                return;
+              }
+              if (!validateMarginAndHpp()) return;
+              setIsSaveConfirmModalOpen(true);
+            }}
+            className="h-6 px-3 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-50 cursor-pointer"
+            title={isGudang ? "Petugas Gudang tidak berwenang mencatat/mengubah SO" : "Simpan Pesanan Penjualan"}
           >
             <Save className="w-3 h-3" />
             <span>{saveMutation.isPending ? "Menyimpan..." : "Simpan"}</span>
@@ -1178,7 +1463,7 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
           <button
             type="button"
             onClick={handleResetForm}
-            className="h-6 px-3 bg-white hover:bg-rose-50 border border-slate-300 text-rose-600 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition"
+            className="h-6 px-3 bg-white hover:bg-rose-50 border border-slate-300 text-rose-600 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition cursor-pointer"
           >
             <Trash2 className="w-3 h-3" />
             <span>Hapus</span>
@@ -1188,20 +1473,49 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
           <button
             type="button"
             onClick={() => alert("Mencetak Surat Pesanan Penjualan...")}
-            className="h-6 px-3 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition"
+            className="h-6 px-3 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition cursor-pointer"
           >
             <Printer className="w-3 h-3" />
             <span>Cetak</span>
           </button>
 
-          {/* 💳 Bayar */}
+          {/* 💳 Bayar / DP (Membuka Modal Pembayaran) */}
           <button
             type="button"
-            onClick={() => alert("Pesanan Penjualan ini belum menjadi Faktur Penjualan.")}
-            className="h-6 px-3 bg-white hover:bg-amber-50 border border-amber-400 text-amber-700 font-bold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition"
+            disabled={isPaymentSubmitted}
+            onClick={() => {
+              if (isPaymentSubmitted) {
+                alert("Pembayaran/DP pesanan telah disubmit. Pelunasan piutang diproses melalui menu Bayar Piutang.");
+                return;
+              }
+              if (!selectedCustomer?.id) {
+                alert("Pilih Pelanggan terlebih dahulu sebelum mengisi pembayaran/DP.");
+                return;
+              }
+              if (items.length === 0) {
+                alert("Silakan tambahkan item pesanan terlebih dahulu sebelum mengisi pembayaran/DP.");
+                return;
+              }
+              setIsBayarModalOpen(true);
+            }}
+            className={`h-6 px-3 font-bold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition ${
+              isPaymentSubmitted
+                ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60"
+                : "bg-white hover:bg-emerald-50 border border-emerald-500 text-emerald-700 cursor-pointer"
+            }`}
+            title={
+              isPaymentSubmitted
+                ? "Pembayaran/DP pesanan telah disubmit. Pelunasan piutang diproses melalui menu Bayar Piutang."
+                : "Bayar DP / Pembayaran Pesanan"
+            }
           >
-            <CreditCard className="w-3 h-3 text-amber-600" />
-            <span>Bayar</span>
+            <CreditCard className={`w-3 h-3 ${isPaymentSubmitted ? "text-slate-400" : "text-emerald-600"}`} />
+            <span>Bayar / DP</span>
+            {dpAmount > 0 && (
+              <span className={`rounded px-1 py-0.2 text-[9px] ${isPaymentSubmitted ? "bg-slate-400 text-white" : "bg-emerald-600 text-white"}`}>
+                {formatCurrency(dpAmount)}
+              </span>
+            )}
           </button>
         </div>
 
@@ -1294,9 +1608,9 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
       {isHargaJualModalOpen && selectedItem && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-2xs flex items-center justify-center p-3">
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-sm overflow-hidden text-xs">
-            <div className="px-3 py-2 bg-slate-100 border-b border-slate-200 font-bold text-slate-800 flex justify-between items-center">
+            <div className="px-4 py-2 bg-[#00c875] text-white font-bold flex justify-between items-center">
               <span>Tingkatan Harga Jual: {selectedItem.name}</span>
-              <button onClick={() => setIsHargaJualModalOpen(false)}>
+              <button onClick={() => setIsHargaJualModalOpen(false)} className="text-white/80 hover:text-white">
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -1347,9 +1661,9 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
       {isInfoRowModalOpen && selectedItem && (
         <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-2xs flex items-center justify-center p-3">
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden text-xs">
-            <div className="px-3 py-2 bg-slate-100 border-b border-slate-200 font-bold text-slate-800 flex justify-between items-center">
+            <div className="px-4 py-2 bg-[#00c875] text-white font-bold flex justify-between items-center">
               <span>Informasi Obat: {selectedItem.name}</span>
-              <button onClick={() => setIsInfoRowModalOpen(false)}>
+              <button onClick={() => setIsInfoRowModalOpen(false)} className="text-white/80 hover:text-white">
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -1377,7 +1691,7 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
               <button
                 type="button"
                 onClick={() => setIsInfoRowModalOpen(false)}
-                className="h-6 px-3 bg-slate-800 text-white rounded text-xs font-semibold"
+                className="h-6 px-3 bg-[#00c875] text-white rounded text-xs font-semibold hover:bg-[#00b066]"
               >
                 Tutup
               </button>
@@ -1385,6 +1699,362 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
           </div>
         </div>
       )}
+
+      {/* MODAL 6: PEMBAYARAN / DP PESANAN PENJUALAN (Identik dengan Gambar 1) */}
+      {isBayarModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-3">
+          <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-lg overflow-hidden text-xs flex flex-col animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="px-4 py-2.5 bg-[#00c875] text-white flex justify-between items-center">
+              <span className="font-bold text-white text-sm flex items-center gap-1.5">
+                <CreditCard className="w-4 h-4 text-white" />
+                Pembayaran / DP Pesanan
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsBayarModalOpen(false)}
+                className="p-1 text-white/80 hover:text-white hover:bg-white/20 rounded transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 space-y-2.5">
+              {/* 1. TOTAL TAGIHAN (Pink Box matching Image 1) */}
+              <div className="bg-[#fce7f3] border-2 border-dashed border-pink-300 rounded-lg px-4 py-3 flex items-center justify-between shadow-2xs">
+                <span className="text-base font-bold text-slate-800 tracking-wide">Total :</span>
+                <span className="text-3xl font-black font-mono text-slate-900 tracking-tight">
+                  Rp {formatRupiahNumber(totalAkhir)}
+                </span>
+              </div>
+
+              {/* 2. FORM FIELDS */}
+              <div className="space-y-1.5 pt-1">
+                {/* DP PO/Pesanan */}
+                <div className="flex items-center gap-2">
+                  <label className="w-32 text-right font-medium text-slate-700 shrink-0">
+                    DP PO/Pesanan :
+                  </label>
+                  <div className="flex-1 relative flex items-center">
+                    <span className="absolute left-2.5 text-xs text-slate-400 font-mono font-bold select-none">Rp</span>
+                    <input
+                      type="text"
+                      value={formatRupiahNumber(dpAmount)}
+                      placeholder="0"
+                      onChange={(e) => handleDpChange(parseRupiahNumber(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      className="w-full h-7 pl-9 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => handleDpChange(Math.round(Number(totalAkhir) * 0.3))}
+                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50 cursor-pointer"
+                      title="Hitung DP 30%"
+                    >
+                      <Calculator className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Kas / Bank */}
+                <div className="flex items-center gap-2">
+                  <label className="w-32 text-right font-medium text-slate-700 shrink-0">
+                    Kas / Bank :
+                  </label>
+                  <div className="flex-1">
+                    <SearchableAccountSelect
+                      accounts={accountsList}
+                      value={cashAccountId}
+                      onChange={(val) => setCashAccountId(val)}
+                      placeholder="Pilih Akun Kas / Bank..."
+                      buttonClassName="h-7 text-xs font-semibold font-mono"
+                    />
+                  </div>
+                </div>
+
+                {/* Bayar Tunai */}
+                <div>
+                  <div className="flex items-center gap-2">
+                    <label className="w-32 text-right font-medium text-slate-700 shrink-0">
+                      Bayar Tunai :
+                    </label>
+                    <div className="flex-1 relative flex items-center">
+                      <span className="absolute left-2.5 text-xs text-slate-400 font-mono font-bold select-none">Rp</span>
+                      <input
+                        type="text"
+                        autoFocus
+                        value={formatRupiahNumber(bayarTunai)}
+                        placeholder="0"
+                        onChange={(e) => handleBayarTunaiChange(parseRupiahNumber(e.target.value))}
+                        onFocus={(e) => e.target.select()}
+                        className="w-full h-7 pl-9 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                      />
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() => {
+                          const fullCash = Math.max(0, totalAkhir - dpAmount - bayarDeposit);
+                          handleBayarTunaiChange(fullCash);
+                        }}
+                        className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50 cursor-pointer"
+                        title="Isi Tunai Penuh"
+                      >
+                        <Calculator className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Preset Quick Buttons matching Image 1 */}
+                  <div className="flex items-center justify-end gap-1.5 pt-0.5 pr-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const fullCash = Math.max(0, totalAkhir - dpAmount - bayarDeposit);
+                        handleBayarTunaiChange(fullCash);
+                      }}
+                      className="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 rounded text-[10px] font-semibold transition cursor-pointer"
+                    >
+                      Uang Pas (Lunas)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const net = Math.max(0, totalAkhir - dpAmount - bayarDeposit);
+                        const half = Math.round(net * 0.5 * 100) / 100;
+                        handleBayarTunaiChange(half);
+                      }}
+                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded text-[10px] font-medium transition cursor-pointer"
+                    >
+                      50% Tunai
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleBayarKreditChange(Math.max(0, totalAkhir - dpAmount - bayarDeposit));
+                      }}
+                      className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 rounded text-[10px] font-medium transition cursor-pointer"
+                    >
+                      Kredit / Tempo (Rp 0)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Bayar Deposit */}
+                <div className="flex items-center gap-2">
+                  <label className="w-32 text-right font-medium text-slate-700 shrink-0">
+                    Bayar Deposit :
+                  </label>
+                  <div className="flex-1 relative flex items-center">
+                    <span className="absolute left-2.5 text-xs text-slate-400 font-mono font-bold select-none">Rp</span>
+                    <input
+                      type="text"
+                      value={formatRupiahNumber(bayarDeposit)}
+                      placeholder="0"
+                      onChange={(e) => handleBayarDepositChange(parseRupiahNumber(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      className="w-full h-7 pl-9 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => handleBayarDepositChange(0)}
+                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50 cursor-pointer"
+                      title="Reset Deposit"
+                    >
+                      <Calculator className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Bayar Kredit */}
+                <div className="flex items-center gap-2">
+                  <label className="w-32 text-right font-medium text-slate-700 shrink-0">
+                    Bayar Kredit :
+                  </label>
+                  <div className="flex-1 relative flex items-center">
+                    <span className="absolute left-2.5 text-xs text-slate-400 font-mono font-bold select-none">Rp</span>
+                    <input
+                      type="text"
+                      value={formatRupiahNumber(bayarKredit)}
+                      placeholder="0"
+                      onChange={(e) => handleBayarKreditChange(parseRupiahNumber(e.target.value))}
+                      onFocus={(e) => e.target.select()}
+                      className="w-full h-7 pl-9 pr-8 text-right font-mono font-bold text-xs border border-slate-300 rounded focus:border-sky-500 focus:outline-none bg-white"
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => {
+                        const fullKredit = Math.max(0, totalAkhir - dpAmount - bayarDeposit);
+                        handleBayarKreditChange(fullKredit);
+                      }}
+                      className="absolute right-1 w-6 h-5 flex items-center justify-center text-slate-400 hover:text-slate-600 border border-slate-200 rounded bg-slate-50 cursor-pointer"
+                      title="Jadikan Piutang Penuh"
+                    >
+                      <Calculator className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. TOTAL BAYAR (Green Box matching Image 1) */}
+              <div className="bg-[#22c55e] text-white rounded-lg px-4 py-2 flex items-center justify-between shadow-2xs">
+                <span className="text-sm font-bold tracking-wide">Total :</span>
+                <span className="text-2xl font-black font-mono tracking-tight">
+                  Rp {formatRupiahNumber((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0))}
+                </span>
+              </div>
+
+              {/* 4. SISA (Orange Box matching Image 1) */}
+              <div className="bg-[#f97316] text-white rounded-lg px-4 py-2 flex items-center justify-between shadow-2xs">
+                <span className="text-sm font-bold tracking-wide">Sisa :</span>
+                <span className="text-2xl font-black font-mono tracking-tight">
+                  Rp {formatRupiahNumber(Math.max(
+                    0,
+                    totalAkhir - ((Number(dpAmount) || 0) + (Number(bayarTunai) || 0) + (Number(bayarDeposit) || 0))
+                  ))}
+                </span>
+              </div>
+            </div>
+
+            {/* 5. ACTION BUTTONS matching Image 1 */}
+            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex justify-end items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsBayarModalOpen(false);
+                  saveMutation.mutate();
+                }}
+                disabled={saveMutation.isPending}
+                className="h-7 px-3.5 bg-white hover:bg-emerald-50 border border-slate-300 text-slate-700 font-semibold rounded text-xs inline-flex items-center gap-1.5 shadow-2xs transition active:scale-95 disabled:opacity-50"
+              >
+                <Save className="w-3.5 h-3.5 text-sky-600" />
+                <span>Simpan</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsBayarModalOpen(false);
+                  saveMutation.mutate();
+                  alert("Mencetak Bukti Pembayaran / DP Pesanan...");
+                }}
+                disabled={saveMutation.isPending}
+                className="h-7 px-3.5 bg-white hover:bg-sky-50 border border-slate-300 text-slate-700 font-semibold rounded text-xs inline-flex items-center gap-1.5 shadow-2xs transition active:scale-95 disabled:opacity-50"
+              >
+                <Printer className="w-3.5 h-3.5 text-blue-600" />
+                <span>Simpan + Cetak</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsBayarModalOpen(false)}
+                className="h-7 px-3.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 font-semibold rounded text-xs inline-flex items-center gap-1.5 shadow-2xs transition active:scale-95 cursor-pointer"
+              >
+                <Undo2 className="w-3.5 h-3.5 text-amber-600" />
+                <span>Kembali</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PERSETUJUAN SIMPAN (Bukan Modal Pembayaran) */}
+      {isSaveConfirmModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-2xs p-3 animate-in fade-in duration-150">
+          <div className="bg-white rounded-lg shadow-2xl border border-slate-300 w-full max-w-md overflow-hidden">
+            {/* Header Ketoko Green */}
+            <div className="px-4 py-2.5 bg-[#00c875] text-white flex justify-between items-center">
+              <span className="font-bold text-sm flex items-center gap-1.5">
+                <Save className="w-4 h-4 text-white" />
+                <span>Konfirmasi Simpan Pesanan Penjualan</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsSaveConfirmModalOpen(false)}
+                className="p-1 text-white/80 hover:text-white rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-4 space-y-3 text-xs">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-emerald-700">
+                  <Check className="w-5 h-5 stroke-[2.5]" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-800 text-sm">Simpan Dokumen Pesanan?</h4>
+                  <p className="text-slate-500 text-[11px] mt-0.5">
+                    Apakah Anda yakin ingin menyimpan pesanan penjualan ini ke sistem?
+                  </p>
+                </div>
+              </div>
+
+              {/* Ringkasan Dokumen */}
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5 text-[11px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">No. Transaksi :</span>
+                  <span className="font-mono font-bold text-slate-800">{orderNo || "Auto"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Tanggal :</span>
+                  <span className="text-slate-700">{orderDate}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Pelanggan :</span>
+                  <span className="font-semibold text-slate-800">{selectedCustomer?.name || "-"}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Jumlah Item :</span>
+                  <span className="font-medium text-slate-800">{items.length} item obat</span>
+                </div>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 text-xs font-bold">
+                  <span className="text-slate-700">Total Nilai Pesanan :</span>
+                  <span className="text-emerald-700">{formatCurrency(totalAkhir)}</span>
+                </div>
+              </div>
+
+              <div className="p-2 bg-amber-50 border border-amber-200 rounded text-[11px] text-amber-800 flex items-center gap-1.5">
+                <span>💡</span>
+                <span>
+                  Pembayaran uang muka (DP) atau pelunasan dapat dilakukan terpisah melalui tombol <strong>Bayar / DP</strong>.
+                </span>
+              </div>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setIsSaveConfirmModalOpen(false)}
+                className="h-7 px-3.5 border border-slate-300 rounded hover:bg-slate-100 text-slate-700 font-medium transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={saveMutation.isPending || isGudang}
+                onClick={() => {
+                  if (isGudang) {
+                    alert("Akses ditolak: Petugas Gudang tidak berwenang mencatat atau mengubah Pesanan Penjualan.");
+                    return;
+                  }
+                  saveMutation.mutate();
+                }}
+                className="h-7 px-4 bg-[#00c875] hover:bg-[#00b066] text-white font-bold rounded shadow-2xs transition active:scale-95 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>{saveMutation.isPending ? "Menyimpan..." : "Ya, Simpan Data"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

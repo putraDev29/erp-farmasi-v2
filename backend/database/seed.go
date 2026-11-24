@@ -216,12 +216,19 @@ func SeedInitialData(db *gorm.DB) error {
 
 		{"4-0000", "PENDAPATAN", "REVENUE", "HEADER", "CREDIT", true},
 		{"4-1000", "Pendapatan Penjualan Obat", "REVENUE", "SALES", "CREDIT", false},
+		{"4-1100", "PENDAPATAN JUAL", "REVENUE", "SALES", "CREDIT", false},
+		{"4-1200", "POTONGAN PENJUALAN", "REVENUE", "SALES", "DEBIT", false},
+		{"4-1300", "RETUR PENJUALAN", "REVENUE", "SALES", "DEBIT", false},
+		{"4-1400", "KERINGANAN PIUTANG", "REVENUE", "SALES", "DEBIT", false},
 		{"4-2000", "Pendapatan Jasa Apotek / Resep", "REVENUE", "SALES", "CREDIT", false},
 		{"4-9000", "Pendapatan Lain-lain", "REVENUE", "SALES", "CREDIT", false},
 
 		{"5-0000", "BEBAN POKOK PENJUALAN (HPP)", "EXPENSE", "HEADER", "DEBIT", true},
 		{"5-1000", "HPP Penjualan Obat", "EXPENSE", "COGS", "DEBIT", false},
+		{"5-1100", "POTONGAN PEMBELIAN", "EXPENSE", "COGS", "CREDIT", false},
+		{"5-1300", "HARGA POKOK PENJUALAN", "EXPENSE", "COGS", "DEBIT", false},
 		{"5-2000", "Biaya Tenaga Kerja Perakitan", "EXPENSE", "COGS", "DEBIT", false},
+		{"5-2100", "KERINGANAN HUTANG", "EXPENSE", "COGS", "CREDIT", false},
 
 		{"6-0000", "BEBAN OPERASIONAL", "EXPENSE", "HEADER", "DEBIT", true},
 		{"6-1000", "Beban Gaji & Tunjangan", "EXPENSE", "OPERATING_EXPENSE", "DEBIT", false},
@@ -246,6 +253,9 @@ func SeedInitialData(db *gorm.DB) error {
 			db.Create(&account)
 		}
 	}
+
+	// 8b. Seed & Ensure Accounts for Discounts (POTONGAN PEMBELIAN, KERINGANAN HUTANG, POTONGAN PENJUALAN, KERINGANAN PIUTANG)
+	EnsureDiscountAccounts(db)
 
 	// 9. Seed Categories
 	categories := []string{
@@ -758,6 +768,9 @@ func SeedInitialData(db *gorm.DB) error {
 	// 28. Seed Sample Sales if empty
 	SeedSampleSales(db)
 
+	// 29. Seed Comprehensive Activity Logs for all categories
+	SeedActivityLogs(db, company.ID, adminUser.ID)
+
 	log.Println("[Seed] All initial data seeded successfully!")
 	return nil
 }
@@ -818,6 +831,28 @@ func SeedDrugExpiryDates(db *gorm.DB) {
 				"batch_number": s.BatchNumber,
 				"expired_date": expDate,
 			})
+
+			// Seed ProductBatch for FEFO fulfillment
+			var balances []models.StockBalance
+			db.Where("product_id = ?", prod.ID).Find(&balances)
+			for _, bal := range balances {
+				var count int64
+				db.Model(&models.ProductBatch{}).Where("warehouse_id = ? AND product_id = ? AND batch_number = ?", bal.WarehouseID, prod.ID, s.BatchNumber).Count(&count)
+				if count == 0 {
+					db.Create(&models.ProductBatch{
+						CompanyID:   prod.CompanyID,
+						BranchID:    bal.WarehouseID, // default branch fallback
+						WarehouseID: bal.WarehouseID,
+						ProductID:   prod.ID,
+						BatchNumber: s.BatchNumber,
+						ExpiredDate: expDate,
+						InitialQty:  bal.Qty,
+						CurrentQty:  bal.AvailableQty,
+						CostPrice:   bal.AvgCost,
+						DocNo:       "SEED-BATCH",
+					})
+				}
+			}
 		}
 	}
 	log.Println("[Seed] Farmasi Drug Expiry dates & Batch numbers initialized!")
@@ -1160,4 +1195,135 @@ func SeedSampleSales(db *gorm.DB) {
 		}
 	}
 	log.Println("[Seed] Sample Sales transactions seeded successfully!")
+}
+
+// EnsureDiscountAccounts guarantees the presence of POTONGAN PEMBELIAN, KERINGANAN HUTANG, POTONGAN PENJUALAN, and KERINGANAN PIUTANG accounts
+func EnsureDiscountAccounts(db *gorm.DB) {
+	var companies []models.Company
+	db.Find(&companies)
+
+	for _, comp := range companies {
+		// 1. Akun POTONGAN PEMBELIAN (5-1100)
+		var pHeader models.Account
+		_ = db.Where("company_id = ? AND code = '5-0000'", comp.ID).First(&pHeader).Error
+		var pParentID *uuid.UUID
+		if pHeader.ID != uuid.Nil {
+			pParentID = &pHeader.ID
+		}
+
+		var accPurchDisc models.Account
+		if err := db.Where("company_id = ? AND code = '5-1100'", comp.ID).First(&accPurchDisc).Error; err != nil {
+			accPurchDisc = models.Account{
+				CompanyID:     comp.ID,
+				Code:          "5-1100",
+				Name:          "POTONGAN PEMBELIAN",
+				Type:          "EXPENSE",
+				Subtype:       "COGS",
+				NormalBalance: "CREDIT",
+				ParentID:      pParentID,
+				IsHeader:      false,
+				IsActive:      true,
+			}
+			db.Create(&accPurchDisc)
+		} else if accPurchDisc.Name != "POTONGAN PEMBELIAN" {
+			db.Model(&accPurchDisc).Update("name", "POTONGAN PEMBELIAN")
+		}
+
+		// 2. Akun KERINGANAN HUTANG (5-2100)
+		var accKeringananHutang models.Account
+		if err := db.Where("company_id = ? AND code = '5-2100'", comp.ID).First(&accKeringananHutang).Error; err != nil {
+			accKeringananHutang = models.Account{
+				CompanyID:     comp.ID,
+				Code:          "5-2100",
+				Name:          "KERINGANAN HUTANG",
+				Type:          "EXPENSE",
+				Subtype:       "COGS",
+				NormalBalance: "CREDIT",
+				ParentID:      pParentID,
+				IsHeader:      false,
+				IsActive:      true,
+			}
+			db.Create(&accKeringananHutang)
+		} else if accKeringananHutang.Name != "KERINGANAN HUTANG" {
+			db.Model(&accKeringananHutang).Update("name", "KERINGANAN HUTANG")
+		}
+
+		// 3. Akun POTONGAN PENJUALAN (4-1200)
+		var sHeader models.Account
+		_ = db.Where("company_id = ? AND code = '4-0000'", comp.ID).First(&sHeader).Error
+		var sParentID *uuid.UUID
+		if sHeader.ID != uuid.Nil {
+			sParentID = &sHeader.ID
+		}
+
+		var accSalesDisc models.Account
+		if err := db.Where("company_id = ? AND code = '4-1200'", comp.ID).First(&accSalesDisc).Error; err != nil {
+			accSalesDisc = models.Account{
+				CompanyID:     comp.ID,
+				Code:          "4-1200",
+				Name:          "POTONGAN PENJUALAN",
+				Type:          "REVENUE",
+				Subtype:       "SALES",
+				NormalBalance: "DEBIT",
+				ParentID:      sParentID,
+				IsHeader:      false,
+				IsActive:      true,
+			}
+			db.Create(&accSalesDisc)
+		} else if accSalesDisc.Name != "POTONGAN PENJUALAN" {
+			db.Model(&accSalesDisc).Update("name", "POTONGAN PENJUALAN")
+		}
+
+		// 4. Akun KERINGANAN PIUTANG (4-1400)
+		var accKeringananPiutang models.Account
+		if err := db.Where("company_id = ? AND code = '4-1400'", comp.ID).First(&accKeringananPiutang).Error; err != nil {
+			accKeringananPiutang = models.Account{
+				CompanyID:     comp.ID,
+				Code:          "4-1400",
+				Name:          "KERINGANAN PIUTANG",
+				Type:          "REVENUE",
+				Subtype:       "SALES",
+				NormalBalance: "DEBIT",
+				ParentID:      sParentID,
+				IsHeader:      false,
+				IsActive:      true,
+			}
+			db.Create(&accKeringananPiutang)
+		} else if accKeringananPiutang.Name != "KERINGANAN PIUTANG" {
+			db.Model(&accKeringananPiutang).Update("name", "KERINGANAN PIUTANG")
+		}
+
+		// Update / Seed default account_settings
+		upsertSetting := func(key string, accID uuid.UUID, desc string) {
+			var s models.AccountSetting
+			if err := db.Where("company_id = ? AND key = ?", comp.ID, key).First(&s).Error; err != nil {
+				db.Create(&models.AccountSetting{
+					CompanyID:   comp.ID,
+					Key:         key,
+					AccountID:   accID,
+					Description: desc,
+				})
+			} else {
+				db.Model(&s).Updates(map[string]interface{}{
+					"account_id":  accID,
+					"description": desc,
+				})
+			}
+		}
+
+		if accPurchDisc.ID != uuid.Nil {
+			upsertSetting("purch_price_discount", accPurchDisc.ID, "Akun Potongan Pembelian (POTONGAN PEMBELIAN)")
+		}
+		if accKeringananHutang.ID != uuid.Nil {
+			upsertSetting("purch_discount", accKeringananHutang.ID, "Akun Keringanan Hutang (KERINGANAN HUTANG)")
+			upsertSetting("ap_discount", accKeringananHutang.ID, "Akun Potongan Hutang (KERINGANAN HUTANG)")
+		}
+		if accSalesDisc.ID != uuid.Nil {
+			upsertSetting("sales_price_discount", accSalesDisc.ID, "Akun Potongan Penjualan (POTONGAN PENJUALAN)")
+		}
+		if accKeringananPiutang.ID != uuid.Nil {
+			upsertSetting("sales_discount", accKeringananPiutang.ID, "Akun Keringanan Piutang (KERINGANAN PIUTANG)")
+			upsertSetting("ar_discount", accKeringananPiutang.ID, "Akun Potongan Piutang (KERINGANAN PIUTANG)")
+		}
+	}
 }

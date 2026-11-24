@@ -31,6 +31,7 @@ interface CartItem {
   discount: number;
   total_amount: number;
   available_stock: number;
+  purchase_price?: number;
 }
 
 export default function PosPage() {
@@ -74,13 +75,14 @@ export default function PosPage() {
       const res = await api.get("/settings/groups/GENERAL");
       return res.data?.data || {};
     },
+    staleTime: 0,
   });
 
-  // Fetch products with stock
+  // Fetch products with stock (Only Retail OTC for POS Cashier)
   const { data: productsData } = useQuery({
     queryKey: ["pos-products", searchTerm, warehouseID],
     queryFn: async () => {
-      const res = await api.get(`/products?search=${encodeURIComponent(searchTerm)}&page_size=30`);
+      const res = await api.get(`/products?search=${encodeURIComponent(searchTerm)}&retail_only=true&page_size=30`);
       return res.data?.data?.items || [];
     },
   });
@@ -169,6 +171,7 @@ export default function PosPage() {
           unit_name: prod.base_unit?.name || "Pcs",
           qty: 1,
           unit_price: prod.selling_price || 0,
+          purchase_price: purchasePrice,
           discount: 0,
           total_amount: prod.selling_price || 0,
           available_stock: 999,
@@ -217,9 +220,59 @@ export default function PosPage() {
   };
 
   const handleProcessPayment = async () => {
-    if (!warehouseID || !customerID) {
-      setErrorMsg("Pilih gudang dan pelanggan terlebih dahulu");
+    if (!warehouseID) {
+      setErrorMsg("Pilih gudang terlebih dahulu");
       return;
+    }
+
+    const confirmBelowHpp = generalSettings?.confirm_price_below_hpp === "true";
+    const minProfit = parseFloat(generalSettings?.min_profit_percent || "0");
+
+    if (confirmBelowHpp) {
+      const belowHpp = cart.filter(
+        (it) => it.purchase_price && it.purchase_price > 0 && it.unit_price < it.purchase_price
+      );
+      if (belowHpp.length > 0) {
+        const itemNames = belowHpp
+          .map(
+            (it) =>
+              `- ${it.name} (Jual: Rp ${it.unit_price.toLocaleString()}, HPP: Rp ${it.purchase_price?.toLocaleString()})`
+          )
+          .join("\n");
+        if (
+          !confirm(
+            `⚠️ Peringatan:\nTerdapat item kasir dengan harga jual di bawah Harga Pokok (HPP):\n${itemNames}\n\nApakah Anda yakin ingin melanjutkan transaksi kasir?`
+          )
+        ) {
+          return;
+        }
+      }
+    }
+
+    if (minProfit > 0) {
+      const belowMargin = cart.filter((it) => {
+        if (!it.purchase_price || it.purchase_price <= 0) return false;
+        const m = ((it.unit_price - it.purchase_price) / it.purchase_price) * 100;
+        return m < minProfit;
+      });
+      if (belowMargin.length > 0) {
+        const itemNames = belowMargin
+          .map((it) => {
+            const m = (
+              ((it.unit_price - (it.purchase_price || 0)) / (it.purchase_price || 1)) *
+              100
+            ).toFixed(1);
+            return `- ${it.name} (Margin: ${m}%, Batas Min: ${minProfit}%)`;
+          })
+          .join("\n");
+        if (
+          !confirm(
+            `⚠️ Peringatan:\nTerdapat item kasir dengan margin di bawah batas Minimum Profit (${minProfit}%):\n${itemNames}\n\nApakah Anda yakin ingin melanjutkan transaksi kasir?`
+          )
+        ) {
+          return;
+        }
+      }
     }
 
     setSubmitting(true);
@@ -227,7 +280,7 @@ export default function PosPage() {
 
     const payload = {
       warehouse_id: warehouseID,
-      customer_id: customerID,
+      customer_id: customerID || undefined,
       type: "POS",
       tax_percent: 11,
       discount: 0,
@@ -372,6 +425,7 @@ export default function PosPage() {
               onChange={(e) => setCustomerID(e.target.value)}
               className="w-full py-1.5 px-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium focus:ring-1 focus:ring-emerald-500"
             >
+              <option value="">-- Tanpa Pelanggan (Umum / Cash) --</option>
               {customers?.map((c: any) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -616,7 +670,8 @@ export default function PosPage() {
           addToCart(prod);
           setIsCariModalOpen(false);
         }}
-        saleType="APOTEK"
+        saleType="RETAIL_KASIR"
+        retailOnly={true}
         warehouseId={warehouseID || undefined}
       />
     </div>

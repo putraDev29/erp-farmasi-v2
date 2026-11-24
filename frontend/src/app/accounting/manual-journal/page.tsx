@@ -6,6 +6,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, Trash2, CheckCircle2, AlertCircle, ArrowLeft } from "lucide-react";
 import Link from "next/link";
 import { api, formatCurrency } from "@/lib/api";
+import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
 interface EntryRow {
   account_code: string;
@@ -150,17 +151,12 @@ export default function ManualJournalPage() {
               <div key={idx} className="flex flex-col sm:flex-row gap-1.5 items-center bg-slate-50 p-1.5 rounded border border-slate-200/70 text-[11px]">
                 {/* Account select */}
                 <div className="w-full sm:w-1/3">
-                  <select
+                  <SearchableAccountSelect
+                    accounts={accounts || []}
                     value={row.account_code}
-                    onChange={(e) => updateRow(idx, "account_code", e.target.value)}
-                    className="w-full h-6 px-1.5 bg-white border border-slate-300 rounded text-[11px]"
-                  >
-                    {accounts?.map((a: any) => (
-                      <option key={a.id} value={a.code}>
-                        {a.code} - {a.name}
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(val, acc) => updateRow(idx, "account_code", acc?._code || val)}
+                    placeholder="Pilih / Cari Akun Jurnal..."
+                  />
                 </div>
 
                 {/* Line note */}

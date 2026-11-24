@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import ItemSearchModal from "@/components/inventory/ItemSearchModal";
+import { sortTableData } from "@/components/common/TableSortSelect";
 
 export default function StockMinimumPage() {
   const router = useRouter();
@@ -26,8 +27,9 @@ export default function StockMinimumPage() {
   const [selectedType, setSelectedType] = useState("-- Semua Jenis --");
   const [selectedBrand, setSelectedBrand] = useState("-- Semua Merek --");
   const [selectedSupplier, setSelectedSupplier] = useState("");
-  const [sortBy, setSortBy] = useState("Kode Item");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [warehouseId, setWarehouseId] = useState("");
 
   // Pagination
@@ -124,30 +126,11 @@ export default function StockMinimumPage() {
     }
 
     // Sort
-    list.sort((a: any, b: any) => {
-      let valA = "";
-      let valB = "";
-      if (sortBy === "Kode Item") {
-        valA = a.code || "";
-        valB = b.code || "";
-      } else if (sortBy === "Nama Item") {
-        valA = a.name || "";
-        valB = b.name || "";
-      } else if (sortBy === "Stok") {
-        return sortDir === "asc"
-          ? (a.stock || 0) - (b.stock || 0)
-          : (b.stock || 0) - (a.stock || 0);
-      } else if (sortBy === "Stok Min") {
-        return sortDir === "asc"
-          ? (a.min_stock || 0) - (b.min_stock || 0)
-          : (b.min_stock || 0) - (a.min_stock || 0);
-      }
-
-      const comp = valA.localeCompare(valB);
-      return sortDir === "asc" ? comp : -comp;
+    return sortTableData(list, sortOption, {
+      getCode: (p: any) => p.code,
+      getName: (p: any) => p.name,
+      getDate: (p: any) => p.created_at,
     });
-
-    return list;
   }, [
     products,
     itemFrom,
@@ -155,8 +138,7 @@ export default function StockMinimumPage() {
     selectedType,
     selectedBrand,
     selectedSupplier,
-    sortBy,
-    sortDir,
+    sortOption,
   ]);
 
   const totalPages = Math.max(1, Math.ceil(filteredProducts.length / pageSize));
@@ -347,26 +329,20 @@ export default function StockMinimumPage() {
 
           <div>
             <label className="block text-slate-600 font-semibold mb-0.5">Urut Berdasar :</label>
-            <div className="flex gap-1">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500"
-              >
-                <option value="Kode Item">Kode Item</option>
-                <option value="Nama Item">Nama Item</option>
-                <option value="Stok">Stok</option>
-                <option value="Stok Min">Stok Min</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
-                className="h-6 w-6 border border-slate-300 rounded bg-white hover:bg-slate-100 flex items-center justify-center text-slate-600 shrink-0"
-                title={`Arah urutan: ${sortDir.toUpperCase()}`}
-              >
-                <ArrowUpDown className="w-3 h-3" />
-              </button>
-            </div>
+            <select
+              value={sortOption}
+              onChange={(e) => {
+                setSortOption(e.target.value);
+                setPage(1);
+              }}
+              className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500 font-medium shadow-2xs truncate cursor-pointer"
+            >
+              <option value="created_at_desc">1. Urutan sesuai waktu input paling atas</option>
+              <option value="code_asc">2. Kode (A - Z)</option>
+              <option value="code_desc">3. Kode (Z - A)</option>
+              <option value="name_asc">4. Nama (A - Z)</option>
+              <option value="name_desc">5. Nama (Z - A)</option>
+            </select>
           </div>
 
           <div className="md:col-span-2">

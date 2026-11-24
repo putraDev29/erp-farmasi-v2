@@ -23,19 +23,21 @@ type StockBalance struct {
 
 type StockMovement struct {
 	BaseModel
-	CompanyID    uuid.UUID `gorm:"type:uuid;not null;index" json:"company_id"`
-	BranchID     uuid.UUID `gorm:"type:uuid;not null;index" json:"branch_id"`
-	WarehouseID  uuid.UUID `gorm:"type:uuid;not null;index" json:"warehouse_id"`
-	ProductID    uuid.UUID `gorm:"type:uuid;not null;index" json:"product_id"`
-	DocType      string    `gorm:"size:50;not null;index" json:"doc_type"` // PURCHASE, SALE, TRANSFER_IN, TRANSFER_OUT, OPNAME, ADJUSTMENT, ASSEMBLY_IN, ASSEMBLY_OUT, OPENING, ITEM_IN, ITEM_OUT
-	DocNo        string    `gorm:"size:50;not null;index" json:"doc_no"`
-	MovementType string    `gorm:"size:10;not null" json:"movement_type"` // IN or OUT
-	Qty          float64   `gorm:"type:numeric(15,4);not null" json:"qty"`
-	CostPerUnit  float64   `gorm:"type:numeric(15,4);default:0" json:"cost_per_unit"`
-	TotalCost    float64   `gorm:"type:numeric(15,4);default:0" json:"total_cost"`
-	BalanceAfter float64   `gorm:"type:numeric(15,4);not null" json:"balance_after"`
-	Notes        string    `gorm:"type:text" json:"notes"`
-	CreatedBy    uuid.UUID `gorm:"type:uuid;not null" json:"created_by"`
+	CompanyID    uuid.UUID  `gorm:"type:uuid;not null;index" json:"company_id"`
+	BranchID     uuid.UUID  `gorm:"type:uuid;not null;index" json:"branch_id"`
+	WarehouseID  uuid.UUID  `gorm:"type:uuid;not null;index" json:"warehouse_id"`
+	ProductID    uuid.UUID  `gorm:"type:uuid;not null;index" json:"product_id"`
+	DocType      string     `gorm:"size:50;not null;index" json:"doc_type"` // PURCHASE, SALE, TRANSFER_IN, TRANSFER_OUT, OPNAME, ADJUSTMENT, ASSEMBLY_IN, ASSEMBLY_OUT, OPENING, ITEM_IN, ITEM_OUT
+	DocNo        string     `gorm:"size:50;not null;index" json:"doc_no"`
+	MovementType string     `gorm:"size:10;not null" json:"movement_type"` // IN or OUT
+	Qty          float64    `gorm:"type:numeric(15,4);not null" json:"qty"`
+	CostPerUnit  float64    `gorm:"type:numeric(15,4);default:0" json:"cost_per_unit"`
+	TotalCost    float64    `gorm:"type:numeric(15,4);default:0" json:"total_cost"`
+	BalanceAfter float64    `gorm:"type:numeric(15,4);not null" json:"balance_after"`
+	BatchNumber  string     `gorm:"size:100" json:"batch_number"`
+	ExpiredDate  *time.Time `json:"expired_date"`
+	Notes        string     `gorm:"type:text" json:"notes"`
+	CreatedBy    uuid.UUID  `gorm:"type:uuid;not null" json:"created_by"`
 
 	Warehouse *Warehouse `gorm:"foreignKey:WarehouseID" json:"warehouse,omitempty"`
 	Product   *Product   `gorm:"foreignKey:ProductID" json:"product,omitempty"`
@@ -248,4 +250,24 @@ type InitialStockEntry struct {
 
 	Warehouse *Warehouse `gorm:"foreignKey:WarehouseID" json:"warehouse,omitempty"`
 	Product   *Product   `gorm:"foreignKey:ProductID" json:"product,omitempty"`
+}
+
+// 6. Farmasi Product Batch (FEFO - First Expired, First Out Tracking)
+type ProductBatch struct {
+	BaseModel
+	CompanyID   uuid.UUID  `gorm:"type:uuid;not null;index" json:"company_id"`
+	BranchID    uuid.UUID  `gorm:"type:uuid;not null;index" json:"branch_id"`
+	WarehouseID uuid.UUID  `gorm:"type:uuid;not null;index" json:"warehouse_id"`
+	ProductID   uuid.UUID  `gorm:"type:uuid;not null;index" json:"product_id"`
+	BatchNumber string     `gorm:"size:100;not null;index" json:"batch_number"`
+	ExpiredDate time.Time  `gorm:"not null;index" json:"expired_date"`
+	InitialQty  float64    `gorm:"type:numeric(15,4);default:0" json:"initial_qty"`
+	CurrentQty  float64    `gorm:"type:numeric(15,4);default:0" json:"current_qty"`
+	CostPrice   float64    `gorm:"type:numeric(15,4);default:0" json:"cost_price"`
+	SupplierID  *uuid.UUID `gorm:"type:uuid;index" json:"supplier_id"`
+	DocNo       string     `gorm:"size:50" json:"doc_no"`
+
+	Product   *Product   `gorm:"foreignKey:ProductID" json:"product,omitempty"`
+	Warehouse *Warehouse `gorm:"foreignKey:WarehouseID" json:"warehouse,omitempty"`
+	Supplier  *Supplier  `gorm:"foreignKey:SupplierID" json:"supplier,omitempty"`
 }

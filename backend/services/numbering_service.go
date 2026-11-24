@@ -60,7 +60,7 @@ func GenerateCashTransactionNumber(tx *gorm.DB, companyID uuid.UUID, tag string,
 	pattern := "%/" + tag + "/%/" + mmyy
 
 	var existing []string
-	tx.Model(&models.CashTransaction{}).
+	tx.Unscoped().Model(&models.CashTransaction{}).
 		Where("company_id = ? AND trx_no LIKE ?", companyID, pattern).
 		Pluck("trx_no", &existing)
 
@@ -80,7 +80,7 @@ func GenerateCashTransactionNumber(tx *gorm.DB, companyID uuid.UUID, tag string,
 	for {
 		candidate := fmt.Sprintf("%04d/%s/UTAMA/%s", nextSeq, tag, mmyy)
 		var exists int64
-		tx.Model(&models.CashTransaction{}).
+		tx.Unscoped().Model(&models.CashTransaction{}).
 			Where("company_id = ? AND trx_no = ?", companyID, candidate).
 			Count(&exists)
 		if exists == 0 {

@@ -19,6 +19,7 @@ import {
 import { api } from "@/lib/api";
 import MasterToolbarButtons from "@/components/common/MasterToolbarButtons";
 import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
+import { TableSortSelect, parseSortValue, sortTableData } from "@/components/common/TableSortSelect";
 
 export default function SuppliersPage() {
   const queryClient = useQueryClient();
@@ -26,8 +27,9 @@ export default function SuppliersPage() {
   // Filters & State
   const [keyword, setKeyword] = useState("");
   const [searchParam, setSearchParam] = useState("");
-  const [sortBy, setSortBy] = useState("name");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const pageSize = 15;
 
@@ -188,9 +190,10 @@ export default function SuppliersPage() {
     setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
   };
 
-  // Pagination slice
-  const totalPages = Math.max(1, Math.ceil(suppliers.length / pageSize));
-  const paginatedData = suppliers.slice((page - 1) * pageSize, page * pageSize);
+  // Pagination & Sort slice
+  const sortedSuppliers = sortTableData(suppliers, sortOption);
+  const totalPages = Math.max(1, Math.ceil(sortedSuppliers.length / pageSize));
+  const paginatedData = sortedSuppliers.slice((page - 1) * pageSize, page * pageSize);
 
   const renderToolbar = () => (
     <div className="flex items-center gap-2 py-1">
@@ -274,26 +277,20 @@ export default function SuppliersPage() {
             />
           </div>
 
-          {/* Urut Berdasar */}
-          <div className="md:col-span-5 flex items-center gap-2">
-            <label className="w-24 shrink-0 text-slate-700 font-medium">Urut Berdasar :</label>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="flex-1 h-6 px-2 rounded border border-slate-300 bg-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="name">Nama</option>
-              <option value="code">Kode</option>
-              <option value="city">Kota</option>
-            </select>
-            <button
-              onClick={toggleSortDir}
-              className="h-6 px-2.5 border border-slate-300 rounded bg-slate-50 hover:bg-slate-100 text-slate-600 flex items-center gap-1 transition"
-              title="Ganti Urutan Naik/Turun"
-            >
-              <ArrowUpDown className="w-3.5 h-3.5" />
-              <span className="text-[11px] uppercase font-semibold">{sortDir}</span>
-            </button>
+          {/* Urut Berdasar (5 Pilihan Standar) */}
+          <div className="md:col-span-5">
+            <TableSortSelect
+              value={sortOption}
+              onChange={(val) => {
+                setSortOption(val);
+                const { sortBy: sb, sortDir: sd } = parseSortValue(val);
+                setSortBy(sb);
+                setSortDir(sd);
+                setPage(1);
+              }}
+              codeLabel="Kode Supplier"
+              nameLabel="Nama Supplier"
+            />
           </div>
 
           {/* Cari Button */}

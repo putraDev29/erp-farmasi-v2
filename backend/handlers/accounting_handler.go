@@ -154,7 +154,7 @@ func (h *AccountingHandler) GetJournals(c *gin.Context) {
 	if tab != "" && tab != "semua" && tab != "all" {
 		switch tab {
 		case "pembelian":
-			query = query.Where("ref_type IN ('PURCHASE', 'PURCHASE_RETURN', 'PAYMENT_OUT')")
+			query = query.Where("ref_type IN ('PURCHASE', 'PURCHASE_ORDER', 'PURCHASE_RETURN', 'PAYMENT_OUT')")
 		case "penjualan":
 			query = query.Where("ref_type IN ('SALE', 'SALES_RETURN', 'PAYMENT_IN', 'KASIR')")
 		case "perakitan":
@@ -649,24 +649,11 @@ func (h *AccountingHandler) CreateCashTransaction(c *gin.Context) {
 			return
 		}
 
-		var totalDeb, totalCred float64
-		tx.Model(&models.JournalEntry{}).Where("account_id = ?", srcAcc.ID).Select("COALESCE(SUM(debit), 0)").Scan(&totalDeb)
-		tx.Model(&models.JournalEntry{}).Where("account_id = ?", srcAcc.ID).Select("COALESCE(SUM(credit), 0)").Scan(&totalCred)
-
-		var initBal models.InitialBalanceEntry
-		if err := tx.Where("company_id = ? AND account_id = ? AND type = 'ACCOUNT'", companyID, srcAcc.ID).First(&initBal).Error; err == nil {
-			totalDeb += initBal.Debit
-			totalCred += initBal.Credit
-		}
-
-		currentBalance := totalDeb - totalCred
-		if srcAcc.NormalBalance == "CREDIT" {
-			currentBalance = totalCred - totalDeb
-		}
+		currentBalance := services.GetAccountRealBalance(tx, srcAcc.ID)
 
 		if currentBalance < totalAmount {
 			tx.Rollback()
-			utils.SendError(c, http.StatusBadRequest, fmt.Sprintf("Transaksi kas ditolak: Saldo akun %s (%s) tidak mencukupi untuk pengeluaran sebesar Rp %.2f. Saldo saat ini hanya Rp %.2f. Sesuai aturan akuntansi Indonesia, saldo kas tidak boleh negatif/minus.", srcAcc.Code, srcAcc.Name, totalAmount, currentBalance), nil)
+			utils.SendError(c, http.StatusBadRequest, fmt.Sprintf("Transaksi kas ditolak: Saldo akun %s (%s) tidak mencukupi untuk pengeluaran sebesar Rp %.2f. Saldo saat ini hanya Rp %.2f. Sesuai aturan akuntansi Indonesia, saldo kas tidak boleh negatif/minus.", srcAcc.Name, srcAcc.Code, totalAmount, currentBalance), nil)
 			return
 		}
 	}

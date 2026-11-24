@@ -30,6 +30,9 @@ func main() {
 		log.Printf("[Server] Seeding notice: %v", err)
 	}
 
+	// Pastikan seluruh data audit log ternormalisasi dengan komputer & IP riil
+	database.CleanAndNormalizeAuditLogs(db)
+
 	// Initialize Gin Router
 	r := routes.SetupRouter(cfg)
 

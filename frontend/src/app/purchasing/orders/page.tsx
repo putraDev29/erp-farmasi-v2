@@ -17,13 +17,46 @@ import {
   FileText,
   Calendar,
   Building2,
+  PackageCheck,
+  Paperclip,
+  Receipt,
+  FileCheck,
+  CheckCircle2,
+  Send,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
 import MasterToolbarButtons from "@/components/common/MasterToolbarButtons";
+import { TerimaBarangPOModal } from "@/components/purchasing/TerimaBarangPOModal";
+import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
+import { TableSortSelect, parseSortValue, sortTableData } from "@/components/common/TableSortSelect";
+import { BuktiPembayaranModal } from "@/components/purchasing/BuktiPembayaranModal";
+import { DokumenSPModal } from "@/components/purchasing/DokumenSPModal";
+import { UploadDokumenPBFModal } from "@/components/purchasing/UploadDokumenPBFModal";
+import { useAuthStore } from "@/lib/auth-store";
+
+const formatUserWithRole = (u: any) => {
+  if (!u) return "-";
+  const name = u.full_name || u.username || "-";
+  if (name.includes("(") && name.includes(")")) return name;
+  const role = u.roles?.[0]?.name || u.role?.name || u.role;
+  if (role) return `${name} (${role})`;
+  return name;
+};
 
 export default function PurchaseOrdersPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
+
+  const isGudangOnly = Boolean(
+    user?.roles?.some((r: string) => r.toUpperCase() === "GUDANG") &&
+      !user?.roles?.some(
+        (r: string) =>
+          r.toUpperCase().includes("ADMIN") ||
+          r.toUpperCase().includes("SUPER") ||
+          r.toUpperCase().includes("APOTEKER")
+      )
+  );
 
   // Filters state matching Screenshot 3
   const [keyword, setKeyword] = useState("");
@@ -32,7 +65,8 @@ export default function PurchaseOrdersPage() {
   const [endDate, setEndDate] = useState("");
   const [processStatus, setProcessStatus] = useState("Semua");
   const [orderStatus, setOrderStatus] = useState("Semua");
-  const [sortBy, setSortBy] = useState("Tanggal");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
+  const [sortBy, setSortBy] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   // Selection & Pagination
@@ -45,6 +79,14 @@ export default function PurchaseOrdersPage() {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [printModalOpen, setPrintModalOpen] = useState(false);
+  const [receiveModalOpen, setReceiveModalOpen] = useState(false);
+  const [receivePOId, setReceivePOId] = useState<string | null>(null);
+  const [docModalOpen, setDocModalOpen] = useState(false);
+  const [docTargetPO, setDocTargetPO] = useState<any>(null);
+  const [isBuktiModalOpen, setIsBuktiModalOpen] = useState(false);
+  const [selectedBuktiPOId, setSelectedBuktiPOId] = useState<string | null>(null);
+  const [isPbfDocModalOpen, setIsPbfDocModalOpen] = useState(false);
+  const [pbfDocTargetPO, setPbfDocTargetPO] = useState<any>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Form state
@@ -117,12 +159,49 @@ export default function PurchaseOrdersPage() {
     },
   });
 
-  // Client-side pagination
-  const totalPages = Math.max(1, Math.ceil(pos.length / pageSize));
+  // Filter POs: Sesuai permintaan user, ketika pesanan pembelian sudah terpenuhi semua, maka tidak perlu muncul di list lagi
+  const activePOs = useMemo(() => {
+    return (pos || []).filter((p: any) => {
+      // Jika user secara eksplisit memilih filter status "Selesai" atau "COMPLETED", izinkan melihatnya
+      if (processStatus === "Selesai" || orderStatus === "COMPLETED") {
+        return true;
+      }
+
+      // Jika status PO sudah COMPLETED atau Selesai -> jangan tampilkan di list
+      if (p.status === "COMPLETED" || p.process_status === "Selesai") {
+        return false;
+      }
+
+      const allItems = p.items || [];
+      if (allItems.length > 0) {
+        // Cek apakah masih ada item yang belum terpenuhi
+        const hasUnfulfilledItems = allItems.some(
+          (it: any) => !it.is_fulfilled && Number(it.qty || 0) > Number(it.received_qty || 0)
+        );
+        // Jika tidak ada item yang belum terpenuhi (semua sudah terpenuhi) -> sembunyikan dari list
+        if (!hasUnfulfilledItems) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [pos, processStatus, orderStatus]);
+
+  // Client-side sorting & pagination
+  const sortedPOs = useMemo(() => {
+    return sortTableData(activePOs, sortOption, {
+      getCode: (item: any) => item.order_no,
+      getName: (item: any) => item.supplier?.name,
+      getDate: (item: any) => item.created_at || item.date,
+    });
+  }, [activePOs, sortOption]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedPOs.length / pageSize));
   const paginatedPOs = useMemo(() => {
     const start = (page - 1) * pageSize;
-    return pos.slice(start, start + pageSize);
-  }, [pos, page, pageSize]);
+    return sortedPOs.slice(start, start + pageSize);
+  }, [sortedPOs, page, pageSize]);
 
   // Mutations
   const createMutation = useMutation({
@@ -164,6 +243,34 @@ export default function PurchaseOrdersPage() {
     },
     onError: (err: any) => {
       setErrorMsg(err.response?.data?.message || "Gagal menghapus Pesanan Pembelian");
+    },
+  });
+
+  const sendToSupplierMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return await api.post(`/purchases/orders/${id}/send`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["purchases"] });
+      alert("✅ PO berhasil dikirim ke supplier!\n\nDokumen pembelian otomatis diteruskan ke menu Pembelian (Status: Menunggu Penerimaan Gudang).");
+    },
+    onError: (err: any) => {
+      alert("Gagal mengirim PO ke supplier: " + (err.response?.data?.message || err.message));
+    },
+  });
+
+  const cancelRemainingMutation = useMutation({
+    mutationFn: async ({ id, reason }: { id: string; reason: string }) => {
+      return await api.post(`/purchases/orders/${id}/cancel-remaining`, { reason });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["purchases"] });
+      alert("✅ Sisa kebutuhan barang pada PO berhasil dibatalkan tanpa menghapus barang yang sudah dipenuhi.");
+    },
+    onError: (err: any) => {
+      alert("Gagal membatalkan sisa PO: " + (err.response?.data?.message || err.message));
     },
   });
 
@@ -397,29 +504,27 @@ export default function PurchaseOrdersPage() {
             </select>
           </div>
 
-          {/* Urut Berdasar */}
-          <div className="lg:col-span-1">
+          {/* Urut Berdasar (5 Pilihan Standar) */}
+          <div className="lg:col-span-2">
             <label className="block text-slate-600 font-semibold text-[11px] mb-0.5">Urut Berdasar :</label>
-            <div className="flex gap-1">
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-sky-500"
-              >
-                <option value="Tanggal">Tanggal</option>
-                <option value="No Transaksi">No Transaksi</option>
-                <option value="Supplier">Supplier</option>
-                <option value="Total">Total</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => setSortDir((prev) => (prev === "asc" ? "desc" : "asc"))}
-                className="h-6 w-6 flex items-center justify-center border border-slate-300 rounded hover:bg-slate-50 text-slate-600 shrink-0"
-                title={`Urutan: ${sortDir.toUpperCase()}`}
-              >
-                <ArrowUpDown className="w-3.5 h-3.5" />
-              </button>
-            </div>
+            <select
+              value={sortOption}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSortOption(val);
+                const { sortBy: sb, sortDir: sd } = parseSortValue(val);
+                setSortBy(sb);
+                setSortDir(sd);
+                setPage(1);
+              }}
+              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] bg-white focus:outline-none focus:border-emerald-500 font-medium shadow-2xs truncate cursor-pointer"
+            >
+              <option value="created_at_desc">1. Urutan sesuai waktu input paling atas</option>
+              <option value="code_asc">2. Kode (A - Z)</option>
+              <option value="code_desc">3. Kode (Z - A)</option>
+              <option value="name_asc">4. Nama (A - Z)</option>
+              <option value="name_desc">5. Nama (Z - A)</option>
+            </select>
           </div>
         </div>
       </div>
@@ -452,24 +557,47 @@ export default function PurchaseOrdersPage() {
 
           {/* Action Buttons */}
           <MasterToolbarButtons
-            addHref="/purchasing/orders/new"
+            addHref={!isGudangOnly ? "/purchasing/orders/new" : undefined}
+            onAdd={
+              isGudangOnly
+                ? () =>
+                    alert(
+                      "Akses Dibatasi: Pembuatan dan pengajuan Pesanan Pembelian (PO) ke PBF hanya dapat dilakukan oleh Admin / APJ."
+                    )
+                : undefined
+            }
             onEdit={() => {
               if (selectedId) router.push(`/purchasing/orders/${selectedId}/edit`);
             }}
-            editDisabled={!selectedId}
+            editDisabled={!selectedId || isGudangOnly}
             onDelete={() => setDeleteConfirmOpen(true)}
-            deleteDisabled={!selectedId}
+            deleteDisabled={!selectedId || isGudangOnly}
             onPrint={() => setPrintModalOpen(true)}
             printDisabled={!selectedId}
           />
+
+          {selectedId && (
+            <button
+              type="button"
+              onClick={() => {
+                setDocTargetPO(selectedPO);
+                setDocModalOpen(true);
+              }}
+              className="h-6 px-2.5 bg-sky-50 hover:bg-sky-100 border border-sky-300 text-sky-800 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
+              title="Lihat & Cetak Dokumen Surat Pesanan (SP) Resmi"
+            >
+              <FileText className="w-3.5 h-3.5 text-sky-600" />
+              <span>Dokumen SP</span>
+            </button>
+          )}
         </div>
 
         <div className="text-[11px] text-slate-500 font-medium">
-          Total: <strong className="text-slate-800">{pos.length}</strong> pesanan ditemukan
+          Total: <strong className="text-slate-800">{activePOs.length}</strong> pesanan ditemukan
         </div>
       </div>
 
-      {/* 4. TABLE VIEW (14 Columns Matching Spec) */}
+      {/* 4. TABLE VIEW (16 Columns Matching Spec) */}
       <div className="flex-1 min-h-0 bg-white rounded-lg shadow-2xs border border-slate-300 overflow-auto">
         <table className="w-full text-[11px] text-left border-collapse whitespace-nowrap">
           <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b border-slate-300 sticky top-0 z-10 shadow-2xs h-7 text-[10.5px]">
@@ -485,87 +613,358 @@ export default function PurchaseOrdersPage() {
               <th className="py-1 px-2 text-right border-r border-slate-200">Jumlah Terima</th>
               <th className="py-1 px-2.5 text-right border-r border-slate-200">Pajak</th>
               <th className="py-1 px-2.5 text-right border-r border-slate-200">Total</th>
+              <th className="py-1 px-2.5 text-center border-r border-slate-200">Status PO</th>
+              <th className="py-1 px-2.5 text-center border-r border-slate-200">Status Bayar</th>
+              <th className="py-1 px-2.5 text-center border-r border-slate-200">Verifikasi Stok</th>
               <th className="py-1 px-2.5 border-r border-slate-200">Keterangan</th>
               <th className="py-1 px-2 border-r border-slate-200">User Buat</th>
-              <th className="py-1 px-2">User Ubah</th>
+              <th className="py-1 px-2 border-r border-slate-200">User Ubah</th>
+              <th className="py-1 px-2.5">Komputer</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-slate-700">
             {isLoading ? (
               <tr>
-                <td colSpan={14} className="text-center py-8 text-slate-400">
+                <td colSpan={17} className="text-center py-8 text-slate-400">
                   Memuat data pesanan pembelian...
                 </td>
               </tr>
             ) : paginatedPOs.length === 0 ? (
               <tr>
-                <td colSpan={14} className="text-center py-8 text-slate-400">
+                <td colSpan={17} className="text-center py-8 text-slate-400">
                   Tidak ada data pesanan pembelian.
                 </td>
               </tr>
             ) : (
               paginatedPOs.map((p: any) => {
                 const isSelected = selectedId === p.id;
+
+                // Collect unique suppliers from PO header & items with exact breakdown
+                const distinctSuppliers = (() => {
+                  const map = new Map<
+                    string,
+                    {
+                      id: string;
+                      name: string;
+                      code: string;
+                      itemCount: number;
+                      orderedQty: number;
+                      receivedQty: number;
+                      subtotal: number;
+                      taxAmount: number;
+                      totalAmount: number;
+                    }
+                  >();
+
+                  const allItems = p.items || [];
+                  const unfulfilledItems = allItems.filter(
+                    (it: any) => !it.is_fulfilled && Number(it.qty || 0) > Number(it.received_qty || 0)
+                  );
+
+                  // Jika semua item PO sudah terpenuhi
+                  if (allItems.length > 0 && unfulfilledItems.length === 0) {
+                    return [];
+                  }
+
+                  const targetItems = unfulfilledItems.length > 0 ? unfulfilledItems : allItems;
+
+                  targetItems.forEach((it: any) => {
+                    const s = it.supplier || (it.supplier_id === p.supplier?.id ? p.supplier : null);
+                    const sName = s?.name || p.supplier?.name || "Supplier";
+                    const sCode = s?.code || p.supplier?.code || "-";
+                    const sId = s?.id || p.supplier?.id || sName;
+
+                    if (!map.has(sId)) {
+                      map.set(sId, {
+                        id: sId,
+                        name: sName,
+                        code: sCode,
+                        itemCount: 0,
+                        orderedQty: 0,
+                        receivedQty: 0,
+                        subtotal: 0,
+                        taxAmount: 0,
+                        totalAmount: 0,
+                      });
+                    }
+
+                    const entry = map.get(sId)!;
+                    entry.itemCount += 1;
+                    const qty = Number(it.qty || 0) - Number(it.received_qty || 0);
+                    const price = Number(it.unit_price || 0);
+                    const disc = Number(it.discount || 0);
+                    const lineSubtotal = Math.max(0, qty * price - disc);
+
+                    entry.orderedQty += qty;
+                    entry.receivedQty += 0;
+                    entry.subtotal += lineSubtotal;
+                  });
+
+                  const taxRate = (Number(p.tax_percent) || 0) / 100;
+                  const allSuppliers = Array.from(map.values());
+                  allSuppliers.forEach((entry) => {
+                    entry.taxAmount = Math.round(entry.subtotal * taxRate * 100) / 100;
+                    entry.totalAmount = entry.subtotal + entry.taxAmount;
+                  });
+
+                  const activeSuppliers = allSuppliers.filter((s) => s.itemCount > 0);
+                  return activeSuppliers.length > 0 ? activeSuppliers : allSuppliers;
+                })();
+
+                const isAllFulfilled = p.status === "COMPLETED" || (p.items?.length > 0 && distinctSuppliers.length === 0);
+                const isMultiSupplier = distinctSuppliers.length > 1;
+                const totalUnfulfilledOrdered = distinctSuppliers.reduce((s, x) => s + x.orderedQty, 0);
+                const totalUnfulfilledTax = distinctSuppliers.reduce((s, x) => s + x.taxAmount, 0);
+                const totalUnfulfilledAmount = distinctSuppliers.reduce((s, x) => s + x.totalAmount, 0);
+
                 return (
                   <tr
                     key={p.id}
                     onClick={() => setSelectedId(p.id)}
                     onDoubleClick={() => router.push(`/purchasing/orders/${p.id}/edit`)}
-                    className={`cursor-pointer transition-colors h-7 border-b border-slate-100 ${
+                    className={`cursor-pointer transition-colors border-b border-slate-100 ${
                       isSelected
                         ? "bg-sky-50 text-sky-950 font-medium"
                         : "hover:bg-slate-50 text-slate-800"
                     }`}
                   >
-                    <td className="py-0.5 px-2 text-center border-r border-slate-100">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          router.push(`/purchasing/orders/${p.id}/edit`);
-                        }}
-                        className="p-0.5 rounded hover:bg-slate-200 text-sky-600 transition"
-                        title="Edit PO"
-                      >
-                        <Pencil className="w-3 h-3" />
-                      </button>
+                    <td className="py-1 px-2 text-center border-r border-slate-100 align-middle">
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            router.push(`/purchasing/orders/${p.id}/edit`);
+                          }}
+                          className="p-0.5 rounded hover:bg-slate-200 text-sky-600 transition"
+                          title="Edit PO"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDocTargetPO(p);
+                            setDocModalOpen(true);
+                          }}
+                          className="p-0.5 rounded hover:bg-sky-100 text-sky-700 transition cursor-pointer"
+                          title="Lihat & Cetak Dokumen Surat Pesanan (SP)"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </td>
-                    <td className="py-0.5 px-2.5 font-semibold text-slate-900 border-r border-slate-100 font-mono">
+                    <td className="py-1 px-2.5 font-semibold text-slate-900 border-r border-slate-100 font-mono align-middle">
                       {p.order_no}
                     </td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100">{formatDate(p.date)}</td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-slate-600">
+                    <td className="py-1 px-2.5 border-r border-slate-100 align-middle">{formatDate(p.date)}</td>
+                    <td className="py-1 px-2.5 border-r border-slate-100 text-slate-600 align-middle">
                       {p.expected_date ? formatDate(p.expected_date) : "-"}
                     </td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-slate-700">
+                    <td className="py-1 px-2.5 border-r border-slate-100 text-slate-700 align-middle">
                       {p.warehouse?.name || "UTAMA - APOTEK"}
                     </td>
-                    <td className="py-0.5 px-2 border-r border-slate-100 font-mono text-[10.5px] text-slate-600">
-                      {p.supplier?.code || "-"}
+                    <td className="py-1 px-2 border-r border-slate-100 font-mono text-[10.5px] text-slate-600 align-middle">
+                      {isAllFulfilled ? (
+                        p.supplier?.code || "-"
+                      ) : !isMultiSupplier ? (
+                        distinctSuppliers[0]?.code || p.supplier?.code || "-"
+                      ) : (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-800 font-bold text-[9px] w-fit border border-emerald-200">
+                            Multi ({distinctSuppliers.length})
+                          </span>
+                          {distinctSuppliers.map((s, idx) => (
+                            <span key={s.id || idx} className="text-[10px] text-slate-600 leading-tight">
+                              {s.code || "-"}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </td>
-                    <td className="py-0.5 px-2.5 font-medium text-slate-900 border-r border-slate-100">
-                      {p.supplier?.name || "-"}
+                    <td className="py-1 px-2.5 font-medium text-slate-900 border-r border-slate-100 align-middle">
+                      {isAllFulfilled ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-500">{p.supplier?.name || "-"}</span>
+                          <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 font-bold text-[9px] border border-emerald-300">
+                            Semua Terpenuhi di Pembelian
+                          </span>
+                        </div>
+                      ) : !isMultiSupplier ? (
+                        distinctSuppliers[0]?.name || p.supplier?.name || "-"
+                      ) : (
+                        <div className="flex flex-col gap-0.5 py-0.5">
+                          <div className="flex items-center gap-1">
+                            <span className="px-1.5 py-0.2 rounded-full bg-emerald-50 text-emerald-700 font-bold text-[9px] border border-emerald-200 inline-flex items-center gap-1">
+                              <span>👥 Multi-Supplier ({distinctSuppliers.length})</span>
+                            </span>
+                          </div>
+                          {distinctSuppliers.map((s, idx) => (
+                            <div key={s.id || idx} className="flex items-center gap-1 text-[11px] leading-tight">
+                              <span className="text-[9px] px-1 rounded bg-slate-100 text-slate-600 font-bold border border-slate-200 shrink-0">
+                                #{idx + 1}
+                              </span>
+                              <span className="font-semibold text-slate-800 truncate max-w-[190px]" title={s.name}>
+                                {s.name}
+                              </span>
+                              {s.itemCount > 0 && (
+                                <span className="text-[9.5px] text-slate-400 font-normal">
+                                  ({s.itemCount} item)
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </td>
-                    <td className="py-0.5 px-2 text-right font-mono font-bold text-slate-800 border-r border-slate-100">
-                      {p.total_ordered_qty || p.items?.reduce((s: number, i: any) => s + i.qty, 0) || 0}
+                    <td className="py-1 px-2 text-right font-mono font-bold text-slate-800 border-r border-slate-100 align-middle">
+                      {isAllFulfilled ? (
+                        <span className="text-slate-400 font-normal text-[10px]">0 (Selesai)</span>
+                      ) : !isMultiSupplier ? (
+                        totalUnfulfilledOrdered
+                      ) : (
+                        <div className="flex flex-col gap-0.5 py-0.5 items-end">
+                          <span className="font-bold text-slate-900 leading-tight">
+                            {totalUnfulfilledOrdered}
+                          </span>
+                          {distinctSuppliers.map((s, idx) => (
+                            <span key={s.id || idx} className="text-[10px] text-slate-600 font-medium leading-tight">
+                              <span className="text-slate-400 font-normal">#{idx + 1}:</span> {s.orderedQty}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </td>
-                    <td className="py-0.5 px-2 text-right font-mono text-slate-500 border-r border-slate-100">
-                      {p.total_received_qty || 0}
+                    <td className="py-1 px-2 text-right font-mono text-slate-700 border-r border-slate-100 align-middle">
+                      {isAllFulfilled ? (
+                        <span className="font-bold text-emerald-700">{p.total_ordered_qty || p.total_received_qty || 0}</span>
+                      ) : !isMultiSupplier ? (
+                        <span className={Number(p.total_received_qty || 0) > 0 ? "font-bold text-emerald-700" : "text-slate-400"}>
+                          {p.total_received_qty || 0}
+                        </span>
+                      ) : (
+                        <div className="flex flex-col gap-0.5 py-0.5 items-end">
+                          <span className={`font-bold leading-tight ${Number(p.total_received_qty || 0) > 0 ? "text-emerald-700" : "text-slate-400"}`}>
+                            {p.total_received_qty || 0}
+                          </span>
+                          {distinctSuppliers.map((s, idx) => (
+                            <span
+                              key={s.id || idx}
+                              className={`text-[10px] font-medium leading-tight ${
+                                s.receivedQty > 0 ? "text-emerald-700 font-bold" : "text-slate-400"
+                              }`}
+                            >
+                              <span className="text-slate-400 font-normal">#{idx + 1}:</span> {s.receivedQty}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </td>
-                    <td className="py-0.5 px-2.5 text-right font-mono text-slate-600 border-r border-slate-100">
-                      {formatCurrency(p.tax_amount || 0)}
+                    <td className="py-1 px-2.5 text-right font-mono text-slate-600 border-r border-slate-100 align-middle">
+                      {isAllFulfilled ? (
+                        <span className="text-slate-400">Rp 0</span>
+                      ) : !isMultiSupplier ? (
+                        formatCurrency(totalUnfulfilledTax)
+                      ) : (
+                        <div className="flex flex-col gap-0.5 py-0.5 items-end">
+                          <span className="font-medium text-slate-700 leading-tight">
+                            {formatCurrency(totalUnfulfilledTax)}
+                          </span>
+                          {distinctSuppliers.map((s, idx) => (
+                            <span key={s.id || idx} className="text-[10px] text-slate-500 font-medium leading-tight">
+                              <span className="text-slate-400 font-normal">#{idx + 1}:</span> {formatCurrency(s.taxAmount)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </td>
-                    <td className="py-0.5 px-2.5 text-right font-mono font-bold text-emerald-700 border-r border-slate-100">
-                      {formatCurrency(p.total_amount)}
+                    <td className="py-1 px-2.5 text-right font-mono font-bold text-emerald-700 border-r border-slate-100 align-middle">
+                      {isAllFulfilled ? (
+                        <span className="text-slate-400 font-normal">Rp 0</span>
+                      ) : !isMultiSupplier ? (
+                        formatCurrency(totalUnfulfilledAmount)
+                      ) : (
+                        <div className="flex flex-col gap-0.5 py-0.5 items-end">
+                          <span className="font-bold text-emerald-700 leading-tight">
+                            {formatCurrency(totalUnfulfilledAmount)}
+                          </span>
+                          {distinctSuppliers.map((s, idx) => (
+                            <span key={s.id || idx} className="text-[10.5px] text-emerald-600 font-semibold leading-tight">
+                              <span className="text-slate-400 font-normal">#{idx + 1}:</span> {formatCurrency(s.totalAmount)}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </td>
-                    <td className="py-0.5 px-2.5 text-slate-500 max-w-xs truncate border-r border-slate-100">
+                    <td className="py-1 px-2 border-r border-slate-100 text-center align-middle">
+                      {isAllFulfilled || p.status === "COMPLETED" ? (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          Selesai
+                        </span>
+                      ) : p.status === "PARTIAL" || p.process_status === "Proses Sebagian" ? (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                          Sebagian
+                        </span>
+                      ) : p.status === "SENT" ? (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-300">
+                          Dikirim PBF
+                        </span>
+                      ) : p.status === "CANCELLED" ? (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                          Dibatalkan
+                        </span>
+                      ) : (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">
+                          Belum Proses
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-1 px-2 border-r border-slate-100 text-center align-middle">
+                      {p.payment_status === "PAID" || (p.remaining_amount <= 0 && Number(p.total_amount) > 0) ? (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          Lunas
+                        </span>
+                      ) : p.payment_status === "DP" || Number(p.dp_amount) > 0 ? (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-300" title={`DP: ${formatCurrency(p.dp_amount || p.paid_amount)}`}>
+                          DP
+                        </span>
+                      ) : p.payment_status === "PARTIAL" || (Number(p.paid_amount) > 0 && Number(p.remaining_amount) > 0) ? (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300" title={`Terbayar: ${formatCurrency(p.paid_amount)}`}>
+                          Sebagian
+                        </span>
+                      ) : (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-50 text-rose-700 border border-rose-200">
+                          Tempo (0)
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-1 px-2 border-r border-slate-100 text-center align-middle">
+                      {p.is_verified || (p.total_received_qty >= p.total_ordered_qty && Number(p.total_ordered_qty) > 0) ? (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          Terverifikasi
+                        </span>
+                      ) : Number(p.total_received_qty) > 0 ? (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                          Sebagian ({p.total_received_qty}/{p.total_ordered_qty})
+                        </span>
+                      ) : (
+                        <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-normal bg-slate-100 text-slate-500 border border-slate-200">
+                          Belum Verifikasi
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-1 px-2.5 text-slate-500 max-w-xs truncate border-r border-slate-100 align-middle">
                       {p.notes || "-"}
                     </td>
-                    <td className="py-0.5 px-2 text-slate-600 border-r border-slate-100">
-                      {p.user?.full_name || p.user?.username || "Admin"}
+                    <td className="py-1 px-2 text-slate-700 border-r border-slate-100 align-middle">
+                      {formatUserWithRole(p.user)}
                     </td>
-                    <td className="py-0.5 px-2 text-slate-400">
-                      {p.modifier?.full_name || p.modifier?.username || "-"}
+                    <td className="py-1 px-2 text-slate-500 border-r border-slate-100 align-middle">
+                      {formatUserWithRole(p.modifier)}
+                    </td>
+                    <td className="py-1 px-2.5 text-slate-700 font-mono text-[10.5px] align-middle">
+                      {p.computer_name || "ISB-SEWA11-S-NB"}
                     </td>
                   </tr>
                 );
@@ -587,11 +986,11 @@ export default function PurchaseOrdersPage() {
             <ChevronLeft className="w-3.5 h-3.5" />
           </button>
           <span className="font-semibold px-2.5 h-full flex items-center text-xs text-slate-700">
-            Hal {pos.length === 0 ? "1 / 0" : `${page} / ${totalPages}`}
+            Hal {activePOs.length === 0 ? "1 / 0" : `${page} / ${totalPages}`}
           </span>
           <button
             type="button"
-            disabled={page >= totalPages || pos.length === 0}
+            disabled={page >= totalPages || activePOs.length === 0}
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             className="px-2 h-full hover:bg-slate-100 disabled:opacity-40 border-l border-slate-200 transition rounded-r"
           >
@@ -986,6 +1385,57 @@ export default function PurchaseOrdersPage() {
           </div>
         </div>
       )}
+
+      {/* MODAL TERIMA & VERIFIKASI BARANG */}
+      <TerimaBarangPOModal
+        isOpen={receiveModalOpen}
+        onClose={() => {
+          setReceiveModalOpen(false);
+          setReceivePOId(null);
+        }}
+        poId={receivePOId}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+          queryClient.invalidateQueries({ queryKey: ["purchases"] });
+        }}
+      />
+
+      {/* MODAL GENERATE DOKUMEN SP RESMI */}
+      <DokumenSPModal
+        isOpen={docModalOpen}
+        onClose={() => {
+          setDocModalOpen(false);
+          setDocTargetPO(null);
+        }}
+        orderId={docTargetPO?.id}
+        poData={docTargetPO}
+      />
+
+      {/* MODAL BUKTI PEMBAYARAN & RIWAYAT HUTANG */}
+      <BuktiPembayaranModal
+        isOpen={isBuktiModalOpen}
+        onClose={() => {
+          setIsBuktiModalOpen(false);
+          setSelectedBuktiPOId(null);
+        }}
+        orderId={selectedBuktiPOId}
+      />
+
+      {/* MODAL UPLOAD DOKUMEN PEMBELIAN / FAKTUR PBF ASAL (1 DOKUMEN) */}
+      <UploadDokumenPBFModal
+        isOpen={isPbfDocModalOpen}
+        onClose={() => {
+          setIsPbfDocModalOpen(false);
+          setPbfDocTargetPO(null);
+        }}
+        orderId={pbfDocTargetPO?.id}
+        orderNo={pbfDocTargetPO?.order_no}
+        supplierName={pbfDocTargetPO?.supplier?.name}
+        existingDocUrl={pbfDocTargetPO?.pbf_document_url}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+        }}
+      />
     </div>
   );
 }

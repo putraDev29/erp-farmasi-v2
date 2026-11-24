@@ -16,6 +16,7 @@ import {
   Undo2,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import SearchableAccountSelect from "@/components/common/SearchableAccountSelect";
 
 export default function AssetGroupsPage() {
   const router = useRouter();
@@ -312,34 +313,22 @@ export default function AssetGroupsPage() {
 
               <div>
                 <label className="block text-slate-600 font-semibold mb-0.5">Kode Akun Aset :</label>
-                <select
+                <SearchableAccountSelect
+                  accounts={assetAccounts}
                   value={akunAsetId}
-                  onChange={(e) => setAkunAsetId(e.target.value)}
-                  className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-[11px] focus:outline-none focus:border-sky-500"
-                >
-                  <option value="">Select...</option>
-                  {assetAccounts.map((a: any) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} - {a.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setAkunAsetId(val)}
+                  placeholder="Select / Cari Akun Aset..."
+                />
               </div>
 
               <div>
                 <label className="block text-slate-600 font-semibold mb-0.5">Kode Akun Penyusutan :</label>
-                <select
+                <SearchableAccountSelect
+                  accounts={deprecAccounts}
                   value={akunPenyusutanId}
-                  onChange={(e) => setAkunPenyusutanId(e.target.value)}
-                  className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-[11px] focus:outline-none focus:border-sky-500"
-                >
-                  <option value="">Select...</option>
-                  {deprecAccounts.map((a: any) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} - {a.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setAkunPenyusutanId(val)}
+                  placeholder="Select / Cari Akun Penyusutan..."
+                />
               </div>
             </div>
 

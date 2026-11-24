@@ -24,6 +24,7 @@ import {
 import { api } from "@/lib/api";
 import MasterToolbarButtons from "@/components/common/MasterToolbarButtons";
 import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
+import { TableSortSelect, parseSortValue, sortTableData } from "@/components/common/TableSortSelect";
 
 export default function CustomersPage() {
   const queryClient = useQueryClient();
@@ -31,10 +32,12 @@ export default function CustomersPage() {
   // Filters & State
   const [keyword, setKeyword] = useState("");
   const [searchParam, setSearchParam] = useState("");
-  const [sortBy, setSortBy] = useState("name");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [sortOption, setSortOption] = useState<string>("created_at_desc");
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const pageSize = 15;
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "PENDING_VERIFY" | "VERIFIED" | "PHARMACY" | "GENERAL">("ALL");
 
   // Selected Row for toolbar
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -289,9 +292,34 @@ export default function CustomersPage() {
     return Number(num).toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
-  // Pagination calculation
-  const totalPages = Math.max(1, Math.ceil(customers.length / pageSize));
-  const paginatedData = customers.slice((page - 1) * pageSize, page * pageSize);
+  // Status counts & Filtered customers
+  const pendingVerifyCount = customers.filter(
+    (c: any) => (c.is_pharmacy_facility && !c.is_verified) || c.customer_status === "Menunggu Verifikasi"
+  ).length;
+  const verifiedCount = customers.filter((c: any) => c.is_verified).length;
+  const pharmacyCount = customers.filter((c: any) => c.is_pharmacy_facility).length;
+  const generalCount = customers.filter((c: any) => !c.is_pharmacy_facility).length;
+
+  const filteredCustomers = customers.filter((c: any) => {
+    if (statusFilter === "PENDING_VERIFY") {
+      return (c.is_pharmacy_facility && !c.is_verified) || c.customer_status === "Menunggu Verifikasi";
+    }
+    if (statusFilter === "VERIFIED") {
+      return c.is_verified;
+    }
+    if (statusFilter === "PHARMACY") {
+      return c.is_pharmacy_facility;
+    }
+    if (statusFilter === "GENERAL") {
+      return !c.is_pharmacy_facility;
+    }
+    return true;
+  });
+
+  // Pagination & Sort calculation
+  const sortedCustomers = sortTableData(filteredCustomers, sortOption);
+  const totalPages = Math.max(1, Math.ceil(sortedCustomers.length / pageSize));
+  const paginatedData = sortedCustomers.slice((page - 1) * pageSize, page * pageSize);
 
   const renderToolbar = (withExtraActions = false) => (
     <div className="flex flex-wrap items-center justify-between gap-2 py-1">
@@ -435,26 +463,20 @@ export default function CustomersPage() {
             />
           </div>
 
-          {/* Urut Berdasar */}
-          <div className="md:col-span-5 flex items-center gap-2">
-            <label className="w-24 shrink-0 text-slate-700 font-medium">Urut Berdasar :</label>
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              className="flex-1 h-6 px-2 rounded border border-slate-300 bg-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="name">Nama</option>
-              <option value="code">Kode</option>
-              <option value="total_spent">Total Belanja</option>
-            </select>
-            <button
-              onClick={toggleSortDir}
-              className="h-6 px-2.5 border border-slate-300 rounded bg-slate-50 hover:bg-slate-100 text-slate-600 flex items-center gap-1 transition"
-              title="Ganti Urutan Naik/Turun"
-            >
-              <ArrowUpDown className="w-3.5 h-3.5" />
-              <span className="text-[11px] uppercase font-semibold">{sortDir}</span>
-            </button>
+          {/* Urut Berdasar (5 Pilihan Standar) */}
+          <div className="md:col-span-5">
+            <TableSortSelect
+              value={sortOption}
+              onChange={(val) => {
+                setSortOption(val);
+                const { sortBy: sb, sortDir: sd } = parseSortValue(val);
+                setSortBy(sb);
+                setSortDir(sd);
+                setPage(1);
+              }}
+              codeLabel="Kode Pelanggan"
+              nameLabel="Nama Pelanggan"
+            />
           </div>
 
           {/* Cari Button */}
@@ -470,6 +492,67 @@ export default function CustomersPage() {
         </div>
       </div>
 
+      {/* Status Filter Tabs (Mobile & CDOB Sync) */}
+      <div className="shrink-0 flex flex-wrap items-center gap-1.5 bg-white border border-slate-200 rounded p-1.5 shadow-2xs">
+        <button
+          onClick={() => { setStatusFilter("ALL"); setPage(1); }}
+          className={`px-3 py-1 rounded text-xs font-semibold transition ${
+            statusFilter === "ALL"
+              ? "bg-slate-800 text-white shadow-2xs"
+              : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+          }`}
+        >
+          Semua Pelanggan ({customers.length})
+        </button>
+        <button
+          onClick={() => { setStatusFilter("PENDING_VERIFY"); setPage(1); }}
+          className={`px-3 py-1 rounded text-xs font-semibold transition flex items-center gap-1.5 ${
+            statusFilter === "PENDING_VERIFY"
+              ? "bg-amber-600 text-white shadow-2xs"
+              : pendingVerifyCount > 0
+              ? "bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300"
+              : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+          }`}
+        >
+          <span>⏳ Menunggu Verifikasi (Pendaftaran Mobile/Sarana)</span>
+          {pendingVerifyCount > 0 && (
+            <span className="px-1.5 py-0.2 text-[10px] font-bold rounded-full bg-amber-500 text-white">
+              {pendingVerifyCount}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => { setStatusFilter("VERIFIED"); setPage(1); }}
+          className={`px-3 py-1 rounded text-xs font-semibold transition flex items-center gap-1.5 ${
+            statusFilter === "VERIFIED"
+              ? "bg-emerald-600 text-white shadow-2xs"
+              : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+          }`}
+        >
+          <span>🛡️ Terverifikasi CDOB ({verifiedCount})</span>
+        </button>
+        <button
+          onClick={() => { setStatusFilter("PHARMACY"); setPage(1); }}
+          className={`px-3 py-1 rounded text-xs font-semibold transition ${
+            statusFilter === "PHARMACY"
+              ? "bg-sky-600 text-white shadow-2xs"
+              : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+          }`}
+        >
+          Sarana Farmasi / PBF ({pharmacyCount})
+        </button>
+        <button
+          onClick={() => { setStatusFilter("GENERAL"); setPage(1); }}
+          className={`px-3 py-1 rounded text-xs font-semibold transition ${
+            statusFilter === "GENERAL"
+              ? "bg-slate-600 text-white shadow-2xs"
+              : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+          }`}
+        >
+          Umum ({generalCount})
+        </button>
+      </div>
+
       {/* Top Toolbar with History & Verification */}
       <div className="shrink-0">{renderToolbar(true)}</div>
 
@@ -478,14 +561,15 @@ export default function CustomersPage() {
         <table className="w-full text-left text-xs border-collapse">
           <thead className="bg-slate-100 text-slate-700 font-semibold text-[11px] border-b border-slate-200 sticky top-0 z-10 shadow-2xs">
               <tr>
-                <th className="py-2 px-2.5 w-10 text-center border-r border-slate-200">Aksi</th>
+                <th className="py-2 px-2.5 w-16 text-center border-r border-slate-200">Aksi</th>
                 <th className="py-2 px-3 border-r border-slate-200 whitespace-nowrap">Kode</th>
-                <th className="py-2 px-3 border-r border-slate-200 whitespace-nowrap min-w-[180px]">Nama</th>
-                <th className="py-2 px-3 border-r border-slate-200 whitespace-nowrap min-w-[260px]">Alamat</th>
+                <th className="py-2 px-3 border-r border-slate-200 whitespace-nowrap min-w-[180px]">Nama Sarana / Toko</th>
+                <th className="py-2 px-3 border-r border-slate-200 whitespace-nowrap min-w-[170px]">Status Legalitas CDOB</th>
+                <th className="py-2 px-3 border-r border-slate-200 whitespace-nowrap min-w-[240px]">Alamat</th>
                 <th className="py-2 px-3 border-r border-slate-200 whitespace-nowrap">Kota</th>
                 <th className="py-2 px-3 border-r border-slate-200 whitespace-nowrap">Provinsi</th>
                 <th className="py-2 px-3 border-r border-slate-200 whitespace-nowrap">Telepon</th>
-                <th className="py-2 px-3 border-r border-slate-200 whitespace-nowrap">Kontak</th>
+                <th className="py-2 px-3 border-r border-slate-200 whitespace-nowrap">Kontak APJ</th>
                 <th className="py-2 px-3 border-r border-slate-200 whitespace-nowrap">Email</th>
                 <th className="py-2 px-3 border-r border-slate-200 whitespace-nowrap text-right">Jml Transaksi</th>
                 <th className="py-2 px-3 border-r border-slate-200 whitespace-nowrap text-right">Total Belanja</th>
@@ -497,13 +581,13 @@ export default function CustomersPage() {
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
                 <tr>
-                  <td colSpan={14} className="py-8 text-center text-slate-400">
+                  <td colSpan={15} className="py-8 text-center text-slate-400">
                     Memuat data pelanggan...
                   </td>
                 </tr>
               ) : paginatedData.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="py-8 text-center text-slate-400">
+                  <td colSpan={15} className="py-8 text-center text-slate-400">
                     Tidak ada data pelanggan ditemukan.
                   </td>
                 </tr>
@@ -518,17 +602,34 @@ export default function CustomersPage() {
                         isSelected ? "bg-sky-50/80 font-medium text-sky-950" : "hover:bg-slate-50/80 text-slate-800"
                       }`}
                     >
-                      <td className="py-1.5 px-2 text-center border-r border-slate-100">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenEdit(c);
-                          }}
-                          className="p-1 text-sky-600 hover:text-sky-800 hover:bg-sky-100 rounded transition"
-                          title="Edit Pelanggan"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
+                      <td className="py-1.5 px-2 text-center border-r border-slate-100 whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEdit(c);
+                            }}
+                            className="p-1 text-sky-600 hover:text-sky-800 hover:bg-sky-100 rounded transition"
+                            title="Edit Pelanggan"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          {c.is_pharmacy_facility && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedId(c.id);
+                                setDocModalTargetId(c.id);
+                                setIsDocModalOpen(true);
+                              }}
+                              className="px-1.5 py-0.5 text-[10px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded transition flex items-center gap-0.5"
+                              title="Buka & Verifikasi Berkas Dokumen CDOB Pelanggan"
+                            >
+                              <span>📎</span>
+                              <span>Dokumen</span>
+                            </button>
+                          )}
+                        </div>
                       </td>
                       <td className="py-1.5 px-3 border-r border-slate-100 font-mono text-[11px] font-semibold text-slate-900 whitespace-nowrap">
                         {c.code}
@@ -536,21 +637,34 @@ export default function CustomersPage() {
                       <td className="py-1.5 px-3 border-r border-slate-100 font-semibold text-slate-800 whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
                           <span>{c.name}</span>
-                          {c.is_verified ? (
-                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-0.5">
-                              <span>✓</span>
-                              <span>Terverifikasi</span>
-                            </span>
-                          ) : c.is_pharmacy_facility ? (
-                            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-50 text-amber-700 border border-amber-300">
-                              {c.pharmacy_type || "Sarana Farmasi"} (Belum Verif)
-                            </span>
-                          ) : (
-                            <span className="text-[9px] font-normal px-1.5 py-0.2 rounded bg-slate-100 text-slate-500">
-                              Umum
+                          {c.pharmacy_type && c.is_pharmacy_facility && (
+                            <span className="text-[9px] font-medium px-1.5 py-0.2 rounded bg-slate-100 text-slate-600">
+                              {c.pharmacy_type}
                             </span>
                           )}
                         </div>
+                      </td>
+                      <td className="py-1.5 px-3 border-r border-slate-100 whitespace-nowrap">
+                        {c.is_verified ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-1">
+                            <span>🛡️</span>
+                            <span>Terverifikasi CDOB</span>
+                          </span>
+                        ) : c.customer_status === "Ditolak" ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300 inline-flex items-center gap-1" title={c.verified_notes || "Dokumen ditolak"}>
+                            <span>❌</span>
+                            <span>Ditolak</span>
+                          </span>
+                        ) : c.is_pharmacy_facility || c.customer_status === "Menunggu Verifikasi" ? (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 inline-flex items-center gap-1 animate-pulse" title="Menunggu persetujuan APJ / verifikasi dokumen CDOB">
+                            <span>⏳</span>
+                            <span>Menunggu Verifikasi</span>
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                            Pelanggan Umum
+                          </span>
+                        )}
                       </td>
                       <td className="py-1.5 px-3 border-r border-slate-100 text-slate-600 text-[11px]">
                         {c.address || "-"}
@@ -565,7 +679,7 @@ export default function CustomersPage() {
                         {c.phone || "-"}
                       </td>
                       <td className="py-1.5 px-3 border-r border-slate-100 text-slate-600 whitespace-nowrap">
-                        {c.contact_person || "-"}
+                        {c.contact_person || c.apj_name || "-"}
                       </td>
                       <td className="py-1.5 px-3 border-r border-slate-100 text-slate-500 whitespace-nowrap">
                         {c.email || "-"}
@@ -1259,7 +1373,10 @@ export default function CustomersPage() {
               </span>
               <button
                 type="button"
-                onClick={() => setIsDocModalOpen(false)}
+                onClick={() => {
+                  setIsDocModalOpen(false);
+                  queryClient.invalidateQueries({ queryKey: ["customers"] });
+                }}
                 className="p-1 text-slate-400 hover:text-slate-600 rounded"
               >
                 <X className="w-4 h-4" />
@@ -1276,10 +1393,13 @@ export default function CustomersPage() {
             <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex justify-end">
               <button
                 type="button"
-                onClick={() => setIsDocModalOpen(false)}
+                onClick={() => {
+                  setIsDocModalOpen(false);
+                  queryClient.invalidateQueries({ queryKey: ["customers"] });
+                }}
                 className="h-7 px-4 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-xs shadow-2xs transition"
               >
-                Tutup
+                Tutup & Sinkronkan
               </button>
             </div>
           </div>

@@ -16,6 +16,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import SearchableAccountSelect from "@/components/common/SearchableAccountSelect";
 
 export default function FixedAssetsPage() {
   const router = useRouter();
@@ -584,18 +585,12 @@ export default function FixedAssetsPage() {
                 <label className="block text-slate-600 font-semibold mb-0.5">
                   Dikreditkan ke Kode Akun :
                 </label>
-                <select
+                <SearchableAccountSelect
+                  accounts={creditAccounts}
                   value={kreditAkunId}
-                  onChange={(e) => setKreditAkunId(e.target.value)}
-                  className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-[11px] focus:outline-none focus:border-sky-500"
-                >
-                  <option value="">Select...</option>
-                  {creditAccounts.map((a: any) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} - {a.name}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(val) => setKreditAkunId(val)}
+                  placeholder="Select / Cari Akun Kredit..."
+                />
               </div>
             </div>
 

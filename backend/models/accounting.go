@@ -115,6 +115,7 @@ type CashTransaction struct {
 	Account        *Account              `gorm:"foreignKey:AccountID" json:"account,omitempty"`
 	OppositeAcc    *Account              `gorm:"foreignKey:OppositeAccID" json:"opposite_acc,omitempty"`
 	TargetAccount  *Account              `gorm:"foreignKey:TargetAccountID" json:"target_account,omitempty"`
+	User           *User                 `gorm:"foreignKey:CreatedBy" json:"user,omitempty"`
 	Items          []CashTransactionItem `gorm:"foreignKey:TransactionID" json:"items,omitempty"`
 }
 

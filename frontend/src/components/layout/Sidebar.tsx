@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   Database,
@@ -341,8 +341,14 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
   onClose,
 }) => {
   const pathname = usePathname();
+  const router = useRouter();
   const { user, logout } = useAuthStore();
   const [themeMode, setThemeMode] = useState<"light" | "dark">("light");
+  const [pendingPath, setPendingPath] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPendingPath(null);
+  }, [pathname]);
 
   const { data: generalSettings } = useQuery({
     queryKey: ["settings-general"],
@@ -354,7 +360,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
         return {};
       }
     },
-    staleTime: 30000,
+    staleTime: 300000,
   });
 
   const brandName = generalSettings?.app_brand_name || "Ketoko.co.id";
@@ -389,6 +395,27 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
     Pengaturan: pathname.startsWith("/settings"),
     "E-commerce": pathname.startsWith("/ecommerce"),
   });
+
+  // Automatically keep current section expanded if navigating between routes
+  useEffect(() => {
+    if (pathname.startsWith("/master") || pathname.startsWith("/inventory/stock-card") || pathname === "/itemad" || pathname === "/kartustok" || pathname === "/datasheet") {
+      setOpenGroups((prev) => ({ ...prev, "Master Data": true }));
+    } else if (pathname.startsWith("/purchasing") || pathname.startsWith("/belilist") || pathname.startsWith("/returbelilist")) {
+      setOpenGroups((prev) => ({ ...prev, Pembelian: true }));
+    } else if (pathname.startsWith("/pos") || pathname.startsWith("/sales") || pathname.startsWith("/ecommerce")) {
+      setOpenGroups((prev) => ({ ...prev, Penjualan: true }));
+    } else if (pathname.startsWith("/assembly")) {
+      setOpenGroups((prev) => ({ ...prev, Perakitan: true }));
+    } else if (pathname.startsWith("/inventory") && !pathname.includes("stock-card")) {
+      setOpenGroups((prev) => ({ ...prev, Persediaan: true }));
+    } else if (pathname.startsWith("/accounting")) {
+      setOpenGroups((prev) => ({ ...prev, Akuntansi: true }));
+    } else if (pathname.startsWith("/reports")) {
+      setOpenGroups((prev) => ({ ...prev, Laporan: true }));
+    } else if (pathname.startsWith("/settings")) {
+      setOpenGroups((prev) => ({ ...prev, Pengaturan: true }));
+    }
+  }, [pathname]);
 
   const [openNested, setOpenNested] = useState<{ [key: string]: boolean }>({
     Wilayah: pathname.includes("/territories") || pathname.includes("/sub-territories"),
@@ -441,32 +468,35 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
   const userRole = user?.roles?.[0] || "SUPER ADMIN";
   const initialLetter = displayName.charAt(0).toUpperCase();
 
-  const handleLinkClick = () => {
+  const handleLinkClick = (href: string) => {
+    if (href !== pathname) {
+      setPendingPath(href);
+    }
     if (typeof window !== "undefined" && window.innerWidth < 768 && onClose) {
       onClose();
     }
   };
 
+  const handleMouseEnter = (href: string) => {
+    try {
+      router.prefetch(href);
+    } catch {}
+  };
+
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-40 w-52 flex flex-col transition-transform duration-300 ease-in-out select-none shadow-[2px_0_8px_rgba(0,0,0,0.03)] border-r ${
-        themeMode === "dark"
-          ? "bg-[#2d323f] text-slate-200 border-slate-700/80"
-          : "bg-white text-slate-700 border-slate-200/90"
-      } ${isOpen ? "translate-x-0" : "-translate-x-full"}`}
+      className={`fixed inset-y-0 left-0 z-40 w-52 flex flex-col transition-transform duration-300 ease-in-out select-none shadow-[2px_0_8px_rgba(0,0,0,0.03)] border-r bg-white text-slate-700 border-slate-200/90 ${
+        isOpen ? "translate-x-0" : "-translate-x-full"
+      }`}
     >
       {/* 1. BRAND HEADER (Compact Width) */}
-      <div className={`h-13 sm:h-14 px-3 flex items-center justify-between border-b shrink-0 ${
-        themeMode === "dark" ? "border-slate-700/60" : "border-slate-100"
-      }`}>
+      <div className="h-13 sm:h-14 px-3 flex items-center justify-between border-b border-slate-100 bg-white shrink-0">
         <Link href="/dashboard" className="flex items-center gap-2 py-1">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#00c875] to-emerald-700 flex items-center justify-center text-white shadow-xs shadow-emerald-500/20 shrink-0">
             <Pill className="w-4 h-4 text-white" />
           </div>
           <div className="min-w-0 flex flex-col justify-center">
-            <span className={`font-extrabold text-[13px] tracking-tight leading-snug block truncate pt-0.5 ${
-              themeMode === "dark" ? "text-white" : "text-slate-900"
-            }`}>
+            <span className="font-extrabold text-[13px] tracking-tight leading-snug block truncate pt-0.5 text-slate-900">
               {brandName}
             </span>
             <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200/60 uppercase tracking-wider block mt-0.5 w-fit leading-none">
@@ -497,16 +527,19 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
           const isCurrentActive = item.href === pathname;
 
           if (!hasSubs && item.href) {
+            const isCurrentActive = item.href === pathname || pendingPath === item.href;
+            const isPending = pendingPath === item.href;
+
             return (
               <Link
                 key={item.title}
                 href={item.href}
-                onClick={handleLinkClick}
+                prefetch={true}
+                onMouseEnter={() => handleMouseEnter(item.href!)}
+                onClick={() => handleLinkClick(item.href!)}
                 className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11.5px] transition-all duration-150 ${
                   isCurrentActive
-                    ? "bg-[#00c875] text-white font-bold shadow-sm shadow-[#00c875]/30"
-                    : themeMode === "dark"
-                    ? "text-slate-300 hover:bg-[#252936] hover:text-white font-medium"
+                    ? "bg-[#00c875] text-white font-bold shadow-xs shadow-emerald-500/20"
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium"
                 }`}
               >
@@ -515,19 +548,18 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                     isCurrentActive ? "text-white" : item.iconColor || "text-slate-400"
                   }`}
                 />
-                <span className="truncate">{item.title}</span>
+                <span className="truncate flex-1">{item.title}</span>
+                {isPending && <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping shrink-0" />}
               </Link>
             );
           }
 
           // Group Menu (with Collapsible Sub-Items)
           const isAnyChildActive = item.subItems?.some((sub) => {
-            if (pathname === sub.href) return true;
-            if (sub.children?.some((child) => child.href === pathname)) return true;
+            if (pathname === sub.href || pendingPath === sub.href) return true;
+            if (sub.children?.some((child) => child.href === pathname || child.href === pendingPath)) return true;
             return false;
           });
-
-          const isSettings = item.title === "Pengaturan";
 
           return (
             <div key={item.title} className="space-y-0.5">
@@ -536,32 +568,16 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                 onClick={() => toggleGroup(item.title)}
                 className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11.5px] transition-all duration-150 ${
                   isAnyChildActive
-                    ? isSettings
-                      ? themeMode === "dark"
-                        ? "text-[#c084fc] bg-[#242834] font-bold border border-purple-500/30"
-                        : "text-purple-700 bg-purple-50/90 font-bold border border-purple-200/80"
-                      : themeMode === "dark"
-                      ? "text-emerald-400 bg-slate-800 font-bold border border-emerald-500/30"
-                      : "text-emerald-900 bg-emerald-50/90 font-bold border border-emerald-200/80"
+                    ? "text-emerald-900 bg-emerald-50/90 font-bold border border-emerald-200/80"
                     : isGroupOpen
-                    ? themeMode === "dark"
-                      ? "text-white bg-[#262a36] font-semibold"
-                      : "text-slate-800 bg-slate-50 font-semibold"
-                    : themeMode === "dark"
-                    ? "text-slate-300 hover:bg-[#262a36] hover:text-white font-medium"
+                    ? "text-slate-800 bg-slate-50 font-semibold"
                     : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium"
                 }`}
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <Icon
                     className={`w-3.5 h-3.5 shrink-0 ${
-                      isAnyChildActive
-                        ? isSettings
-                          ? themeMode === "dark"
-                            ? "text-[#c084fc]"
-                            : "text-purple-600"
-                          : "text-[#00c875]"
-                        : item.iconColor || "text-slate-400"
+                      isAnyChildActive ? "text-[#00c875]" : item.iconColor || "text-slate-400"
                     }`}
                   />
                   <span className="truncate">{item.title}</span>
@@ -575,24 +591,24 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
 
               {/* Sub Menu Drawer */}
               {isGroupOpen && item.subItems && (
-                <div className={`pl-2.5 pr-0.5 py-0.5 space-y-0.5 border-l-2 ml-2.5 ${
-                  themeMode === "dark" ? "border-slate-700/60 bg-[#252936]/30 rounded-r" : "border-slate-100"
-                }`}>
+                <div className="pl-2.5 pr-0.5 py-0.5 space-y-0.5 border-l-2 ml-2.5 border-slate-100">
                   {item.subItems.map((sub) => {
                     const hasChildren = sub.children && sub.children.length > 0;
                     const isNestedOpen = openNested[sub.title];
                     const isSubActive =
                       pathname === sub.href ||
+                      pendingPath === sub.href ||
                       (sub.href === "/master/items" &&
                         (pathname.startsWith("/master/items") || pathname === "/itemad")) ||
                       (sub.href === "/inventory/stock-card" &&
                         (pathname.startsWith("/inventory/stock-card") || pathname === "/kartustok")) ||
                       (sub.href === "/master/datasheet" &&
                         (pathname.startsWith("/master/datasheet") || pathname === "/datasheet"));
+                    const isPending = pendingPath === sub.href;
 
                     if (hasChildren) {
                       const isAnyGrandchildActive = sub.children!.some(
-                        (c) => pathname === c.href
+                        (c) => pathname === c.href || pendingPath === c.href
                       );
 
                       return (
@@ -602,19 +618,9 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                             onClick={() => toggleNested(sub.title)}
                             className={`w-full flex items-center justify-between px-2 py-1 rounded-md text-[11px] transition-all ${
                               isAnyGrandchildActive
-                                ? isSettings
-                                  ? themeMode === "dark"
-                                    ? "text-[#c084fc] font-bold bg-[#242834]"
-                                    : "text-purple-700 font-bold bg-purple-50"
-                                  : themeMode === "dark"
-                                  ? "text-emerald-400 font-bold bg-slate-800"
-                                  : "text-emerald-900 font-bold bg-emerald-50"
+                                ? "text-emerald-900 font-bold bg-emerald-50"
                                 : isNestedOpen
-                                ? themeMode === "dark"
-                                  ? "text-white font-semibold bg-[#262a36]"
-                                  : "text-slate-800 font-semibold bg-slate-50"
-                                : themeMode === "dark"
-                                ? "text-slate-400 hover:text-white hover:bg-[#262a36] font-medium"
+                                ? "text-slate-800 font-semibold bg-slate-50"
                                 : "text-slate-500 hover:text-slate-800 hover:bg-slate-50 font-medium"
                             }`}
                           >
@@ -628,15 +634,13 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
 
                           {/* Nested Sub-Children */}
                           {isNestedOpen && (
-                            <div className={`pl-2.5 pr-0.5 py-0.5 space-y-0.5 border-l ml-1.5 ${
-                              themeMode === "dark" ? "border-slate-700" : "border-slate-200"
-                            }`}>
+                            <div className="pl-2.5 pr-0.5 py-0.5 space-y-0.5 border-l ml-1.5 border-slate-200">
                               {sub.children!.map((child) => {
                                 const hasGrandchildren = child.children && child.children.length > 0;
                                 if (hasGrandchildren) {
                                   const isChildNestedOpen = openNested[child.title];
                                   const isAnyGcActive = child.children!.some(
-                                    (gc) => pathname === gc.href
+                                    (gc) => pathname === gc.href || pendingPath === gc.href
                                   );
 
                                   return (
@@ -646,19 +650,9 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                                         onClick={() => toggleNested(child.title)}
                                         className={`w-full flex items-center justify-between px-2 py-1 rounded text-[10.5px] transition-all ${
                                           isAnyGcActive
-                                            ? isSettings
-                                              ? themeMode === "dark"
-                                                ? "text-[#c084fc] font-bold bg-[#242834]"
-                                                : "text-purple-700 font-bold bg-purple-50"
-                                              : themeMode === "dark"
-                                              ? "text-emerald-400 font-bold bg-slate-800"
-                                              : "text-emerald-900 font-bold bg-emerald-50"
+                                            ? "text-emerald-900 font-bold bg-emerald-50"
                                             : isChildNestedOpen
-                                            ? themeMode === "dark"
-                                              ? "text-white font-semibold bg-[#262a36]"
-                                              : "text-slate-800 font-semibold bg-slate-50"
-                                            : themeMode === "dark"
-                                            ? "text-slate-400 hover:text-white hover:bg-[#262a36] font-medium"
+                                            ? "text-slate-800 font-semibold bg-slate-50"
                                             : "text-slate-500 hover:text-slate-800 hover:bg-slate-50 font-medium"
                                         }`}
                                       >
@@ -671,27 +665,25 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                                       </button>
 
                                       {isChildNestedOpen && (
-                                        <div className={`pl-2 pr-0.5 py-0.5 space-y-0.5 border-l ml-1.5 ${
-                                          themeMode === "dark" ? "border-slate-700" : "border-slate-200"
-                                        }`}>
+                                        <div className="pl-2 pr-0.5 py-0.5 space-y-0.5 border-l ml-1.5 border-slate-200">
                                           {child.children!.map((gc) => {
-                                            const isGcActive = pathname === gc.href;
+                                            const isGcActive = pathname === gc.href || pendingPath === gc.href;
+                                            const isGcPending = pendingPath === gc.href;
                                             return (
                                               <Link
                                                 key={gc.href}
                                                 href={gc.href}
-                                                onClick={handleLinkClick}
-                                                className={`block px-2 py-0.5 rounded text-[10px] transition-all truncate ${
+                                                prefetch={true}
+                                                onMouseEnter={() => handleMouseEnter(gc.href)}
+                                                onClick={() => handleLinkClick(gc.href)}
+                                                className={`flex items-center justify-between px-2 py-0.5 rounded text-[10px] transition-all truncate ${
                                                   isGcActive
-                                                    ? isSettings
-                                                      ? "bg-purple-600 text-white font-bold shadow-xs shadow-purple-600/30"
-                                                      : "bg-[#00c875] text-white font-bold shadow-xs shadow-[#00c875]/30"
-                                                    : themeMode === "dark"
-                                                    ? "text-slate-400 hover:text-white hover:bg-[#262a36]"
+                                                    ? "bg-[#00c875] text-white font-bold shadow-xs shadow-[#00c875]/30"
                                                     : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
                                                 }`}
                                               >
-                                                {gc.title}
+                                                <span className="truncate">{gc.title}</span>
+                                                {isGcPending && <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping shrink-0 ml-1" />}
                                               </Link>
                                             );
                                           })}
@@ -701,23 +693,23 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                                   );
                                 }
 
-                                const isChildActive = pathname === child.href;
+                                const isChildActive = pathname === child.href || pendingPath === child.href;
+                                const isChildPending = pendingPath === child.href;
                                 return (
                                   <Link
                                     key={child.href}
                                     href={child.href}
-                                    onClick={handleLinkClick}
-                                    className={`block px-2 py-1 rounded text-[10.5px] transition-all truncate ${
+                                    prefetch={true}
+                                    onMouseEnter={() => handleMouseEnter(child.href)}
+                                    onClick={() => handleLinkClick(child.href)}
+                                    className={`flex items-center justify-between px-2 py-1 rounded text-[10.5px] transition-all truncate ${
                                       isChildActive
-                                        ? isSettings
-                                          ? "bg-purple-600 text-white font-bold shadow-xs shadow-purple-600/30"
-                                          : "bg-[#00c875] text-white font-bold shadow-xs shadow-[#00c875]/30"
-                                        : themeMode === "dark"
-                                        ? "text-slate-400 hover:text-white hover:bg-[#262a36]"
+                                        ? "bg-[#00c875] text-white font-bold shadow-xs shadow-[#00c875]/30"
                                         : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
                                     }`}
                                   >
-                                    {child.title}
+                                    <span className="truncate">{child.title}</span>
+                                    {isChildPending && <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping shrink-0 ml-1" />}
                                   </Link>
                                 );
                               })}
@@ -732,18 +724,17 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
                       <Link
                         key={sub.href}
                         href={sub.href}
-                        onClick={handleLinkClick}
-                        className={`block px-2 py-1 rounded-md text-[11px] transition-all truncate ${
+                        prefetch={true}
+                        onMouseEnter={() => handleMouseEnter(sub.href)}
+                        onClick={() => handleLinkClick(sub.href)}
+                        className={`flex items-center justify-between px-2 py-1 rounded-md text-[11px] transition-all truncate ${
                           isSubActive
-                            ? isSettings
-                              ? "bg-purple-600 text-white font-bold shadow-xs shadow-purple-600/30"
-                              : "bg-[#00c875] text-white font-bold shadow-xs shadow-[#00c875]/30"
-                            : themeMode === "dark"
-                            ? "text-slate-300 hover:text-white hover:bg-[#262a36] font-medium"
+                            ? "bg-[#00c875] text-white font-bold shadow-xs shadow-[#00c875]/30"
                             : "text-slate-500 hover:text-slate-900 hover:bg-slate-50 font-medium"
                         }`}
                       >
-                        {sub.title}
+                        <span className="truncate">{sub.title}</span>
+                        {isPending && <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping shrink-0 ml-1" />}
                       </Link>
                     );
                   })}
@@ -755,9 +746,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
       </div>
 
       {/* 4. PINNED MODERN USER PROFILE FOOTER */}
-      <div className={`p-2.5 border-t flex items-center justify-between shrink-0 ${
-        themeMode === "dark" ? "bg-[#242834] border-slate-700/80 text-slate-300" : "bg-slate-50/90 border-slate-200/90"
-      }`}>
+      <div className="p-2.5 border-t border-slate-200/90 bg-slate-50/90 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-800 font-bold flex items-center justify-center text-[11px] border border-emerald-200 shrink-0 shadow-xs">
             {initialLetter}
@@ -767,7 +756,7 @@ export const Sidebar: React.FC<{ isOpen: boolean; onClose?: () => void }> = ({
               {displayName}
             </div>
             <div className="flex items-center gap-1 mt-0.5">
-              <span className="bg-purple-100 text-purple-700 border border-purple-200 text-[8.5px] font-extrabold px-1 py-0.2 rounded leading-tight uppercase truncate">
+              <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-[8.5px] font-extrabold px-1 py-0.2 rounded leading-tight uppercase truncate">
                 {userRole}
               </span>
             </div>

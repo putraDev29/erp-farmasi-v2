@@ -28,6 +28,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
 interface ItemDiscountRow {
   group_code: string;
@@ -307,11 +308,33 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
     }
   }, [units, baseUnitID]);
 
+  // Auto-fill default markup from general settings if new item and markup is 0
+  useEffect(() => {
+    if (!isEdit && generalSettings?.min_profit_percent) {
+      const defaultMargin = parseFloat(generalSettings.min_profit_percent);
+      if (!isNaN(defaultMargin) && defaultMargin > 0 && markupPercent === 0) {
+        setMarkupPercent(defaultMargin);
+        if (purchasePrice > 0) {
+          setSellingPrice(Math.round(purchasePrice * (1 + defaultMargin / 100)));
+        }
+      }
+    }
+  }, [generalSettings, isEdit, markupPercent, purchasePrice]);
+
   // Calculate Harga Jual from Harga Pokok and Proc %
   const handlePurchasePriceChange = (val: number) => {
     setPurchasePrice(val);
-    if (markupPercent > 0) {
-      const calculatedSell = val * (1 + markupPercent / 100);
+    const effectiveMarkup =
+      markupPercent > 0
+        ? markupPercent
+        : parseFloat(generalSettings?.min_profit_percent || "0") || 0;
+
+    if (markupPercent === 0 && effectiveMarkup > 0) {
+      setMarkupPercent(effectiveMarkup);
+    }
+
+    if (effectiveMarkup > 0) {
+      const calculatedSell = val * (1 + effectiveMarkup / 100);
       setSellingPrice(Math.round(calculatedSell));
     }
   };
@@ -1205,137 +1228,97 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
             {/* Harga Pokok Penjualan */}
             <div>
               <label className="block text-slate-700 font-medium mb-1">Harga Pokok Penjualan :</label>
-              <select
+              <SearchableAccountSelect
+                accounts={accounts}
                 value={cogsAccountID}
-                onChange={(e) => setCogsAccountID(e.target.value)}
-                className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-sky-500 bg-white"
-              >
-                <option value="">HARGA POKOK PENJUALAN</option>
-                {accounts.map((a: any) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} - {a.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setCogsAccountID(val)}
+                placeholder="-- Pilih / Cari Akun HPP --"
+                buttonClassName="h-8 text-xs"
+              />
             </div>
 
             {/* Pendapatan Jual */}
             <div>
               <label className="block text-slate-700 font-medium mb-1">Pendapatan Jual :</label>
-              <select
+              <SearchableAccountSelect
+                accounts={accounts}
                 value={salesAccountID}
-                onChange={(e) => setSalesAccountID(e.target.value)}
-                className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-sky-500 bg-white"
-              >
-                <option value="">PENDAPATAN JUAL</option>
-                {accounts.map((a: any) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} - {a.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setSalesAccountID(val)}
+                placeholder="-- Pilih / Cari Akun Pendapatan Jual --"
+                buttonClassName="h-8 text-xs"
+              />
             </div>
 
             {/* Pendapatan Jasa */}
             <div>
               <label className="block text-slate-700 font-medium mb-1">Pendapatan Jasa :</label>
-              <select
+              <SearchableAccountSelect
+                accounts={accounts}
                 value={serviceRevenueAccountID}
-                onChange={(e) => setServiceRevenueAccountID(e.target.value)}
-                className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-sky-500 bg-white"
-              >
-                <option value="">PENDAPATAN JASA</option>
-                {accounts.map((a: any) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} - {a.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setServiceRevenueAccountID(val)}
+                placeholder="-- Pilih / Cari Akun Pendapatan Jasa --"
+                buttonClassName="h-8 text-xs"
+              />
             </div>
 
             {/* Persediaan */}
             <div>
               <label className="block text-slate-700 font-medium mb-1">Persediaan :</label>
-              <select
+              <SearchableAccountSelect
+                accounts={accounts}
                 value={inventoryAccountID}
-                onChange={(e) => setInventoryAccountID(e.target.value)}
-                className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-sky-500 bg-white"
-              >
-                <option value="">PERSEDIAAN BARANG</option>
-                {accounts.map((a: any) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} - {a.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setInventoryAccountID(val)}
+                placeholder="-- Pilih / Cari Akun Persediaan --"
+                buttonClassName="h-8 text-xs"
+              />
             </div>
 
             {/* Biaya Non Inventory */}
             <div>
               <label className="block text-slate-700 font-medium mb-1">Biaya Non Inventory :</label>
-              <select
+              <SearchableAccountSelect
+                accounts={accounts}
                 value={nonInventoryExpenseAccountID}
-                onChange={(e) => setNonInventoryExpenseAccountID(e.target.value)}
-                className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-sky-500 bg-white"
-              >
-                <option value="">BIAYA BELANJA NON INVENTORY</option>
-                {accounts.map((a: any) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} - {a.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setNonInventoryExpenseAccountID(val)}
+                placeholder="-- Pilih / Cari Akun Biaya Non Inventory --"
+                buttonClassName="h-8 text-xs"
+              />
             </div>
 
             {/* Persediaan Lainnya */}
             <div>
               <label className="block text-slate-700 font-medium mb-1">Persediaan Lainnya :</label>
-              <select
+              <SearchableAccountSelect
+                accounts={accounts}
                 value={wipInventoryAccountID}
-                onChange={(e) => setWipInventoryAccountID(e.target.value)}
-                className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-sky-500 bg-white"
-              >
-                <option value="">PERSEDIAAN BARANG DALAM PROSES</option>
-                {accounts.map((a: any) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} - {a.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setWipInventoryAccountID(val)}
+                placeholder="-- Pilih / Cari Akun Persediaan Barang Dalam Proses --"
+                buttonClassName="h-8 text-xs"
+              />
             </div>
 
             {/* Biaya Tenaga Kerja */}
             <div>
               <label className="block text-slate-700 font-medium mb-1">Biaya Tenaga Kerja :</label>
-              <select
+              <SearchableAccountSelect
+                accounts={accounts}
                 value={assemblyLaborAccountID}
-                onChange={(e) => setAssemblyLaborAccountID(e.target.value)}
-                className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-sky-500 bg-white"
-              >
-                <option value="">HUTANG GAJI PROSES PERAKITAN</option>
-                {accounts.map((a: any) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} - {a.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setAssemblyLaborAccountID(val)}
+                placeholder="-- Pilih / Cari Akun Gaji Proses Perakitan --"
+                buttonClassName="h-8 text-xs"
+              />
             </div>
 
             {/* Biaya Overhead */}
             <div>
               <label className="block text-slate-700 font-medium mb-1">Biaya Overhead :</label>
-              <select
+              <SearchableAccountSelect
+                accounts={accounts}
                 value={assemblyOverheadAccountID}
-                onChange={(e) => setAssemblyOverheadAccountID(e.target.value)}
-                className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-sky-500 bg-white"
-              >
-                <option value="">HUTANG BIAYA OVERHEAD PROSES PERAKITAN</option>
-                {accounts.map((a: any) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} - {a.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setAssemblyOverheadAccountID(val)}
+                placeholder="-- Pilih / Cari Akun Overhead Proses Perakitan --"
+                buttonClassName="h-8 text-xs"
+              />
             </div>
           </div>
         )}

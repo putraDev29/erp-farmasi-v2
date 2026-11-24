@@ -22,8 +22,9 @@ interface CariObatSalesModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelect: (item: any) => void;
-  saleType?: "APOTEK" | "PBF"; // APOTEK: retail sale, PBF: wholesale B2B distributor sale
+  saleType?: "APOTEK" | "PBF" | "RETAIL_KASIR"; // APOTEK: retail sale, PBF: wholesale B2B distributor sale, RETAIL_KASIR: strict OTC only
   warehouseId?: string;
+  retailOnly?: boolean; // When true, strictly hide prescription-only drugs (Obat Keras, Narkotika, Psikotropika, Prekursor, OOT, Khusus RS)
 }
 
 export const CariObatSalesModal: React.FC<CariObatSalesModalProps> = ({
@@ -32,6 +33,7 @@ export const CariObatSalesModal: React.FC<CariObatSalesModalProps> = ({
   onSelect,
   saleType = "APOTEK",
   warehouseId,
+  retailOnly = false,
 }) => {
   // Filters matching Ketoko Spec (Image 2)
   const [keyword, setKeyword] = useState("");
@@ -106,7 +108,9 @@ export const CariObatSalesModal: React.FC<CariObatSalesModalProps> = ({
       }
 
       // Pharmacy vs PBF Filter
-      if (distributionFilter === "APOTEK_ELIGIBLE") {
+      if (retailOnly || saleType === "RETAIL_KASIR") {
+        params.append("retail_only", "true");
+      } else if (distributionFilter === "APOTEK_ELIGIBLE") {
         params.append("target_facility", "apotek");
       } else if (distributionFilter === "PBF_ONLY") {
         params.append("distribution_channel", "PBF_ONLY");
@@ -145,6 +149,29 @@ export const CariObatSalesModal: React.FC<CariObatSalesModalProps> = ({
 
   const handleChoose = (item: any) => {
     if (!item) return;
+
+    const isRetailMode = retailOnly || saleType === "RETAIL_KASIR";
+    if (isRetailMode) {
+      const cls = String(item.drug_classification || "").toUpperCase();
+      if (
+        cls === "OBAT_KERAS" ||
+        cls === "NARKOTIKA" ||
+        cls === "PSIKOTROPIKA" ||
+        cls === "PREKURSOR" ||
+        cls === "OOT" ||
+        cls === "OBAT_KHUSUS_RS" ||
+        item.distribution_channel === "PBF_ONLY" ||
+        item.is_sold_in_pharmacy === false
+      ) {
+        alert(
+          `⛔ PERINGATAN REGULASI BPOM & KEFARMASIAN!\n\nObat "${item.name}" tergolong ${formatClassification(
+            cls
+          )} (Wajib Resep Dokter).\nObat ini TIDAK BOLEH dijual bebas di kasir retail.\n\nSilakan buat transaksi melalui menu Penjualan Resep / Faktur Penjualan Reguler.`
+        );
+        return;
+      }
+    }
+
     // Check regulatory restriction: if transaction is APOTEK, PBF_ONLY items cannot be sold!
     if (saleType === "APOTEK" && (item.distribution_channel === "PBF_ONLY" || item.is_sold_in_pharmacy === false)) {
       alert(
@@ -253,24 +280,26 @@ export const CariObatSalesModal: React.FC<CariObatSalesModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-2xs flex items-center justify-center p-2 sm:p-4 select-none">
       <div className="bg-white rounded-xl shadow-2xl border border-slate-300 w-full max-w-7xl max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150 text-xs">
-        {/* Title Bar matching Image 2 */}
-        <div className="px-4 py-2 bg-slate-50 border-b border-slate-300 flex items-center justify-between shrink-0">
+        {/* Title Bar - Ketoko Green Theme */}
+        <div className="px-4 py-2.5 bg-[#00c875] text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-bold text-slate-800">Cari Item...</h2>
+            <h2 className="text-sm font-bold text-white tracking-wide">Cari Item / Obat (Aturan FEFO)</h2>
             <span
               className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
-                saleType === "PBF"
-                  ? "bg-blue-100 text-blue-800 border border-blue-300"
-                  : "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                retailOnly || saleType === "RETAIL_KASIR"
+                  ? "bg-amber-100 text-amber-900 border border-amber-300"
+                  : saleType === "PBF"
+                  ? "bg-blue-100 text-blue-900"
+                  : "bg-white text-emerald-800"
               }`}
             >
-              Mode Penjualan: {saleType === "PBF" ? "PBF / B2B Grosir" : "Apotek Retail"}
+              Mode: {retailOnly || saleType === "RETAIL_KASIR" ? "Kasir Retail Bebas (OTC & Alkes Saja)" : saleType === "PBF" ? "PBF / B2B Grosir" : "Apotek Retail & Resep"}
             </span>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded transition"
+            className="p-1 text-white/80 hover:text-white hover:bg-white/20 rounded transition"
             title="Tutup (Esc)"
           >
             <X className="w-4 h-4" />
@@ -320,15 +349,27 @@ export const CariObatSalesModal: React.FC<CariObatSalesModalProps> = ({
                 onChange={(e) => setSelectedDrugClass(e.target.value)}
                 className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] text-slate-800 focus:outline-none focus:border-sky-500 bg-white"
               >
-                <option value="Semua">Semua</option>
-                <option value="OBAT_BEBAS">Obat Bebas</option>
-                <option value="OBAT_BEBAS_TERBATAS">Obat Bebas Terbatas</option>
-                <option value="OBAT_KERAS">Obat Keras (Resep)</option>
-                <option value="PSIKOTROPIKA">Psikotropika</option>
-                <option value="NARKOTIKA">Narkotika</option>
-                <option value="PREKURSOR">Prekursor Farmasi</option>
-                <option value="OOT">Obat Tertentu (OOT)</option>
-                <option value="ALKES">Alkes &amp; BHP</option>
+                {retailOnly || saleType === "RETAIL_KASIR" ? (
+                  <>
+                    <option value="Semua">Semua (Khusus Retail Bebas)</option>
+                    <option value="OBAT_BEBAS">Obat Bebas (Lingkaran Hijau)</option>
+                    <option value="OBAT_BEBAS_TERBATAS">Obat Bebas Terbatas (Lingkaran Biru)</option>
+                    <option value="ALKES">Alkes &amp; BHP</option>
+                    <option value="LAINNYA">Suplemen, Vitamin &amp; Herbal</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="Semua">Semua</option>
+                    <option value="OBAT_BEBAS">Obat Bebas</option>
+                    <option value="OBAT_BEBAS_TERBATAS">Obat Bebas Terbatas</option>
+                    <option value="OBAT_KERAS">Obat Keras (Resep)</option>
+                    <option value="PSIKOTROPIKA">Psikotropika</option>
+                    <option value="NARKOTIKA">Narkotika</option>
+                    <option value="PREKURSOR">Prekursor Farmasi</option>
+                    <option value="OOT">Obat Tertentu (OOT)</option>
+                    <option value="ALKES">Alkes &amp; BHP</option>
+                  </>
+                )}
               </select>
             </div>
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"farmasi/backend/models"
+	"farmasi/backend/services"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -74,10 +75,13 @@ func SeedKetokoAccountingMaster(db *gorm.DB, companyID, branchID, userID uuid.UU
 		{"4-1100", "PENDAPATAN JUAL", "REVENUE", "SALES", "CREDIT", false, "4-0000"},
 		{"4-1200", "POTONGAN PENJUALAN", "REVENUE", "SALES", "DEBIT", false, "4-0000"},
 		{"4-1300", "RETUR PENJUALAN", "REVENUE", "SALES", "DEBIT", false, "4-0000"},
+		{"4-1400", "KERINGANAN PIUTANG", "REVENUE", "SALES", "DEBIT", false, "4-0000"},
 
 		// 5. HPP
 		{"5-0000", "HPP", "EXPENSE", "HEADER", "DEBIT", true, ""},
+		{"5-1100", "POTONGAN PEMBELIAN", "EXPENSE", "COGS", "CREDIT", false, "5-0000"},
 		{"5-1300", "HARGA POKOK PENJUALAN", "EXPENSE", "COGS", "DEBIT", false, "5-0000"},
+		{"5-2100", "KERINGANAN HUTANG", "EXPENSE", "COGS", "CREDIT", false, "5-0000"},
 		{"5-2200", "PENGATURAN STOK / SELISIH OPNAME", "EXPENSE", "COGS", "DEBIT", false, "5-0000"},
 
 		// 6. BIAYA
@@ -199,12 +203,6 @@ func SeedKetokoAccountingMaster(db *gorm.DB, companyID, branchID, userID uuid.UU
 						Debit:     se.Debit,
 						Credit:    se.Credit,
 					}).FirstOrCreate(&models.InitialBalanceEntry{})
-
-				bal := se.Debit - se.Credit
-				if se.Credit > se.Debit {
-					bal = se.Credit - se.Debit
-				}
-				db.Model(&models.Account{}).Where("id = ?", aID).Update("balance", bal)
 			}
 		}
 	} else {
@@ -239,12 +237,6 @@ func SeedKetokoAccountingMaster(db *gorm.DB, companyID, branchID, userID uuid.UU
 						Debit:     se.Debit,
 						Credit:    se.Credit,
 					}).FirstOrCreate(&models.InitialBalanceEntry{})
-
-				bal := se.Debit - se.Credit
-				if se.Credit > se.Debit {
-					bal = se.Credit - se.Debit
-				}
-				db.Model(&models.Account{}).Where("id = ?", aID).Update("balance", bal)
 			}
 		}
 	}
@@ -614,6 +606,8 @@ func SeedKetokoAccountingMaster(db *gorm.DB, companyID, branchID, userID uuid.UU
 			}
 		}
 	}
+
+	_ = services.SyncAllAccountBalances(db, companyID)
 
 	log.Println("[Seed] Ketoko Chart of Accounts and real linked transactions successfully synced!")
 }

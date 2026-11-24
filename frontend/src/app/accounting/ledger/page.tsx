@@ -11,6 +11,7 @@ import {
   Play,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
 export default function GeneralLedgerPage() {
   const router = useRouter();
@@ -166,17 +167,12 @@ export default function GeneralLedgerPage() {
 
             <div className="flex-1 min-w-[240px]">
               <label className="block text-slate-600 font-semibold mb-0.5">Kode Akun :</label>
-              <select
+              <SearchableAccountSelect
+                accounts={accounts}
                 value={accountID}
-                onChange={(e) => setAccountID(e.target.value)}
-                className="w-full h-6 px-2 border border-slate-300 rounded bg-white text-[11px] focus:outline-none focus:border-sky-500 font-mono"
-              >
-                {accounts.map((a: any) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} - {a.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setAccountID(val)}
+                placeholder="Pilih / Cari Akun Buku Besar..."
+              />
             </div>
 
             <button
