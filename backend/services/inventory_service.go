@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"farmasi/backend/models"
@@ -44,13 +45,15 @@ func GetAvailableBatchesFEFO(db *gorm.DB, warehouseID, productID uuid.UUID) ([]m
 	return batches, err
 }
 
-// MutateStock performs concurrency-safe stock updates with moving average costing,
+// MutateStockWithBatches performs concurrency-safe stock updates with moving average costing,
 // batch management, and strict FEFO (First Expired, First Out) deduction for pharmacy compliance.
-func MutateStock(tx *gorm.DB, params StockMutationParams) (*models.StockBalance, error) {
+// It returns the updated StockBalance and the list of deducted batches (with quantities and EDs).
+func MutateStockWithBatches(tx *gorm.DB, params StockMutationParams) (*models.StockBalance, []DeductedBatchResult, error) {
 	if params.Qty <= 0 {
-		return nil, errors.New("kuantitas mutasi harus lebih besar dari 0")
+		return nil, nil, errors.New("kuantitas mutasi harus lebih besar dari 0")
 	}
 
+	var deductedBatches []DeductedBatchResult
 	var balance models.StockBalance
 	// Lock the stock balance row
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -60,7 +63,7 @@ func MutateStock(tx *gorm.DB, params StockMutationParams) (*models.StockBalance,
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if params.MovementType == "OUT" {
-				return nil, fmt.Errorf("stok tidak mencukupi di gudang ini (stok 0)")
+				return nil, nil, fmt.Errorf("stok tidak mencukupi di gudang ini (stok 0)")
 			}
 			// Create new record for IN
 			balance = models.StockBalance{
@@ -74,10 +77,10 @@ func MutateStock(tx *gorm.DB, params StockMutationParams) (*models.StockBalance,
 				ExpiredDate:  params.ExpiredDate,
 			}
 			if err := tx.Create(&balance).Error; err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		} else {
-			return nil, err
+			return nil, nil, err
 		}
 	} else {
 		// Existing balance
@@ -99,14 +102,14 @@ func MutateStock(tx *gorm.DB, params StockMutationParams) (*models.StockBalance,
 			}
 		} else if params.MovementType == "OUT" {
 			if balance.AvailableQty < params.Qty {
-				return nil, fmt.Errorf("stok tidak mencukupi (Tersedia: %.2f, Diminta: %.2f)", balance.AvailableQty, params.Qty)
+				return nil, nil, fmt.Errorf("stok tidak mencukupi (Tersedia: %.2f, Diminta: %.2f)", balance.AvailableQty, params.Qty)
 			}
 			balance.Qty -= params.Qty
 			balance.AvailableQty = balance.Qty - balance.ReservedQty
 		}
 
 		if err := tx.Save(&balance).Error; err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
@@ -180,19 +183,48 @@ func MutateStock(tx *gorm.DB, params StockMutationParams) (*models.StockBalance,
 		tx.Create(&movement)
 
 	} else if params.MovementType == "OUT" {
-		// Outbound: Deduct batches following FEFO (Earliest Expired First) or target batch
+		// Outbound: Deduct batches following target batch (if chosen by ED) first, or FEFO (Earliest Expired First)
 		var batches []models.ProductBatch
-		orderClause := "expired_date ASC, created_at ASC"
+		qBatch := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("warehouse_id = ? AND product_id = ? AND current_qty > 0", params.WarehouseID, params.ProductID)
 		if params.BatchNumber != "" {
-			orderClause = fmt.Sprintf("CASE WHEN batch_number = '%s' THEN 0 ELSE 1 END, expired_date ASC, created_at ASC", params.BatchNumber)
+			qBatch = qBatch.Order(clause.Expr{
+				SQL:  "CASE WHEN batch_number = ? THEN 0 ELSE 1 END, expired_date ASC, created_at ASC",
+				Vars: []interface{}{params.BatchNumber},
+			})
+		} else {
+			qBatch = qBatch.Order("expired_date ASC, created_at ASC")
 		}
-		tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("warehouse_id = ? AND product_id = ? AND current_qty > 0", params.WarehouseID, params.ProductID).
-			Order(orderClause).
-			Find(&batches)
+		qBatch.Find(&batches)
+
+		// Self-healing fallback: if no batches found directly on product_id,
+		// check if batches exist under related/original product_id (e.g. copied/duplicated or code match)
+		if len(batches) == 0 {
+			var p models.Product
+			if tx.Unscoped().First(&p, params.ProductID).Error == nil {
+				cleanCode := strings.TrimSuffix(p.Code, "-COPY")
+				var relatedProd models.Product
+				if tx.Unscoped().Where("(code = ? OR code = ?) AND id != ?", cleanCode, p.Code+"-COPY", params.ProductID).First(&relatedProd).Error == nil {
+					qFallback := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+						Where("warehouse_id = ? AND product_id = ? AND current_qty > 0", params.WarehouseID, relatedProd.ID)
+					if params.BatchNumber != "" {
+						qFallback = qFallback.Order(clause.Expr{
+							SQL:  "CASE WHEN batch_number = ? THEN 0 ELSE 1 END, expired_date ASC, created_at ASC",
+							Vars: []interface{}{params.BatchNumber},
+						})
+					} else {
+						qFallback = qFallback.Order("expired_date ASC, created_at ASC")
+					}
+					qFallback.Find(&batches)
+					if len(batches) > 0 {
+						// Auto-migrate orphaned batches to the active product ID
+						tx.Model(&models.ProductBatch{}).Where("product_id = ?", relatedProd.ID).Update("product_id", params.ProductID)
+					}
+				}
+			}
+		}
 
 		remainingQtyToDeduct := params.Qty
-		var deductedBatches []DeductedBatchResult
 
 		for i := range batches {
 			if remainingQtyToDeduct <= 0 {
@@ -243,6 +275,12 @@ func MutateStock(tx *gorm.DB, params StockMutationParams) (*models.StockBalance,
 			if batchNo == "" {
 				batchNo = "DEFAULT"
 			}
+			deductedBatches = append(deductedBatches, DeductedBatchResult{
+				BatchNumber: batchNo,
+				ExpiredDate: balance.ExpiredDate,
+				Qty:         remainingQtyToDeduct,
+				CostPrice:   params.UnitCost,
+			})
 			tx.Create(&models.StockMovement{
 				CompanyID:    params.CompanyID,
 				BranchID:     params.BranchID,
@@ -262,7 +300,24 @@ func MutateStock(tx *gorm.DB, params StockMutationParams) (*models.StockBalance,
 				CreatedAt:    time.Now(),
 			})
 		}
+
+		// Update StockBalance header to point to next available FEFO batch
+		var nextEarliest models.ProductBatch
+		if errNext := tx.Where("warehouse_id = ? AND product_id = ? AND current_qty > 0", params.WarehouseID, params.ProductID).
+			Order("expired_date ASC, created_at ASC").
+			First(&nextEarliest).Error; errNext == nil {
+			balance.BatchNumber = nextEarliest.BatchNumber
+			expCopy := nextEarliest.ExpiredDate
+			balance.ExpiredDate = &expCopy
+			tx.Save(&balance)
+		}
 	}
 
-	return &balance, nil
+	return &balance, deductedBatches, nil
+}
+
+// MutateStock is a backward-compatible wrapper around MutateStockWithBatches.
+func MutateStock(tx *gorm.DB, params StockMutationParams) (*models.StockBalance, error) {
+	bal, _, err := MutateStockWithBatches(tx, params)
+	return bal, err
 }

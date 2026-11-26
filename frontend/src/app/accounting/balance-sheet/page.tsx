@@ -26,7 +26,7 @@ export default function BalanceSheetPage() {
       <div className="shrink-0 flex items-center justify-between border-b border-slate-200 pb-1">
         <div>
           <h1 className="text-sm font-bold text-slate-800">Neraca Keuangan (Balance Sheet)</h1>
-          <p className="text-[11px] text-slate-500">Posisi harta aktiva, kewajiban utang, dan ekuitas modal apotek.</p>
+          
         </div>
       </div>
 

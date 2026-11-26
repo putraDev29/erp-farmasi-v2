@@ -219,9 +219,6 @@ export default function ExpiredDrugsPage() {
                 CDOB / BPOM
               </span>
             </h1>
-            <p className="text-slate-500 text-xs">
-              Sistem peringatan dini (Early Warning System) pengawasan masa simpan &amp; nomor batch obat apotek.
-            </p>
           </div>
         </div>
 

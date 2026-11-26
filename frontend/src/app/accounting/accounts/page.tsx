@@ -509,6 +509,7 @@ export default function AccountsPage() {
                     onChange={(val) => setParentAccountId(val)}
                     placeholder="-- Posisi Utama / Cari Induk Akun --"
                     allowClear={true}
+                    includeHeaders={true}
                   />
                 </div>
               </div>

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
 import { CariSupplierModal } from "@/components/purchasing/CariSupplierModal";
+import { SettlePurchaseReturnModal } from "@/components/purchasing/SettlePurchaseReturnModal";
 import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
 interface DebtRow {
@@ -28,11 +29,14 @@ interface DebtRow {
   pbf_invoice_no?: string;
   date: string;
   due_date: string;
+  total_amount?: number;
+  paid_amount?: number;
   remaining_amount: number;
   discount: number;
   total: number;
   is_pay: boolean;
   pay_amount: number;
+  notes?: string;
 }
 
 const formatRupiahNumber = (val: number): string => {
@@ -55,6 +59,7 @@ export default function NewSupplierPaymentPage() {
 
   // Modals
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
+  const [selectedReturnForSettle, setSelectedReturnForSettle] = useState<any>(null);
 
   // Header State matching Screenshot 7
   const [paymentNo, setPaymentNo] = useState("Auto");
@@ -124,15 +129,30 @@ export default function NewSupplierPaymentPage() {
           pbf_invoice_no: inv.pbf_invoice_no || "-",
           date: inv.date,
           due_date: inv.due_date || inv.date,
+          total_amount: Number(inv.total_amount) || sisa,
+          paid_amount: Number(inv.paid_amount) || 0,
           remaining_amount: sisa,
           discount: 0,
           total: sisa,
           is_pay: false,
           pay_amount: 0,
+          notes: inv.notes || "",
         };
       });
 
       return mappedPurchases;
+    },
+  });
+
+  // Fetch Pending Purchase Returns for this supplier (status=SELESAI, settlement_status=PENDING)
+  const { data: pendingReturns = [] } = useQuery({
+    queryKey: ["pending-returns-settlement", selectedSupplier?.id],
+    enabled: !!selectedSupplier?.id,
+    queryFn: async () => {
+      const res = await api.get(
+        `/purchases/returns?supplier_id=${selectedSupplier.id}&status=SELESAI&settlement_status=PENDING`
+      );
+      return res.data?.data || [];
     },
   });
 
@@ -466,16 +486,17 @@ export default function NewSupplierPaymentPage() {
                     Memuat daftar faktur &amp; tagihan PO hutang supplier...
                   </td>
                 </tr>
-              ) : rows.length === 0 ? (
+              ) : rows.length === 0 && pendingReturns.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="py-16 text-center text-slate-400">
                     {selectedSupplier
-                      ? "Tidak ada tagihan hutang yang belum lunas untuk supplier ini."
+                      ? "Tidak ada tagihan hutang atau retur yang belum diselesaikan untuk supplier ini."
                       : "Pilih Supplier di atas untuk menampilkan daftar tagihan hutang."}
                   </td>
                 </tr>
               ) : (
-                rows.map((r, idx) => {
+                <>
+                  {rows.map((r, idx) => {
                   const isSelected = selectedRowIndex === idx;
                   return (
                     <tr
@@ -582,7 +603,51 @@ export default function NewSupplierPaymentPage() {
                       </td>
                     </tr>
                   );
-                })
+                })}
+                  {pendingReturns.map((ret: any, rIdx: number) => (
+                    <tr
+                      key={`ret-${ret.id}`}
+                      onClick={() => setSelectedReturnForSettle(ret)}
+                      className="cursor-pointer transition bg-amber-50/60 hover:bg-amber-100/70"
+                      title="Klik untuk menyelesaikan retur (Potong Hutang atau Pengembalian Dana)"
+                    >
+                      <td className="py-1 px-1.5 text-center text-slate-500 border-r border-slate-200">
+                        {rows.length + rIdx + 1}
+                      </td>
+                      <td className="py-1 px-2 border-r border-slate-200 whitespace-nowrap">
+                        <span className="inline-block px-1.5 py-0.2 rounded text-[9.5px] font-bold mr-1 bg-amber-100 text-amber-800 border border-amber-300">
+                          Retur
+                        </span>
+                        <span className="font-mono font-bold text-amber-900">{ret.return_no}</span>
+                      </td>
+                      <td className="py-1 px-2 whitespace-nowrap border-r border-slate-200 font-mono text-slate-600 bg-sky-50/30">
+                        {ret.purchase?.invoice_no || "-"}
+                      </td>
+                      <td className="py-1 px-2 whitespace-nowrap border-r border-slate-200 text-slate-600">
+                        {formatDate(ret.date)}
+                      </td>
+                      <td className="py-1 px-2 whitespace-nowrap border-r border-slate-200 text-slate-400">
+                        -
+                      </td>
+                      <td className="py-1 px-2 text-right font-mono font-bold text-amber-800 border-r border-slate-200">
+                        {formatCurrency(ret.total_amount)}
+                      </td>
+                      <td className="py-1 px-2 text-right text-slate-400 border-r border-slate-200">
+                        -
+                      </td>
+                      <td className="py-1 px-2 text-right font-mono font-semibold text-amber-900 border-r border-slate-200">
+                        {formatCurrency(ret.total_amount)}
+                      </td>
+                      <td className="py-1 px-1.5 text-center border-r border-slate-200" />
+                      <td className="py-0.5 px-1 text-right border-r border-slate-200" />
+                      <td className="py-1 px-2 text-center whitespace-nowrap">
+                        <span className="inline-block px-1.5 py-0.2 rounded text-[9.5px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                          Menunggu Penyelesaian
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </>
               )}
             </tbody>
           </table>
@@ -742,6 +807,24 @@ export default function NewSupplierPaymentPage() {
         onClose={() => setIsSupplierModalOpen(false)}
         onSelect={(sup) => setSelectedSupplier(sup)}
         selectedId={selectedSupplier?.id}
+      />
+
+      <SettlePurchaseReturnModal
+        isOpen={!!selectedReturnForSettle}
+        onClose={() => setSelectedReturnForSettle(null)}
+        purchaseReturn={selectedReturnForSettle}
+        unpaidInvoices={rows.map((r) => ({
+          id: r.purchase_id || r.id,
+          invoice_no: r.invoice_no,
+          pbf_invoice_no: r.pbf_invoice_no,
+          date: r.date,
+          due_date: r.due_date,
+          total_amount: r.total_amount ?? r.remaining_amount,
+          paid_amount: r.paid_amount ?? 0,
+          remaining_amount: r.remaining_amount,
+          notes: r.notes,
+        }))}
+        cashAccounts={cashAccounts}
       />
     </div>
   );

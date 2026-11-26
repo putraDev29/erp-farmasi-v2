@@ -35,14 +35,14 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8 border border-slate-100">
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4" suppressHydrationWarning>
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-8 border border-slate-100" suppressHydrationWarning>
         <div className="flex flex-col items-center text-center mb-6">
           <div className="w-14 h-14 bg-emerald-600 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-emerald-500/30 mb-3">
             <Pill className="w-8 h-8" />
           </div>
           <h1 className="text-2xl font-black text-slate-800 tracking-tight">FARMASI ERP</h1>
-          <p className="text-xs text-slate-500 mt-1">Sistem Terpadu POS, Inventori & Akuntansi</p>
+          <p className="text-xs text-slate-500 mt-1">Sistem Terpadu POS, Inventori &amp; Akuntansi</p>
         </div>
 
         {error && (
@@ -52,7 +52,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        <form onSubmit={handleLogin} className="space-y-4">
+        <form onSubmit={handleLogin} className="space-y-4" suppressHydrationWarning>
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1">Username / Email</label>
             <div className="relative">
@@ -60,10 +60,12 @@ export default function LoginPage() {
               <input
                 type="text"
                 required
+                autoComplete="username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="admin"
                 className="w-full pl-9 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                suppressHydrationWarning
               />
             </div>
           </div>
@@ -75,10 +77,12 @@ export default function LoginPage() {
               <input
                 type="password"
                 required
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 className="w-full pl-9 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                suppressHydrationWarning
               />
             </div>
           </div>
@@ -92,21 +96,21 @@ export default function LoginPage() {
                   setUsername("admin");
                   setPassword("admin123");
                 }}
-                className="px-2 py-1.5 bg-white hover:bg-emerald-100/80 border border-emerald-200 rounded-lg text-slate-800 font-medium text-left transition shadow-2xs"
+                className="px-2 py-1.5 bg-white hover:bg-emerald-100/80 border border-emerald-200 rounded-lg text-slate-800 font-medium text-left transition shadow-2xs cursor-pointer"
               >
-                <div className="font-bold text-emerald-900">Akun Admin</div>
-                <div className="text-[10px] text-slate-500 font-mono">admin / admin123</div>
+                <span className="block font-bold text-emerald-900">Akun Admin</span>
+                <span className="block text-[10px] text-slate-500 font-mono">admin / admin123</span>
               </button>
               <button
                 type="button"
                 onClick={() => {
                   setUsername("gudang");
-                  setPassword("admin123");
+                  setPassword("gudang123");
                 }}
-                className="px-2 py-1.5 bg-white hover:bg-emerald-100/80 border border-emerald-200 rounded-lg text-slate-800 font-medium text-left transition shadow-2xs"
+                className="px-2 py-1.5 bg-white hover:bg-emerald-100/80 border border-emerald-200 rounded-lg text-slate-800 font-medium text-left transition shadow-2xs cursor-pointer"
               >
-                <div className="font-bold text-emerald-900">Akun Gudang</div>
-                <div className="text-[10px] text-slate-500 font-mono">gudang / admin123</div>
+                <span className="block font-bold text-emerald-900">Akun Gudang</span>
+                <span className="block text-[10px] text-slate-500 font-mono">gudang / gudang123</span>
               </button>
             </div>
           </div>
@@ -114,9 +118,16 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-sm transition shadow-md shadow-emerald-600/20 disabled:opacity-50"
+            className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-sm transition shadow-md shadow-emerald-600/20 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
           >
-            {loading ? "Memverifikasi..." : "Masuk ke Sistem"}
+            {loading ? (
+              <>
+                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                <span>Memverifikasi...</span>
+              </>
+            ) : (
+              "Masuk ke Sistem"
+            )}
           </button>
         </form>
 

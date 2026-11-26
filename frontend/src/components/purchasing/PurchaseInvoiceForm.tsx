@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ChevronLeft,
@@ -24,8 +24,10 @@ import {
   PackageCheck,
   Layers,
   Barcode,
+  ShoppingCart,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { CurrencyInput } from "@/components/common/CurrencyInput";
 import { CariSupplierModal } from "./CariSupplierModal";
 import { CariItemModal } from "./CariItemModal";
 import { DetailItemModal } from "./DetailItemModal";
@@ -62,7 +64,9 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
   invoiceId,
 }) => {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
+  const urlPoId = searchParams ? (searchParams.get("po_id") || searchParams.get("order_id")) : null;
 
   // Modals state
   const [isSupplierModalOpen, setIsSupplierModalOpen] = useState(false);
@@ -72,6 +76,8 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
   const [isInfoRowModalOpen, setIsInfoRowModalOpen] = useState(false);
   const [isBayarModalOpen, setIsBayarModalOpen] = useState(false);
   const [isSaveConfirmModalOpen, setIsSaveConfirmModalOpen] = useState(false);
+  const [isMasterCostModalOpen, setIsMasterCostModalOpen] = useState(false);
+  const [pendingShouldVerify, setPendingShouldVerify] = useState(false);
   const [isIncludeBiayaModalOpen, setIsIncludeBiayaModalOpen] = useState(false);
   const [isPesananModalOpen, setIsPesananModalOpen] = useState(false);
   const [isDataSerialModalOpen, setIsDataSerialModalOpen] = useState(false);
@@ -137,6 +143,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
 
   // Bottom form state
   const [notes, setNotes] = useState("");
+  const [deliveryMethod, setDeliveryMethod] = useState<"DIKIRIM" | "DIAMBIL">("DIKIRIM");
   const [dueDate, setDueDate] = useState(() => {
     return new Date().toISOString().split("T")[0];
   });
@@ -258,11 +265,25 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
     enabled: isEdit && Boolean(invoiceId),
   });
 
-  // Status apakah faktur sudah diverifikasi / disetujui Admin
+  // Query linked PO detail if invoice is linked to a PO
+  const linkedPoId = existingInvoice?.purchase_order_id || urlPoId;
+  const { data: linkedPO } = useQuery({
+    queryKey: ["linked-po-detail", linkedPoId],
+    queryFn: async () => {
+      if (!linkedPoId) return null;
+      const res = await api.get(`/purchases/orders/${linkedPoId}`);
+      return res.data?.data;
+    },
+    enabled: Boolean(linkedPoId) && (!existingInvoice || !existingInvoice.purchase_order),
+  });
+
+  // Status apakah faktur sudah diverifikasi / disetujui Admin / Selesai
   const isVerifiedByAdmin = Boolean(
     existingInvoice && (
       Boolean(existingInvoice.is_verified) ||
-      existingInvoice.verification_status === "APPROVED"
+      existingInvoice.verification_status === "APPROVED" ||
+      existingInvoice.verification_status === "SELESAI" ||
+      existingInvoice.status === "POSTED"
     )
   );
 
@@ -300,6 +321,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
 
   useEffect(() => {
     if (existingInvoice) {
+      const poObj = existingInvoice.purchase_order || linkedPO;
       setInvoiceNo(existingInvoice.invoice_no || "Auto");
       if (existingInvoice.date) {
         const d = new Date(existingInvoice.date);
@@ -311,28 +333,71 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
         );
       }
       if (existingInvoice.due_date) {
-        setDueDate(new Date(existingInvoice.due_date).toISOString().split("T")[0]);
+        const dStr = String(existingInvoice.due_date);
+        setDueDate(dStr.includes("T") ? dStr.split("T")[0] : dStr.substring(0, 10));
+      } else if (poObj?.expected_date) {
+        const expStr = String(poObj.expected_date);
+        setDueDate(expStr.includes("T") ? expStr.split("T")[0] : expStr.substring(0, 10));
       }
       if (existingInvoice.supplier) {
         setSelectedSupplier(existingInvoice.supplier);
+      } else if (poObj?.supplier) {
+        setSelectedSupplier(poObj.supplier);
       }
       if (existingInvoice.warehouse_id) {
         setWarehouseId(existingInvoice.warehouse_id);
+      } else if (poObj?.warehouse_id) {
+        setWarehouseId(poObj.warehouse_id);
       }
-      if (existingInvoice.purchase_order) {
-        setSelectedPO(existingInvoice.purchase_order);
+      if (poObj) {
+        setSelectedPO(poObj);
+      }
+      if (existingInvoice.delivery_method === "DIAMBIL" || existingInvoice.delivery_method === "DIKIRIM") {
+        setDeliveryMethod(existingInvoice.delivery_method);
+      } else if (poObj?.delivery_method === "DIAMBIL" || poObj?.delivery_method === "DIKIRIM") {
+        setDeliveryMethod(poObj.delivery_method);
       }
       if (existingInvoice.pbf_invoice_no) setPbfInvoiceNo(existingInvoice.pbf_invoice_no);
       if (existingInvoice.pbf_delivery_order_no) setPbfDeliveryOrderNo(existingInvoice.pbf_delivery_order_no);
       if (existingInvoice.tax_invoice_no) setTaxInvoiceNo(existingInvoice.tax_invoice_no);
-      setNotes(existingInvoice.notes || "");
-      setTaxPercent(existingInvoice.tax_percent || 0);
-      setPpnType(existingInvoice.tax_percent > 0 ? "Exclude" : "Non");
-      setNominalDiscount(existingInvoice.discount || 0);
-      setExtraFee(existingInvoice.shipping_fee || 0);
-      setExtraFeeCheckbox((existingInvoice.shipping_fee || 0) > 0);
-      const paid = Number(existingInvoice.paid_amount) || 0;
-      const dp = Number(existingInvoice.dp_amount) || 0;
+
+      // Keterangan dari invoice atau fallback ke PO
+      const invNotes = existingInvoice.notes || "";
+      const poNotes = poObj?.notes || "";
+      if (invNotes && !invNotes.startsWith("Dipindahkan dari PO")) {
+        setNotes(invNotes);
+      } else if (poNotes) {
+        setNotes(poNotes);
+      } else {
+        setNotes(invNotes);
+      }
+
+      // Pajak: Jika di invoice 0 tapi di PO ada, gunakan dari PO
+      const invTax = Number(existingInvoice.tax_percent) || 0;
+      const poTax = Number(poObj?.tax_percent) || 0;
+      const effectiveTax = invTax > 0 ? invTax : poTax;
+      setTaxPercent(effectiveTax);
+      setTaxCheckbox(effectiveTax > 0);
+      setPpnType(effectiveTax > 0 ? "Exclude" : "Non");
+
+      // Diskon / Potongan: Jika di invoice 0 tapi di PO ada, gunakan dari PO
+      const invDisc = Number(existingInvoice.discount) || 0;
+      const poDisc = Number(poObj?.discount) || 0;
+      const effectiveDisc = invDisc > 0 ? invDisc : poDisc;
+      setNominalDiscount(effectiveDisc);
+
+      // Biaya / Ongkir: Jika di invoice 0 tapi di PO ada, gunakan dari PO
+      const invFee = Number(existingInvoice.shipping_fee) || 0;
+      const poFee = Number(poObj?.shipping_fee) || 0;
+      const effectiveFee = invFee > 0 ? invFee : poFee;
+      setExtraFee(effectiveFee);
+      setExtraFeeCheckbox(effectiveFee > 0);
+      if (effectiveFee > 0) {
+        setIncludeBiayaData((prev) => ({ ...prev, nominal: effectiveFee }));
+      }
+
+      const paid = Number(existingInvoice.paid_amount) || Number(poObj?.paid_amount) || 0;
+      const dp = Number(existingInvoice.dp_amount) || Number(poObj?.dp_amount) || 0;
       const total = Number(existingInvoice.total_amount) || 0;
       setPaidAmount(paid);
       setDpAmount(dp);
@@ -373,22 +438,12 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
         if (mappedItems.length > 0) setSelectedRowIndex(0);
       }
     }
-  }, [existingInvoice]);
-
-  // Adjust tax percentage based on PPN dropdown
-  useEffect(() => {
-    if (ppnType === "Non") {
-      setTaxPercent(0);
-      setTaxCheckbox(false);
-    } else if (ppnType === "Include" || ppnType === "Exclude") {
-      if (taxPercent === 0) setTaxPercent(11);
-      setTaxCheckbox(true);
-    }
-  }, [ppnType]);
+  }, [existingInvoice, linkedPO]);
 
   // Calculations
   const itemCount = items.length;
   const totalQty = items.reduce((sum, it) => sum + (Number(it.qty) || 0), 0);
+  const totalReceivedQty = items.reduce((sum, it) => sum + (Number(it.received_qty ?? it.qty) || 0), 0);
   const subtotal = items.reduce((sum, it) => sum + it.line_total, 0);
 
   // Discount calculation
@@ -487,6 +542,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
 
   // Import items from PO
   const handleSelectPO = (po: any) => {
+    if (!po) return;
     setSelectedPO(po);
     if (po.supplier) {
       setSelectedSupplier(po.supplier);
@@ -494,9 +550,48 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
     if (po.warehouse_id) {
       setWarehouseId(po.warehouse_id);
     }
-    if (po.tax_percent > 0) {
-      setTaxPercent(po.tax_percent);
-      setPpnType("Exclude");
+    // Tanggal Jatuh Tempo dari PO jika ada (Expected Date)
+    if (po.expected_date) {
+      try {
+        setDueDate(new Date(po.expected_date).toISOString().split("T")[0]);
+      } catch (_) {}
+    }
+    // Catatan / Keterangan dari PO
+    if (po.notes) {
+      setNotes(po.notes);
+    }
+    if (po.delivery_method === "DIAMBIL" || po.delivery_method === "DIKIRIM") {
+      setDeliveryMethod(po.delivery_method);
+    }
+    // Pajak % dari PO
+    const tp = Number(po.tax_percent) || 0;
+    setTaxPercent(tp);
+    setTaxCheckbox(tp > 0);
+    setPpnType(tp > 0 ? "Exclude" : "Non");
+
+    // Potongan / Diskon dari PO
+    if (po.discount) {
+      setNominalDiscount(Number(po.discount) || 0);
+    }
+    if (po.discount_percent) {
+      setDiscountPercent(Number(po.discount_percent) || 0);
+    }
+    if (po.nota_discount_percent) {
+      setNotaDiscountPercent(Number(po.nota_discount_percent) || 0);
+    }
+
+    // Biaya tambahan / Ongkir dari PO
+    if (po.shipping_fee) {
+      const fee = Number(po.shipping_fee) || 0;
+      setExtraFee(fee);
+      setExtraFeeCheckbox(fee > 0);
+      setIncludeBiayaData((prev) => ({ ...prev, nominal: fee }));
+    }
+
+    // Uang Muka / DP jika ada
+    if (po.dp_amount || po.paid_amount) {
+      const dp = Number(po.dp_amount || po.paid_amount || 0);
+      setDpAmount(dp);
     }
 
     if (po.items && po.items.length > 0) {
@@ -543,6 +638,23 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
       setSelectedRowIndex(0);
     }
   };
+
+  // Auto-fetch PO if query parameter is present (e.g. from Pesanan Pembelian page)
+  const { data: poFromUrl } = useQuery({
+    queryKey: ["purchase-order-auto-import", urlPoId],
+    queryFn: async () => {
+      if (!urlPoId) return null;
+      const res = await api.get(`/purchases/orders/${urlPoId}`);
+      return res.data?.data;
+    },
+    enabled: Boolean(urlPoId) && !isEdit,
+  });
+
+  useEffect(() => {
+    if (poFromUrl && !existingInvoice) {
+      handleSelectPO(poFromUrl);
+    }
+  }, [poFromUrl, existingInvoice]);
 
   // Row selection handler
   const handleSelectRow = (index: number) => {
@@ -657,6 +769,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
     setItems([]);
     setSelectedRowIndex(null);
     setNotes("");
+    setDeliveryMethod("DIKIRIM");
     setTaxPercent(0);
     setPpnType("Non");
     setNominalDiscount(0);
@@ -675,7 +788,8 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
 
   // Save Invoice Mutation
   const saveMutation = useMutation({
-    mutationFn: async (shouldVerify: boolean = true) => {
+    mutationFn: async (opts: boolean | { shouldVerify?: boolean; updateMasterCost?: boolean } = true) => {
+      const updateMasterCost = typeof opts === "object" ? Boolean(opts?.updateMasterCost) : false;
       if (!selectedSupplier?.id) {
         throw new Error("Pilih Supplier terlebih dahulu.");
       }
@@ -694,6 +808,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
         pbf_delivery_order_no: pbfDeliveryOrderNo,
         tax_invoice_no: taxInvoiceNo,
         due_date: dueDate ? new Date(dueDate) : undefined,
+        delivery_method: deliveryMethod,
         notes: notes,
         tax_percent: taxPercent,
         discount: calculatedNominalDiscount,
@@ -701,6 +816,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
         dp_amount: Number(dpAmount) || 0,
         paid_amount: (Number(bayarTunai) || 0) + (Number(dpAmount) || 0) + (Number(bayarDeposit) || 0),
         cash_account_id: cashAccountId || undefined,
+        update_master_cost: updateMasterCost,
         is_verified: existingInvoice ? (Boolean(existingInvoice.is_verified) || existingInvoice.verification_status === "APPROVED") : false,
         items: items.map((it) => {
           let resolvedUnitId = it.unit_id;
@@ -735,10 +851,12 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["purchases"] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
       queryClient.invalidateQueries({ queryKey: ["inventory-balances"] });
       queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
       setIsBayarModalOpen(false);
       setIsSaveConfirmModalOpen(false);
+      setIsMasterCostModalOpen(false);
       alert(
         "✅ Faktur pembelian berhasil dicatat!\n\n" +
           "• Status: Menunggu Penerimaan Fisik oleh Petugas Gudang.\n" +
@@ -948,7 +1066,17 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
           <select
             value={ppnType}
             disabled={isVerifiedByAdmin}
-            onChange={(e) => setPpnType(e.target.value as any)}
+            onChange={(e) => {
+              const val = e.target.value as any;
+              setPpnType(val);
+              if (val === "Non") {
+                setTaxPercent(0);
+                setTaxCheckbox(false);
+              } else if (taxPercent === 0) {
+                setTaxPercent(11);
+                setTaxCheckbox(true);
+              }
+            }}
             className={`w-full h-6 px-1.5 border border-slate-300 rounded text-[11px] ${
               isVerifiedByAdmin
                 ? "bg-slate-100 text-slate-500 cursor-not-allowed"
@@ -961,7 +1089,26 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
           </select>
         </div>
 
-        <div className="md:col-span-6">
+        <div className="md:col-span-3">
+          <label className="block text-slate-600 text-[10px] mb-0.5 font-medium">
+            Metode Pengiriman :
+          </label>
+          <select
+            value={deliveryMethod}
+            disabled={isVerifiedByAdmin}
+            onChange={(e) => setDeliveryMethod(e.target.value as "DIKIRIM" | "DIAMBIL")}
+            className={`w-full h-6 px-1.5 border border-emerald-300 rounded text-[11px] font-semibold ${
+              isVerifiedByAdmin
+                ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                : "bg-emerald-50/40 text-emerald-900 focus:outline-none focus:border-emerald-500 cursor-pointer"
+            }`}
+          >
+            <option value="DIKIRIM">Dikirim Supplier</option>
+            <option value="DIAMBIL">Diambil ke Supplier</option>
+          </select>
+        </div>
+
+        <div className="md:col-span-3">
           <label className="block text-slate-600 text-[10px] mb-0.5 font-medium">
             Pesanan :
           </label>
@@ -1005,78 +1152,6 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
               <Search className="w-3 h-3" />
             </button>
           </div>
-        </div>
-
-        {/* ROW 3: PBF Invoicing & Documents Compliance (CDOB) */}
-        <div className="md:col-span-3">
-          <label className="block text-slate-600 text-[10px] mb-0.5 font-medium">
-            No. Faktur Asli PBF :
-          </label>
-          <input
-            type="text"
-            disabled={isVerifiedByAdmin}
-            value={pbfInvoiceNo}
-            onChange={(e) => setPbfInvoiceNo(e.target.value)}
-            placeholder="Contoh: INV-PBF/2026/089"
-            className={`w-full h-6 px-2 border border-slate-300 rounded text-[11px] font-mono ${
-              isVerifiedByAdmin
-                ? "bg-slate-100 text-slate-500 cursor-not-allowed"
-                : "bg-white focus:outline-none focus:border-sky-500"
-            }`}
-          />
-        </div>
-
-        <div className="md:col-span-3">
-          <label className="block text-slate-600 text-[10px] mb-0.5 font-medium">
-            No. Surat Jalan PBF :
-          </label>
-          <input
-            type="text"
-            disabled={isVerifiedByAdmin}
-            value={pbfDeliveryOrderNo}
-            onChange={(e) => setPbfDeliveryOrderNo(e.target.value)}
-            placeholder="Contoh: DO/2026/XI/124"
-            className={`w-full h-6 px-2 border border-slate-300 rounded text-[11px] font-mono ${
-              isVerifiedByAdmin
-                ? "bg-slate-100 text-slate-500 cursor-not-allowed"
-                : "bg-white focus:outline-none focus:border-sky-500"
-            }`}
-          />
-        </div>
-
-        <div className="md:col-span-3">
-          <label className="block text-slate-600 text-[10px] mb-0.5 font-medium">
-            No. Faktur Pajak PBF :
-          </label>
-          <input
-            type="text"
-            disabled={isVerifiedByAdmin}
-            value={taxInvoiceNo}
-            onChange={(e) => setTaxInvoiceNo(e.target.value)}
-            placeholder="Contoh: 010.002-26.12345678"
-            className={`w-full h-6 px-2 border border-slate-300 rounded text-[11px] font-mono ${
-              isVerifiedByAdmin
-                ? "bg-slate-100 text-slate-500 cursor-not-allowed"
-                : "bg-white focus:outline-none focus:border-sky-500"
-            }`}
-          />
-        </div>
-
-        <div className="md:col-span-3 flex flex-col justify-end">
-          <button
-            type="button"
-            onClick={() => setIsPbfDocModalOpen(true)}
-            className="w-full h-6 px-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-semibold rounded text-[11px] inline-flex items-center justify-between shadow-2xs transition active:scale-95"
-            title="Upload atau lihat Faktur PBF, Surat Jalan, e-Faktur Pajak, dan CoA"
-          >
-            <span className="flex items-center gap-1">
-              <span>📎</span>
-              <span>Dokumen PBF (Faktur/SJ/CoA)</span>
-            </span>
-            <span className="bg-emerald-600 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">
-              {pbfDocCount}
-            </span>
-          </button>
         </div>
       </div>
 
@@ -1142,11 +1217,27 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                         <td className="py-0.5 px-1.5 text-center border-r border-slate-200">
                           {it.unit_name}
                         </td>
-                        <td className="py-0.5 px-2 text-right font-mono border-r border-slate-200">
-                          {Number(it.unit_price).toLocaleString("en-US", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                        <td className="py-0.5 px-1 text-right font-mono border-r border-slate-200">
+                          <CurrencyInput
+                            disabled={isVerifiedByAdmin}
+                            value={it.unit_price}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(newPrice) => {
+                              setItems((prev) =>
+                                prev.map((row, rIdx) => {
+                                  if (rIdx !== idx) return row;
+                                  const base = row.qty * newPrice;
+                                  const disc = (base * (row.discount_percent || 0)) / 100;
+                                  return {
+                                    ...row,
+                                    unit_price: newPrice,
+                                    line_total: Math.max(0, base - disc),
+                                  };
+                                })
+                              );
+                            }}
+                            className="w-full px-1 py-0.5 text-right font-mono bg-transparent hover:bg-white focus:bg-white border border-transparent hover:border-slate-300 focus:border-sky-500 rounded text-slate-900 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+                          />
                         </td>
                         <td className="py-0.5 px-1.5 text-right font-mono border-r border-slate-200">
                           {Number(it.discount_percent || 0).toFixed(2)}
@@ -1307,9 +1398,122 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
         </button>
       </div>
 
-      {/* 5. Bottom Calculation & Notes matching Gambar 2 */}
+      {/* 5. Bottom Calculation & Notes matching Gambar 1 / Pesanan Pembelian */}
       <div className="bg-slate-50/70 border border-slate-300 rounded p-1 sm:p-1.5 space-y-1 text-xs shadow-2xs shrink-0">
-        {/* ROW 1: Keterangan (col-4) | Item (col-2) | Sub Total (col-2) | Pjk % (col-2) | Nom Pajak (col-2) */}
+        {/* ROW 1: Tanggal Kirim | Item | Terima | Sub Total | Pjk % | Nom Pajak */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-1.5 items-end">
+          {/* Tanggal Kirim / Jatuh Tempo */}
+          <div className="md:col-span-3">
+            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
+              Tanggal Kirim :
+            </label>
+            <input
+              type="date"
+              disabled={isVerifiedByAdmin}
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              className={`w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] ${
+                isVerifiedByAdmin
+                  ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                  : "bg-white text-slate-800 focus:outline-none focus:border-sky-500"
+              }`}
+            />
+          </div>
+
+          {/* Item count */}
+          <div className="md:col-span-1">
+            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
+              Item :
+            </label>
+            <input
+              type="text"
+              readOnly
+              value={itemCount.toFixed(2)}
+              className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-slate-100 text-right font-mono"
+            />
+          </div>
+
+          {/* Terima */}
+          <div className="md:col-span-1">
+            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
+              Terima :
+            </label>
+            <input
+              type="text"
+              readOnly
+              value={totalReceivedQty.toFixed(2)}
+              className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-slate-100 text-right font-mono"
+            />
+          </div>
+
+          {/* Sub Total */}
+          <div className="md:col-span-3">
+            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
+              Sub Total :
+            </label>
+            <input
+              type="text"
+              readOnly
+              value={subtotal.toLocaleString("id-ID", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
+              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-900 bg-slate-100 text-right font-mono font-bold"
+            />
+          </div>
+
+          {/* Pjk % (Dropdown Pilihan Pajak sama seperti di Pesanan Pembelian) */}
+          <div className="md:col-span-2">
+            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
+              Pjk % :
+            </label>
+            <select
+              disabled={isVerifiedByAdmin}
+              value={taxPercent}
+              onChange={(e) => {
+                const val = Number(e.target.value) || 0;
+                setTaxPercent(val);
+                setTaxCheckbox(val > 0);
+                if (val > 0 && ppnType === "Non") {
+                  setPpnType("Exclude");
+                } else if (val === 0) {
+                  setPpnType("Non");
+                }
+              }}
+              className={`w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 font-medium cursor-pointer ${
+                isVerifiedByAdmin
+                  ? "bg-slate-100 text-slate-500 cursor-not-allowed"
+                  : "bg-white focus:outline-none focus:border-sky-500"
+              }`}
+            >
+              <option value={0}>0% - Non Pajak</option>
+              <option value={11}>11% - PPN 11%</option>
+              <option value={12}>12% - PPN 12%</option>
+              <option value={10}>10% - PPN 10%</option>
+              <option value={5}>5% - PPh 21 (5%)</option>
+              <option value={2}>2% - PPh 23 (2%)</option>
+              <option value={0.5}>0.5% - PPh 22 (0.5%)</option>
+            </select>
+          </div>
+
+          {/* Nom Pajak */}
+          <div className="md:col-span-2">
+            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
+              Nom Pajak :
+            </label>
+            <input
+              type="text"
+              readOnly
+              value={taxAmount.toLocaleString("id-ID", {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
+              className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-slate-100 text-right font-mono"
+            />
+          </div>
+        </div>
+
+        {/* ROW 2: Keterangan | Pot % | Pot Nota % | Nom Potongan | Biaya | Total Akhir */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-1.5 items-end">
           {/* Keterangan */}
           <div className="md:col-span-4">
@@ -1330,123 +1534,8 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
             />
           </div>
 
-          {/* Item count */}
-          <div className="md:col-span-2">
-            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
-              Item :
-            </label>
-            <input
-              type="text"
-              readOnly
-              value={itemCount.toFixed(2)}
-              className="w-full h-6 px-2 py-0 border border-dashed border-slate-300 rounded text-[11px] text-slate-800 bg-white text-right font-mono font-medium"
-            />
-          </div>
-
-          {/* Sub Total */}
-          <div className="md:col-span-2">
-            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
-              Sub Total :
-            </label>
-            <input
-              type="text"
-              readOnly
-              value={subtotal.toLocaleString("id-ID", {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-              className="w-full h-6 px-2 py-0 border border-dashed border-slate-300 rounded text-[11px] text-slate-900 bg-white text-right font-mono font-bold"
-            />
-          </div>
-
-          {/* Pjk % */}
-          <div className="md:col-span-2">
-            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
-              Pjk % :
-            </label>
-            <div className="flex items-center gap-1">
-              <input
-                type="number"
-                step="any"
-                disabled={isVerifiedByAdmin}
-                value={taxPercent || ""}
-                placeholder="0"
-                onChange={(e) => {
-                  const val = Number(e.target.value) || 0;
-                  setTaxPercent(val);
-                  setTaxCheckbox(val > 0);
-                  if (val > 0 && ppnType === "Non") {
-                    setPpnType("Exclude");
-                  } else if (val === 0) {
-                    setPpnType("Non");
-                  }
-                }}
-                className={`w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-right font-mono ${
-                  isVerifiedByAdmin
-                    ? "bg-slate-100 text-slate-500 cursor-not-allowed"
-                    : "bg-white text-slate-800 focus:outline-none focus:border-sky-500"
-                }`}
-              />
-              <input
-                type="checkbox"
-                disabled={isVerifiedByAdmin}
-                checked={taxCheckbox}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  setTaxCheckbox(checked);
-                  if (checked && taxPercent === 0) {
-                    setTaxPercent(11);
-                    setPpnType("Exclude");
-                  } else if (!checked) {
-                    setTaxPercent(0);
-                    setPpnType("Non");
-                  }
-                }}
-                className="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </div>
-          </div>
-
-          {/* Nom Pajak */}
-          <div className="md:col-span-2">
-            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
-              Nom Pajak :
-            </label>
-            <div className="flex items-center gap-1">
-              <input
-                type="text"
-                readOnly
-                value={taxAmount.toLocaleString("id-ID", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
-                className="w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white text-right font-mono"
-              />
-              <input
-                type="checkbox"
-                disabled={isVerifiedByAdmin}
-                checked={taxCheckbox}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  setTaxCheckbox(checked);
-                  if (checked && taxPercent === 0) {
-                    setTaxPercent(11);
-                    setPpnType("Exclude");
-                  } else if (!checked) {
-                    setTaxPercent(0);
-                    setPpnType("Non");
-                  }
-                }}
-                className="w-3.5 h-3.5 rounded text-emerald-600 border-slate-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* ROW 2: Pot % (col-2) | Pot Nota % (col-2) | Nom Potongan (col-2) | Biaya (col-2) | Total Akhir (col-4) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-1.5 items-end">
           {/* Pot % */}
-          <div className="md:col-span-2">
+          <div className="md:col-span-1">
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
               Pot % :
             </label>
@@ -1459,7 +1548,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
               onChange={(e) => {
                 setDiscountPercent(Number(e.target.value) || 0);
               }}
-              className={`w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-right font-mono ${
+              className={`w-full h-6 px-1 py-0 border border-slate-300 rounded text-[11px] text-right font-mono ${
                 isVerifiedByAdmin
                   ? "bg-slate-100 text-slate-500 cursor-not-allowed"
                   : "bg-white text-slate-800 focus:outline-none focus:border-sky-500"
@@ -1468,7 +1557,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
           </div>
 
           {/* Pot Nota % */}
-          <div className="md:col-span-2">
+          <div className="md:col-span-1">
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
               Pot Nota % :
             </label>
@@ -1481,7 +1570,7 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
               onChange={(e) => {
                 setNotaDiscountPercent(Number(e.target.value) || 0);
               }}
-              className={`w-full h-6 px-2 py-0 border border-slate-300 rounded text-[11px] text-right font-mono ${
+              className={`w-full h-6 px-1 py-0 border border-slate-300 rounded text-[11px] text-right font-mono ${
                 isVerifiedByAdmin
                   ? "bg-slate-100 text-slate-500 cursor-not-allowed"
                   : "bg-white text-slate-800 focus:outline-none focus:border-sky-500"
@@ -1543,24 +1632,38 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                     : "bg-white text-slate-800 focus:outline-none focus:border-sky-500"
                 }`}
               />
-              <button
-                type="button"
+              <input
+                type="checkbox"
                 disabled={isVerifiedByAdmin}
-                onClick={() => setIsIncludeBiayaModalOpen(true)}
-                className="w-6 h-6 border border-slate-300 rounded bg-white hover:bg-slate-100 flex items-center justify-center text-slate-600 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
-                title={isVerifiedByAdmin ? "Faktur sudah disetujui Admin" : "Include Biaya Tambahan"}
-              >
-                <DollarSign className="w-3 h-3 text-slate-600" />
-              </button>
+                checked={extraFeeCheckbox}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  if (checked) {
+                    setExtraFeeCheckbox(true);
+                    setIsIncludeBiayaModalOpen(true);
+                  } else {
+                    setExtraFeeCheckbox(false);
+                    setExtraFee(0);
+                    setIncludeBiayaData({
+                      name: "Ongkos Kirim",
+                      nominal: 0,
+                      allocation: "HPP",
+                      notes: "",
+                    });
+                  }
+                }}
+                className="h-3.5 w-3.5 text-sky-600 rounded border-slate-300 focus:ring-sky-500 cursor-pointer disabled:opacity-40"
+                title="Include Biaya Tambahan"
+              />
             </div>
           </div>
 
-          {/* Total Akhir (Highlight Pink/Magenta Box) */}
-          <div className="md:col-span-4">
+          {/* Total Akhir (Pink Box) */}
+          <div className="md:col-span-2">
             <label className="block text-slate-700 font-bold text-[10px] mb-0.5 leading-none">
               Total Akhir :
             </label>
-            <div className="w-full h-6 px-2 bg-[#f9cbe2] border border-pink-300 rounded text-right font-mono font-extrabold text-xs text-slate-900 shadow-2xs flex items-center justify-end">
+            <div className="w-full h-6 px-2 bg-[#f9cbe2] border border-pink-300 rounded text-right font-mono font-bold text-xs text-slate-900 shadow-2xs flex items-center justify-end">
               {grandTotal.toLocaleString("id-ID", {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
@@ -1601,7 +1704,8 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                 alert("Tabel item pembelian masih kosong. Silakan klik [+ Item].");
                 return;
               }
-              saveMutation.mutate(false);
+              setPendingShouldVerify(false);
+              setIsMasterCostModalOpen(true);
             }}
             disabled={saveMutation.isPending || isVerifiedByAdmin}
             className={`h-6 px-2.5 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 ${
@@ -1636,7 +1740,8 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                 alert("Tabel item pembelian masih kosong. Silakan klik [+ Item].");
                 return;
               }
-              setIsSaveConfirmModalOpen(true);
+              setPendingShouldVerify(false);
+              setIsMasterCostModalOpen(true);
             }}
             className={`h-6 px-3 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 ${
               isVerifiedByAdmin
@@ -2355,13 +2460,65 @@ export const PurchaseInvoiceForm: React.FC<PurchaseInvoiceFormProps> = ({
                 type="button"
                 disabled={saveMutation.isPending}
                 onClick={() => {
-                  saveMutation.mutate(false);
+                  saveMutation.mutate({ shouldVerify: false, updateMasterCost: false });
                 }}
                 className="h-7 px-4 bg-[#00c875] hover:bg-[#00b066] text-white font-bold rounded shadow-2xs transition active:scale-95 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
               >
                 <Check className="w-3.5 h-3.5 stroke-[3]" />
                 <span>{saveMutation.isPending ? "Menyimpan..." : "Ya, Simpan Pembelian"}</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL KONFIRMASI UPDATE HARGA POKOK MASTER DATA */}
+      {isMasterCostModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-2xs p-3 animate-in fade-in duration-150">
+          <div className="bg-white rounded-md shadow-2xl border border-slate-300 w-full max-w-md overflow-hidden">
+            <div className="px-4 py-2 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+              <span className="font-semibold text-xs text-slate-700">Konfirmasi</span>
+              <button
+                type="button"
+                onClick={() => setIsMasterCostModalOpen(false)}
+                className="p-0.5 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 text-xs text-slate-800 space-y-5">
+              <div className="leading-relaxed text-[13px] text-slate-800">
+                <p>Apakah Harga Pokok akan di ubah pada master data ?</p>
+                <p>Harga Pokok akan disimpan setelah klik tombol Simpan.</p>
+              </div>
+              <div className="flex justify-center gap-3 pt-1">
+                <button
+                  type="button"
+                  disabled={saveMutation.isPending}
+                  onClick={() =>
+                    saveMutation.mutate({
+                      shouldVerify: pendingShouldVerify,
+                      updateMasterCost: true,
+                    })
+                  }
+                  className="min-w-[90px] h-7 px-4 bg-slate-100 hover:bg-slate-200 border border-slate-400 rounded text-slate-800 font-medium text-xs transition cursor-pointer disabled:opacity-50"
+                >
+                  {saveMutation.isPending ? "Menyimpan..." : "Yes"}
+                </button>
+                <button
+                  type="button"
+                  disabled={saveMutation.isPending}
+                  onClick={() =>
+                    saveMutation.mutate({
+                      shouldVerify: pendingShouldVerify,
+                      updateMasterCost: false,
+                    })
+                  }
+                  className="min-w-[90px] h-7 px-4 bg-white hover:bg-slate-100 border border-slate-300 rounded text-slate-800 font-medium text-xs transition cursor-pointer disabled:opacity-50"
+                >
+                  No
+                </button>
+              </div>
             </div>
           </div>
         </div>

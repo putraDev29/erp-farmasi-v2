@@ -31,6 +31,8 @@ import { api, formatCurrency, formatDate } from "@/lib/api";
 import { useAuthStore } from "@/lib/auth-store";
 import { CariObatSalesModal } from "./CariObatSalesModal";
 import { CariPelangganModal } from "./CariPelangganModal";
+import { DetailItemSalesModal } from "./DetailItemSalesModal";
+import { PilihBatchEDModal } from "./PilihBatchEDModal";
 import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
 import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
@@ -54,6 +56,9 @@ export interface SalesOrderItemRow {
   distribution_channel?: string;
   selling_price?: number;
   wholesale_price?: number;
+  batch_mode?: "FEFO" | "MANUAL";
+  batch_number?: string;
+  expired_date?: string;
 }
 
 interface SalesOrderFormProps {
@@ -79,7 +84,9 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
   // Modals state
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
   const [isItemModalOpen, setIsItemModalOpen] = useState(false);
+  const [batchModalRowIndex, setBatchModalRowIndex] = useState<number | null>(null);
   const [isEditRowModalOpen, setIsEditRowModalOpen] = useState(false);
+  const [editingRow, setEditingRow] = useState<SalesOrderItemRow | null>(null);
   const [isHargaJualModalOpen, setIsHargaJualModalOpen] = useState(false);
   const [isInfoRowModalOpen, setIsInfoRowModalOpen] = useState(false);
   const [isPbfDocModalOpen, setIsPbfDocModalOpen] = useState(false);
@@ -183,6 +190,7 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
     return now.toISOString().split("T")[0];
   });
   const [notes, setNotes] = useState("");
+  const [deliveryMethod, setDeliveryMethod] = useState<"DIKIRIM" | "DIAMBIL">("DIKIRIM");
   const [taxPercent, setTaxPercent] = useState<number>(0);
   const [taxCheckbox, setTaxCheckbox] = useState(false);
   const [nominalDiscount, setNominalDiscount] = useState<number>(0);
@@ -303,6 +311,17 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
 
   // Status apakah pembayaran / DP sudah disubmit
   // Sesuai aturan: jika pembayaran sudah disubmit, tombol bayar didisable karena pelunasan piutang dilakukan melalui menu Bayar Piutang
+  // Status apakah Pesanan Penjualan sudah selesai -> Transaksi Terkunci
+  const isCompleted = Boolean(
+    existingSO && (
+      existingSO.status === "SELESAI" ||
+      existingSO.status === "COMPLETED" ||
+      existingSO.process_status === "Selesai" ||
+      orderStatus === "SELESAI" ||
+      orderStatus === "COMPLETED"
+    )
+  );
+
   const isPaymentSubmitted = Boolean(
     (existingSO && (
       existingSO.payment_status === "PAID" ||
@@ -328,15 +347,22 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
       if (existingSO.notes) {
         setNotes(existingSO.notes);
       }
+      if (existingSO.delivery_method === "DIAMBIL" || existingSO.delivery_method === "DIKIRIM") {
+        setDeliveryMethod(existingSO.delivery_method);
+      }
+      if (existingSO.delivery_date) {
+        setDeliveryDate(existingSO.delivery_date.split("T")[0]);
+      } else if (existingSO.customer_sp_date) {
+        setDeliveryDate(existingSO.customer_sp_date.split("T")[0]);
+      }
       if (existingSO.customer_sp_type) setSpType(existingSO.customer_sp_type);
       if (existingSO.customer_sp_number) setSpNumber(existingSO.customer_sp_number);
       if (existingSO.pbf_origin_invoice_no) setPbfOriginInvoiceNo(existingSO.pbf_origin_invoice_no);
       if (existingSO.tax_percent !== undefined) {
-        setTaxPercent(existingSO.tax_percent);
-        if (existingSO.tax_percent > 0) {
-          setPpnType("Exclude");
-          setTaxCheckbox(true);
-        }
+        const tp = Number(existingSO.tax_percent) || 0;
+        setTaxPercent(tp);
+        setPpnType(tp > 0 ? "Exclude" : "Non");
+        setTaxCheckbox(tp > 0);
       }
       if (existingSO.warehouse_id) {
         setWarehouseId(existingSO.warehouse_id);
@@ -383,6 +409,9 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
             distribution_channel: prod.distribution_channel || "ALL",
             selling_price: prod.selling_price || unitPrice,
             wholesale_price: prod.wholesale_price || unitPrice,
+            batch_mode: it.batch_number ? "MANUAL" : "FEFO",
+            batch_number: it.batch_number || "",
+            expired_date: it.expired_date ? new Date(it.expired_date).toISOString().split("T")[0] : "",
           };
         });
         setItems(mappedItems);
@@ -391,35 +420,49 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
     }
   }, [existingSO]);
 
-  // Adjust tax percentage based on PPN dropdown
-  useEffect(() => {
-    if (ppnType === "Non") {
-      setTaxPercent(0);
-      setTaxCheckbox(false);
-    } else if (ppnType === "Include" || ppnType === "Exclude") {
-      setTaxPercent(11);
-      setTaxCheckbox(true);
+  // Open Detail Item modal
+  const handleOpenEditRow = (targetIdx?: number) => {
+    const idx = targetIdx !== undefined ? targetIdx : selectedRowIndex;
+    if (idx === null || !items[idx]) {
+      alert("Pilih baris item yang ingin diubah terlebih dahulu.");
+      return;
     }
-  }, [ppnType]);
+    setSelectedRowIndex(idx);
+    setEditingRow({ ...items[idx] });
+    setIsEditRowModalOpen(true);
+  };
+
+  const handleSaveDetailItem = (updatedRow: any) => {
+    if (selectedRowIndex === null) return;
+    const updated = [...items];
+    updated[selectedRowIndex] = {
+      ...updated[selectedRowIndex],
+      ...updatedRow,
+    };
+    setItems(updated);
+    setIsEditRowModalOpen(false);
+  };
 
   // Calculations
   const itemCount = items.length;
   const totalQty = items.reduce((sum, it) => sum + (it.qty || 0), 0);
   const subTotal = items.reduce((sum, it) => sum + (it.line_total || 0), 0);
 
+  // Discount computation (both Pot % and Pot Nota % can be filled simultaneously)
+  const pot1Amount = useMemo(() => {
+    return (subTotal * (Number(discountPercent) || 0)) / 100;
+  }, [subTotal, discountPercent]);
+
+  const potNotaAmount = useMemo(() => {
+    return ((subTotal - pot1Amount) * (Number(notaDiscountPercent) || 0)) / 100;
+  }, [subTotal, pot1Amount, notaDiscountPercent]);
+
   const calculatedNominalDiscount = useMemo(() => {
-    let d = 0;
-    if (discountPercent > 0) {
-      d += (subTotal * discountPercent) / 100;
+    if (discountPercent > 0 || notaDiscountPercent > 0) {
+      return Math.round(pot1Amount + potNotaAmount);
     }
-    if (notaDiscountPercent > 0) {
-      d += ((subTotal - d) * notaDiscountPercent) / 100;
-    }
-    if (nominalDiscount > 0) {
-      d += nominalDiscount;
-    }
-    return Math.min(d, subTotal);
-  }, [subTotal, discountPercent, notaDiscountPercent, nominalDiscount]);
+    return nominalDiscount;
+  }, [discountPercent, notaDiscountPercent, pot1Amount, potNotaAmount, nominalDiscount]);
 
   const afterDiscount = Math.max(0, subTotal - calculatedNominalDiscount);
 
@@ -444,7 +487,13 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
 
   // Handle select product from CariObatSalesModal
   const handleSelectItem = (prod: any) => {
-    const existingIndex = items.findIndex((it) => it.product_id === prod.id);
+    const chosenBatch = prod._selectedBatch as
+      | { batch_mode: "FEFO" | "MANUAL"; batch_number: string; expired_date: string }
+      | undefined;
+    const chosenBatchNo = chosenBatch?.batch_mode === "MANUAL" ? chosenBatch.batch_number : "";
+    const existingIndex = items.findIndex(
+      (it) => it.product_id === prod.id && (it.batch_number || "") === chosenBatchNo
+    );
     const price = Number(prod.selling_price || prod.unit_price || 0);
     const purchasePrice = Number(prod.purchase_price || prod.avg_cost || 0);
     const unitName = prod.base_unit?.name || prod.unit_name || "PCS";
@@ -493,6 +542,9 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
         distribution_channel: prod.distribution_channel || "ALL",
         selling_price: price,
         wholesale_price: Number(prod.wholesale_price || price),
+        batch_mode: chosenBatch?.batch_mode === "MANUAL" ? "MANUAL" : "FEFO",
+        batch_number: chosenBatchNo,
+        expired_date: chosenBatch?.batch_mode === "MANUAL" ? chosenBatch.expired_date : "",
       };
       const newItems = [...items, newRow];
       setItems(newItems);
@@ -594,6 +646,7 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
     setItems([]);
     setSelectedRowIndex(null);
     setNotes("");
+    setDeliveryMethod("DIKIRIM");
     setTaxPercent(0);
     setPpnType("Non");
     setNominalDiscount(0);
@@ -611,7 +664,7 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
     } else {
       alert(
         `Perhatian: Terdapat ${lowStockItems.length} item dengan jumlah pesanan melebihi sisa stok:\n` +
-          lowStockItems.map((it) => `- ${it.name} (Stok: ${it.stock}, Pesanan: ${it.qty})`).join("\n")
+        lowStockItems.map((it) => `- ${it.name} (Stok: ${it.stock}, Pesanan: ${it.qty})`).join("\n")
       );
     }
   };
@@ -652,6 +705,8 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
         cash_account_id: cashAccountId || undefined,
         status: orderStatus !== "Select..." ? orderStatus : "PENDING",
         customer_sp_number: spNumber,
+        delivery_method: deliveryMethod,
+        delivery_date: deliveryDate ? new Date(deliveryDate) : undefined,
         customer_sp_date: deliveryDate ? new Date(deliveryDate) : undefined,
         customer_sp_type: spType,
         pbf_origin_invoice_no: pbfOriginInvoiceNo,
@@ -672,6 +727,11 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
             qty: it.qty,
             unit_price: it.unit_price,
             discount: (it.unit_price * (it.discount_percent / 100)) * it.qty,
+            batch_number: it.batch_mode === "MANUAL" && it.batch_number ? it.batch_number : undefined,
+            expired_date:
+              it.batch_mode === "MANUAL" && it.expired_date
+                ? new Date(it.expired_date).toISOString()
+                : undefined,
           };
         }),
       };
@@ -763,6 +823,21 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
         </div>
       </div>
 
+      {/* Locked Status Banner */}
+      {isEdit && isCompleted && (
+        <div className="shrink-0 px-3 py-1.5 rounded-lg border bg-emerald-50 border-emerald-300 text-emerald-900 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="font-bold">
+              🟢 STATUS: PESANAN PENJUALAN SELESAI (Transaksi Terkunci - Hanya Dapat Dilihat)
+            </span>
+          </div>
+          <span className="text-[11px] bg-emerald-200/70 text-emerald-900 px-2 py-0.5 rounded font-mono font-bold">
+            READ-ONLY
+          </span>
+        </div>
+      )}
+
       {/* 2. Top Form Section (3 Rows matching Screenshot) */}
       <div className="bg-slate-50/70 border border-slate-300 rounded p-1 sm:p-1.5 space-y-1 shadow-2xs shrink-0">
         {/* ROW 1: No Transaksi | Tanggal | Pelanggan | Status Pesanan */}
@@ -809,9 +884,10 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
               />
               <button
                 type="button"
-                onClick={() => setIsCustomerModalOpen(true)}
-                className="w-6 h-6 flex items-center justify-center border border-slate-300 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition shrink-0"
-                title="Cari Pelanggan (🔍)"
+                disabled={isCompleted}
+                onClick={() => !isCompleted && setIsCustomerModalOpen(true)}
+                className="w-6 h-6 flex items-center justify-center border border-slate-300 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                title={isCompleted ? "Transaksi terkunci" : "Cari Pelanggan (🔍)"}
               >
                 <Search className="w-3 h-3" />
               </button>
@@ -825,8 +901,9 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
             </label>
             <select
               value={orderStatus}
+              disabled={isCompleted}
               onChange={(e) => setOrderStatus(e.target.value)}
-              className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500"
+              className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
             >
               <option value="Select...">Select...</option>
               <option value="PENDING">PENDING</option>
@@ -838,10 +915,10 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
           </div>
         </div>
 
-        {/* ROW 2: Gudang | Salesman | PPN | Jenis SP Farmasi */}
+        {/* ROW 2: Gudang | Salesman | PPN | Jenis SP Farmasi | Metode Penyerahan */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-1.5 items-end">
           {/* Gudang */}
-          <div className="md:col-span-4">
+          <div className="md:col-span-3">
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
               Gudang :
             </label>
@@ -859,7 +936,7 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
           </div>
 
           {/* Salesman (Kode Sales) */}
-          <div className="md:col-span-3">
+          <div className="md:col-span-2">
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
               Salesman (Kode Sales) :
             </label>
@@ -884,7 +961,17 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
             </label>
             <select
               value={ppnType}
-              onChange={(e) => setPpnType(e.target.value as any)}
+              onChange={(e) => {
+                const val = e.target.value as any;
+                setPpnType(val);
+                if (val === "Non") {
+                  setTaxPercent(0);
+                  setTaxCheckbox(false);
+                } else {
+                  if (taxPercent === 0) setTaxPercent(11);
+                  setTaxCheckbox(true);
+                }
+              }}
               className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 cursor-pointer"
             >
               <option value="Non">Non</option>
@@ -894,20 +981,35 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
           </div>
 
           {/* Jenis SP Farmasi (BPOM) */}
-          <div className="md:col-span-3">
+          <div className="md:col-span-2">
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
-              Jenis SP Farmasi (BPOM) :
+              Jenis SP (BPOM) :
             </label>
             <select
               value={spType}
               onChange={(e) => setSpType(e.target.value)}
               className="w-full h-6 px-1.5 py-0 border border-emerald-300 rounded text-[11px] font-semibold text-emerald-800 bg-emerald-50/40 focus:outline-none focus:border-emerald-500 cursor-pointer"
             >
-              <option value="REGULER">SP REGULER (Obat Bebas & Keras)</option>
-              <option value="NARKOTIKA">SP NARKOTIKA (Formulir Khusus)</option>
+              <option value="REGULER">SP REGULER</option>
+              <option value="NARKOTIKA">SP NARKOTIKA</option>
               <option value="PSIKOTROPIKA">SP PSIKOTROPIKA</option>
-              <option value="PREKURSOR">SP PREKURSOR FARMASI</option>
-              <option value="OOT">SP OBAT-OBAT TERTENTU (OOT)</option>
+              <option value="PREKURSOR">SP PREKURSOR</option>
+              <option value="OOT">SP OOT</option>
+            </select>
+          </div>
+
+          {/* Metode Pengambilan / Pengiriman */}
+          <div className="md:col-span-3">
+            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
+              Metode Penyerahan :
+            </label>
+            <select
+              value={deliveryMethod}
+              onChange={(e) => setDeliveryMethod(e.target.value as "DIKIRIM" | "DIAMBIL")}
+              className="w-full h-6 px-1.5 py-0 border border-sky-300 rounded text-[11px] font-semibold text-sky-900 bg-sky-50/50 focus:outline-none focus:border-sky-500 cursor-pointer"
+            >
+              <option value="DIKIRIM">Melalui Pengiriman</option>
+              <option value="DIAMBIL">Diambil Pelanggan Langsung</option>
             </select>
           </div>
         </div>
@@ -987,7 +1089,8 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
                 <th className="py-0.5 px-2 border-r border-slate-200 text-right w-16">Jumlah</th>
                 <th className="py-0.5 px-2 border-r border-slate-200 text-right w-16">Jml Teri...</th>
                 <th className="py-0.5 px-2 border-r border-slate-200 text-center w-16">Satuan</th>
-                <th className="py-0.5 px-2.5 border-r border-slate-200 text-right w-24">Harga</th>
+                <th className="py-0.5 px-2 border-r border-slate-200 text-center w-36">Batch &amp; ED</th>
+                <th className="py-0.5 px-2.5 border-r border-slate-200 text-right w-32 min-w-[120px]">Harga</th>
                 <th className="py-0.5 px-2 border-r border-slate-200 text-center w-12">Pot %</th>
                 <th className="py-0.5 px-2.5 text-right w-28">Total</th>
               </tr>
@@ -995,7 +1098,7 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
             <tbody className="divide-y divide-slate-100">
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-16 text-center text-slate-400 font-medium">
+                  <td colSpan={11} className="py-16 text-center text-slate-400 font-medium">
                     No data
                   </td>
                 </tr>
@@ -1004,13 +1107,13 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
                   const isSelected = selectedRowIndex === idx;
                   return (
                     <tr
-                      key={row.product_id}
+                      key={`${row.product_id}-${row.batch_number || "FEFO"}-${idx}`}
                       onClick={() => setSelectedRowIndex(idx)}
-                      className={`h-6 cursor-pointer transition-colors ${
-                        isSelected
-                          ? "bg-sky-50 text-sky-950 font-medium"
-                          : "hover:bg-slate-50/80 text-slate-800"
-                      }`}
+                      onDoubleClick={() => handleOpenEditRow(idx)}
+                      className={`h-6 cursor-pointer transition-colors ${isSelected
+                        ? "bg-sky-50 text-sky-950 font-medium"
+                        : "hover:bg-slate-50/80 text-slate-800"
+                        }`}
                     >
                       <td className="py-0.5 px-2 text-center text-slate-400 border-r border-slate-100">
                         {idx + 1}
@@ -1045,16 +1148,41 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
                       <td className="py-0.5 px-2 border-r border-slate-100 text-center font-medium">
                         {row.unit_name}
                       </td>
-                      {/* Editable Harga */}
-                      <td className="py-0 px-1 border-r border-slate-100 text-right">
+                      {/* Batch & ED Selector (Auto FEFO / Pilih ED) */}
+                      <td className="py-0.5 px-1.5 border-r border-slate-100 text-center">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setBatchModalRowIndex(idx);
+                          }}
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold border transition cursor-pointer inline-flex items-center gap-1 ${
+                            row.batch_mode === "MANUAL" && row.batch_number
+                              ? "bg-sky-50 hover:bg-sky-100 text-sky-900 border-sky-300"
+                              : "bg-emerald-50/70 hover:bg-emerald-100 text-emerald-800 border-emerald-200"
+                          }`}
+                          title="Klik untuk memilih Auto FEFO atau Batch / Expired Date tertentu"
+                        >
+                          {row.batch_mode === "MANUAL" && row.batch_number ? (
+                            <span className="font-mono">
+                              {row.batch_number}
+                              {row.expired_date ? ` (${formatDate(row.expired_date)})` : ""}
+                            </span>
+                          ) : (
+                            <span>Auto FEFO ▾</span>
+                          )}
+                        </button>
+                      </td>
+                      {/* Disabled Harga with Rupiah formatting */}
+                      <td className="py-0 px-1 border-r border-slate-100 text-right w-32 min-w-[120px]">
                         <input
-                          type="number"
-                          value={row.unit_price}
+                          type="text"
+                          disabled
+                          readOnly
+                          value={Number(row.unit_price || 0).toLocaleString("id-ID")}
                           onClick={(e) => e.stopPropagation()}
-                          onChange={(e) =>
-                            handleUpdateItem(idx, "unit_price", Math.max(0, parseFloat(e.target.value) || 0))
-                          }
-                          className="w-20 h-5 px-1 border border-slate-300 rounded text-right text-[11px] bg-white focus:outline-none focus:border-sky-500"
+                          className="w-full h-5 px-1.5 border border-slate-200 rounded text-right text-[11px] font-mono font-semibold bg-slate-100 text-slate-700 cursor-not-allowed select-none"
+                          title="Harga satuan diatur melalui pencarian obat atau ubah detail item [✏]"
                         />
                       </td>
                       {/* Editable Pot % */}
@@ -1146,8 +1274,9 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
       <div className="flex items-center gap-1.5 shrink-0 py-0.5">
         <button
           type="button"
-          onClick={() => setIsItemModalOpen(true)}
-          className="h-6 px-3 bg-[#e2f8ec] hover:bg-[#c9f1dc] text-[#00a862] border border-[#a2e8c2] font-bold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95"
+          disabled={isCompleted || isGudang}
+          onClick={() => !isCompleted && !isGudang && setIsItemModalOpen(true)}
+          className="h-6 px-3 bg-[#e2f8ec] hover:bg-[#c9f1dc] text-[#00a862] border border-[#a2e8c2] font-bold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <span className="text-sm font-bold leading-none">+</span>
           <span>Item</span>
@@ -1155,24 +1284,22 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
 
         <button
           type="button"
-          disabled={selectedRowIndex === null}
-          onClick={() => {
-            if (selectedRowIndex !== null) setIsEditRowModalOpen(true);
-          }}
-          className="h-6 w-6 border border-slate-300 rounded hover:bg-slate-100 flex items-center justify-center text-slate-600 disabled:opacity-40 transition"
-          title="Ubah Item"
+          disabled={selectedRowIndex === null || isCompleted || isGudang}
+          onClick={() => handleOpenEditRow()}
+          className="h-6 w-6 border border-slate-300 rounded hover:bg-slate-100 flex items-center justify-center text-slate-600 disabled:opacity-40 transition cursor-pointer disabled:cursor-not-allowed"
+          title={isCompleted ? "Transaksi terkunci" : "Ubah Item"}
         >
           <Pencil className="w-3 h-3" />
         </button>
 
         <button
           type="button"
-          disabled={selectedRowIndex === null}
+          disabled={selectedRowIndex === null || isCompleted || isGudang}
           onClick={() => {
-            if (selectedRowIndex !== null) handleRemoveItem(selectedRowIndex);
+            if (selectedRowIndex !== null && !isCompleted && !isGudang) handleRemoveItem(selectedRowIndex);
           }}
-          className="h-6 w-6 border border-slate-300 rounded hover:bg-rose-50 hover:border-rose-300 hover:text-rose-600 flex items-center justify-center text-slate-600 disabled:opacity-40 transition"
-          title="Hapus Item"
+          className="h-6 w-6 border border-slate-300 rounded hover:bg-rose-50 hover:border-rose-300 hover:text-rose-600 flex items-center justify-center text-slate-600 disabled:opacity-40 transition disabled:cursor-not-allowed"
+          title={isCompleted ? "Transaksi terkunci" : "Hapus Item"}
         >
           <Trash2 className="w-3 h-3" />
         </button>
@@ -1272,28 +1399,20 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
               Pjk % :
             </label>
-            <div className="flex items-center gap-1">
-              <select
-                value={ppnType === "Non" ? "0" : String(taxPercent)}
-                onChange={(e) => {
-                  const val = parseFloat(e.target.value) || 0;
-                  setTaxPercent(val);
-                  setPpnType(val > 0 ? "Exclude" : "Non");
-                  setTaxCheckbox(val > 0);
-                }}
-                className="w-full h-6 px-1 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 cursor-pointer"
-              >
-                <option value="0">0% - Non Pajak</option>
-                <option value="11">11% - PPN Standar</option>
-                <option value="12">12% - PPN 2025</option>
-              </select>
-              <input
-                type="checkbox"
-                checked={taxCheckbox}
-                onChange={(e) => setTaxCheckbox(e.target.checked)}
-                className="w-3.5 h-3.5 text-sky-600 rounded"
-              />
-            </div>
+            <select
+              value={String(taxPercent)}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value) || 0;
+                setTaxPercent(val);
+                setPpnType(val > 0 ? "Exclude" : "Non");
+                setTaxCheckbox(val > 0);
+              }}
+              className="w-full h-6 px-1 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 cursor-pointer"
+            >
+              <option value="0">0% - Non Pajak</option>
+              <option value="11">11% - PPN 11%</option>
+              <option value="12">12% - PPN 12%</option>
+            </select>
           </div>
 
           {/* Nom Pajak */}
@@ -1301,20 +1420,12 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
               Nom Pajak :
             </label>
-            <div className="flex items-center gap-1">
-              <input
-                type="text"
-                readOnly
-                value={formatCurrency(calculatedTaxAmount).replace("Rp", "").trim()}
-                className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-right text-slate-700 bg-slate-100 focus:outline-none"
-              />
-              <input
-                type="checkbox"
-                checked={taxCheckbox}
-                onChange={(e) => setTaxCheckbox(e.target.checked)}
-                className="w-3.5 h-3.5 text-sky-600 rounded"
-              />
-            </div>
+            <input
+              type="text"
+              readOnly
+              value={formatCurrency(calculatedTaxAmount).replace("Rp", "").trim()}
+              className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-right text-slate-700 bg-slate-100 focus:outline-none font-medium"
+            />
           </div>
         </div>
 
@@ -1343,9 +1454,15 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
               type="number"
               min={0}
               max={100}
-              value={discountPercent}
-              onChange={(e) => setDiscountPercent(parseFloat(e.target.value) || 0)}
-              className="w-full h-6 px-1 py-0 border border-slate-300 rounded text-[11px] text-center text-slate-800 bg-white focus:outline-none focus:border-sky-500"
+              step="0.01"
+              value={discountPercent || ""}
+              placeholder="0"
+              onChange={(e) => {
+                const val = parseFloat(e.target.value) || 0;
+                setDiscountPercent(val);
+                if (val > 0) setNominalDiscount(0);
+              }}
+              className="w-full h-6 px-1 py-0 border border-slate-300 rounded text-[11px] text-center text-slate-800 bg-white font-mono focus:outline-none focus:border-sky-500"
             />
           </div>
 
@@ -1358,23 +1475,38 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
               type="number"
               min={0}
               max={100}
-              value={notaDiscountPercent}
-              onChange={(e) => setNotaDiscountPercent(parseFloat(e.target.value) || 0)}
-              className="w-full h-6 px-1 py-0 border border-slate-300 rounded text-[11px] text-center text-slate-800 bg-white focus:outline-none focus:border-sky-500"
+              step="0.01"
+              value={notaDiscountPercent || ""}
+              placeholder="0"
+              onChange={(e) => {
+                const val = parseFloat(e.target.value) || 0;
+                setNotaDiscountPercent(val);
+                if (val > 0) setNominalDiscount(0);
+              }}
+              className="w-full h-6 px-1 py-0 border border-slate-300 rounded text-[11px] text-center text-slate-800 bg-white font-mono focus:outline-none focus:border-sky-500"
             />
           </div>
 
           {/* Nom Potongan */}
-          <div className="col-span-1 md:col-span-1">
+          <div className="col-span-1 md:col-span-2">
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none truncate">
               Nom Potongan :
             </label>
             <input
-              type="number"
-              min={0}
-              value={nominalDiscount}
-              onChange={(e) => setNominalDiscount(parseFloat(e.target.value) || 0)}
-              className="w-full h-6 px-1 py-0 border border-slate-300 rounded text-[11px] text-right text-slate-800 bg-white focus:outline-none focus:border-sky-500"
+              type="text"
+              value={
+                calculatedNominalDiscount > 0
+                  ? calculatedNominalDiscount.toLocaleString("id-ID")
+                  : "0"
+              }
+              onChange={(e) => {
+                const raw = e.target.value.replace(/[^0-9]/g, "");
+                const val = Number(raw) || 0;
+                setNominalDiscount(val);
+                setDiscountPercent(0);
+                setNotaDiscountPercent(0);
+              }}
+              className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-right text-slate-800 bg-white font-mono focus:outline-none focus:border-sky-500"
             />
           </div>
 
@@ -1385,15 +1517,18 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
             </label>
             <div className="flex items-center gap-1">
               <input
-                type="number"
-                min={0}
-                value={extraFee}
+                type="text"
+                placeholder="0"
+                value={extraFee > 0 ? extraFee.toLocaleString("id-ID") : "0"}
                 onChange={(e) => {
-                  const val = parseFloat(e.target.value) || 0;
+                  const raw = e.target.value.replace(/[^0-9]/g, "");
+                  const val = Number(raw) || 0;
                   setExtraFee(val);
-                  setExtraFeeCheckbox(val > 0);
+                  if (val > 0) {
+                    setExtraFeeCheckbox(true);
+                  }
                 }}
-                className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-right text-slate-800 bg-white focus:outline-none focus:border-sky-500"
+                className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-right text-slate-800 bg-white font-mono focus:outline-none focus:border-sky-500"
               />
               <span className="w-5 h-6 flex items-center justify-center border border-slate-300 rounded bg-slate-100 text-slate-600 text-xs font-bold shrink-0">
                 $
@@ -1401,14 +1536,18 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
               <input
                 type="checkbox"
                 checked={extraFeeCheckbox}
-                onChange={(e) => setExtraFeeCheckbox(e.target.checked)}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  setExtraFeeCheckbox(checked);
+                  if (!checked) setExtraFee(0);
+                }}
                 className="w-3.5 h-3.5 text-sky-600 rounded"
               />
             </div>
           </div>
 
           {/* Total Akhir (Pink Highlight matching Screenshot) */}
-          <div className="col-span-2 md:col-span-3">
+          <div className="col-span-2 md:col-span-2">
             <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
               Total Akhir :
             </label>
@@ -1435,8 +1574,12 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
           {/* 💾 Simpan (Membuka Modal Persetujuan Simpan) */}
           <button
             type="button"
-            disabled={saveMutation.isPending || isGudang}
+            disabled={saveMutation.isPending || isGudang || isCompleted}
             onClick={() => {
+              if (isCompleted) {
+                alert("Pesanan Penjualan sudah selesai. Transaksi yang sudah selesai tidak dapat diedit.");
+                return;
+              }
               if (isGudang) {
                 alert("Akses ditolak: Petugas Gudang tidak berwenang mencatat atau mengubah Pesanan Penjualan.");
                 return;
@@ -1452,8 +1595,14 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
               if (!validateMarginAndHpp()) return;
               setIsSaveConfirmModalOpen(true);
             }}
-            className="h-6 px-3 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-50 cursor-pointer"
-            title={isGudang ? "Petugas Gudang tidak berwenang mencatat/mengubah SO" : "Simpan Pesanan Penjualan"}
+            className="h-6 px-3 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            title={
+              isCompleted
+                ? "Pesanan Penjualan sudah selesai. Transaksi yang sudah selesai tidak dapat diedit."
+                : isGudang
+                  ? "Petugas Gudang tidak berwenang mencatat/mengubah SO"
+                  : "Simpan Pesanan Penjualan"
+            }
           >
             <Save className="w-3 h-3" />
             <span>{saveMutation.isPending ? "Menyimpan..." : "Simpan"}</span>
@@ -1462,8 +1611,16 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
           {/* 🗑 Hapus */}
           <button
             type="button"
-            onClick={handleResetForm}
-            className="h-6 px-3 bg-white hover:bg-rose-50 border border-slate-300 text-rose-600 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition cursor-pointer"
+            disabled={isCompleted || isGudang}
+            onClick={() => {
+              if (isCompleted) {
+                alert("Pesanan Penjualan sudah selesai. Transaksi yang sudah selesai tidak dapat dihapus.");
+                return;
+              }
+              handleResetForm();
+            }}
+            className="h-6 px-3 bg-white hover:bg-rose-50 border border-slate-300 text-rose-600 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            title={isCompleted ? "Pesanan Penjualan sudah selesai (Tidak dapat dihapus)" : "Hapus / Reset Form"}
           >
             <Trash2 className="w-3 h-3" />
             <span>Hapus</span>
@@ -1498,11 +1655,10 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
               }
               setIsBayarModalOpen(true);
             }}
-            className={`h-6 px-3 font-bold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition ${
-              isPaymentSubmitted
-                ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60"
-                : "bg-white hover:bg-emerald-50 border border-emerald-500 text-emerald-700 cursor-pointer"
-            }`}
+            className={`h-6 px-3 font-bold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition ${isPaymentSubmitted
+              ? "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60"
+              : "bg-white hover:bg-emerald-50 border border-emerald-500 text-emerald-700 cursor-pointer"
+              }`}
             title={
               isPaymentSubmitted
                 ? "Pembayaran/DP pesanan telah disubmit. Pelunasan piutang diproses melalui menu Bayar Piutang."
@@ -1523,9 +1679,8 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
         <div className="text-[11px] text-slate-600 flex items-center gap-1.5 font-semibold">
           <span>Status Pesanan:</span>
           <span
-            className={`font-bold ${
-              orderStatus === "SELESAI" ? "text-emerald-700" : "text-slate-800 uppercase"
-            }`}
+            className={`font-bold ${orderStatus === "SELESAI" ? "text-emerald-700" : "text-slate-800 uppercase"
+              }`}
           >
             {orderStatus !== "Select..." ? orderStatus : "PENDING"}
           </span>
@@ -1560,6 +1715,32 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
         saleType="PBF"
         warehouseId={warehouseId}
       />
+
+      {batchModalRowIndex !== null && items[batchModalRowIndex] && (
+        <PilihBatchEDModal
+          isOpen={true}
+          onClose={() => setBatchModalRowIndex(null)}
+          productId={items[batchModalRowIndex].product_id}
+          productName={items[batchModalRowIndex].name}
+          productCode={items[batchModalRowIndex].code}
+          warehouseId={warehouseId}
+          currentBatchNumber={items[batchModalRowIndex].batch_number}
+          onSelect={(opt) => {
+            setItems((prev) =>
+              prev.map((it, i) =>
+                i === batchModalRowIndex
+                  ? {
+                      ...it,
+                      batch_mode: opt.batch_mode,
+                      batch_number: opt.batch_number,
+                      expired_date: opt.expired_date,
+                    }
+                  : it
+              )
+            );
+          }}
+        />
+      )}
 
       {/* MODAL 3: LAMPIRAN DOKUMEN PBF & SP (PbfDocumentUpload) */}
       {isPbfDocModalOpen && (
@@ -2055,6 +2236,14 @@ export const SalesOrderForm: React.FC<SalesOrderFormProps> = ({
         </div>
       )}
 
+      {/* MODAL EDIT ITEM / DETAIL ITEM PENJUALAN */}
+      <DetailItemSalesModal
+        isOpen={isEditRowModalOpen}
+        onClose={() => setIsEditRowModalOpen(false)}
+        item={editingRow}
+        onSave={handleSaveDetailItem}
+        mainCustomer={selectedCustomer}
+      />
     </div>
   );
 };

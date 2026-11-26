@@ -14,9 +14,8 @@ export default function MasterOtherPage() {
 
   return (
     <div className="space-y-4 text-xs">
-      <div className="bg-white border border-slate-200 rounded p-4 shadow-sm">
+      <div className="bg-white border border-slate-200 rounded p-3 shadow-2xs">
         <h2 className="text-sm font-semibold text-slate-800">Master Data Lainnya</h2>
-        <p className="text-slate-500 text-[11px]">Parameter penunjang transaksi, pengelompokan inventori, dan akun kas</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">

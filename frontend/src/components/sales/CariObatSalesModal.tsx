@@ -15,8 +15,10 @@ import {
   ShieldCheck,
   AlertTriangle,
   Package,
+  Calendar,
 } from "lucide-react";
 import { api, formatCurrency } from "@/lib/api";
+import { PilihBatchEDModal, SelectedBatchOption } from "./PilihBatchEDModal";
 
 interface CariObatSalesModalProps {
   isOpen: boolean;
@@ -53,6 +55,7 @@ export const CariObatSalesModal: React.FC<CariObatSalesModalProps> = ({
   // Selected item row & info modal
   const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
   const [infoModalOpen, setInfoModalOpen] = useState(false);
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
 
   // Queries for dropdown filters
   const { data: warehouses = [] } = useQuery({
@@ -147,7 +150,7 @@ export const CariObatSalesModal: React.FC<CariObatSalesModalProps> = ({
   const total = resultData?.total || 0;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  const handleChoose = (item: any) => {
+  const handleChoose = (item: any, chosenBatch?: SelectedBatchOption) => {
     if (!item) return;
 
     const isRetailMode = retailOnly || saleType === "RETAIL_KASIR";
@@ -179,7 +182,7 @@ export const CariObatSalesModal: React.FC<CariObatSalesModalProps> = ({
       );
       return;
     }
-    onSelect(item);
+    onSelect(chosenBatch ? { ...item, _selectedBatch: chosenBatch } : item);
     onClose();
   };
 
@@ -238,15 +241,28 @@ export const CariObatSalesModal: React.FC<CariObatSalesModalProps> = ({
           </button>
         </div>
 
-        {/* Tombol Pilih (Light Green Button matching Image 2: #a6e5b5) */}
+        {/* Tombol Pilih Auto FEFO */}
         <button
           type="button"
           disabled={!selectedProduct}
           onClick={() => handleChoose(selectedProduct)}
-          className="h-6 px-3 bg-[#a6e5b5] hover:bg-[#8ee0a1] text-emerald-950 font-bold border border-emerald-300 rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40"
+          className="h-6 px-3 bg-[#a6e5b5] hover:bg-[#8ee0a1] text-emerald-950 font-bold border border-emerald-300 rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40 cursor-pointer"
+          title="Pilih item dengan metode FEFO otomatis"
         >
           <Check className="w-3.5 h-3.5 stroke-[3]" />
-          <span>Pilih...</span>
+          <span>Pilih (FEFO)</span>
+        </button>
+
+        {/* Tombol Pilih Sesuai ED / Batch */}
+        <button
+          type="button"
+          disabled={!selectedProduct}
+          onClick={() => selectedProduct && setIsBatchModalOpen(true)}
+          className="h-6 px-3 bg-sky-100 hover:bg-sky-200 text-sky-900 font-bold border border-sky-300 rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-40 cursor-pointer"
+          title="Pilih item berdasarkan Expired Date (ED) / No. Batch tertentu"
+        >
+          <Calendar className="w-3.5 h-3.5" />
+          <span>Pilih Sesuai ED</span>
         </button>
 
         {/* Tombol Informasi (Cyan Button matching Image 2: #a5f3fc) */}
@@ -712,6 +728,18 @@ export const CariObatSalesModal: React.FC<CariObatSalesModalProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {selectedProduct && (
+        <PilihBatchEDModal
+          isOpen={isBatchModalOpen}
+          onClose={() => setIsBatchModalOpen(false)}
+          productId={selectedProduct.id}
+          productName={selectedProduct.name}
+          productCode={selectedProduct.code}
+          warehouseId={selectedWarehouse !== "all" ? selectedWarehouse : warehouseId}
+          onSelect={(opt) => handleChoose(selectedProduct, opt)}
+        />
       )}
     </div>
   );

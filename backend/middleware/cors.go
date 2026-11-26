@@ -12,8 +12,8 @@ func CORSMiddleware() gin.HandlerFunc {
 		AllowOriginFunc: func(origin string) bool {
 			return true
 		},
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With", "X-Company-ID", "X-Branch-ID", "X-Computer-Name"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With", "X-Company-ID", "X-Branch-ID", "X-Computer-Name", "X-Real-IP", "X-Real-Ip", "X-Forwarded-For"},
 		ExposeHeaders:    []string{"Content-Length", "Content-Disposition"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,

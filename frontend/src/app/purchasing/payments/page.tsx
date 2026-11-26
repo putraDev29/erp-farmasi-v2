@@ -193,9 +193,6 @@ export default function SupplierPaymentsPage() {
             <span className="w-1.5 h-3.5 bg-teal-500 rounded-xs inline-block" />
             Daftar Pembayaran Hutang
           </h1>
-          <p className="text-[10px] text-slate-500">
-            Pelunasan faktur pembelian, pengeluaran kas/bank, dan pengurangan saldo hutang pemasok
-          </p>
         </div>
       </div>
 

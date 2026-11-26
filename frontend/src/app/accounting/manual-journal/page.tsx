@@ -95,7 +95,7 @@ export default function ManualJournalPage() {
         </Link>
         <div>
           <h1 className="text-sm font-bold text-slate-800">Input Jurnal Umum Manual</h1>
-          <p className="text-[11px] text-slate-500">Pencatatan penyesuaian akuntansi, beban utilitas, atau setoran modal pemilik.</p>
+          
         </div>
       </div>
 

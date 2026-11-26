@@ -196,15 +196,19 @@ func (h *SalesHandler) CreateSalesOrder(c *gin.Context) {
 		CashAccountID      *uuid.UUID `json:"cash_account_id"`
 		CustomerSPNumber   string     `json:"customer_sp_number"`
 		CustomerSPDate     *time.Time `json:"customer_sp_date"`
+		DeliveryDate       *time.Time `json:"delivery_date"`
+		DeliveryMethod     string     `json:"delivery_method"`
 		CustomerSPType     string     `json:"customer_sp_type"`
 		PBFOriginInvoiceNo string     `json:"pbf_origin_invoice_no"`
 		ComputerName       string     `json:"computer_name"`
 		Items              []struct {
-			ProductID uuid.UUID `json:"product_id" binding:"required"`
-			UnitID    uuid.UUID `json:"unit_id" binding:"required"`
-			Qty       float64   `json:"qty" binding:"required"`
-			UnitPrice float64   `json:"unit_price" binding:"required"`
-			Discount  float64   `json:"discount"`
+			ProductID   uuid.UUID  `json:"product_id" binding:"required"`
+			UnitID      uuid.UUID  `json:"unit_id" binding:"required"`
+			Qty         float64    `json:"qty" binding:"required"`
+			UnitPrice   float64    `json:"unit_price" binding:"required"`
+			Discount    float64    `json:"discount"`
+			BatchNumber string     `json:"batch_number"`
+			ExpiredDate *time.Time `json:"expired_date"`
 		} `json:"items" binding:"required"`
 	}
 
@@ -320,6 +324,11 @@ func (h *SalesHandler) CreateSalesOrder(c *gin.Context) {
 		}
 	}
 
+	soDeliveryMethod := "DIKIRIM"
+	if strings.ToUpper(req.DeliveryMethod) == "DIAMBIL" {
+		soDeliveryMethod = "DIAMBIL"
+	}
+
 	so := models.SalesOrder{
 		CompanyID:          companyID,
 		BranchID:           branchID,
@@ -329,6 +338,13 @@ func (h *SalesHandler) CreateSalesOrder(c *gin.Context) {
 		OrderNo:            soNo,
 		Date:               orderDate,
 		ExpectedDate:       req.ExpectedDate,
+		DeliveryMethod:     soDeliveryMethod,
+		DeliveryDate: func() *time.Time {
+			if req.DeliveryDate != nil {
+				return req.DeliveryDate
+			}
+			return req.CustomerSPDate
+		}(),
 		Status:             status,
 		ProcessStatus:      "Belum Proses",
 		PaymentStatus:      paymentStatus,
@@ -371,6 +387,8 @@ func (h *SalesHandler) CreateSalesOrder(c *gin.Context) {
 			UnitPrice:    it.UnitPrice,
 			Discount:     it.Discount,
 			TotalAmount:  (it.Qty * it.UnitPrice) - it.Discount,
+			BatchNumber:  it.BatchNumber,
+			ExpiredDate:  it.ExpiredDate,
 		}
 		tx.Create(&item)
 	}
@@ -459,6 +477,11 @@ func (h *SalesHandler) UpdateSalesOrder(c *gin.Context) {
 		return
 	}
 
+	if so.Status == "SELESAI" || so.Status == "COMPLETED" || so.ProcessStatus == "Selesai" {
+		utils.SendError(c, http.StatusBadRequest, "Pesanan Penjualan sudah selesai. Transaksi yang sudah selesai tidak dapat diedit.", nil)
+		return
+	}
+
 	var req struct {
 		WarehouseID        *uuid.UUID `json:"warehouse_id"`
 		CustomerID         uuid.UUID  `json:"customer_id"`
@@ -473,15 +496,19 @@ func (h *SalesHandler) UpdateSalesOrder(c *gin.Context) {
 		PaidAmount         float64    `json:"paid_amount"`
 		CustomerSPNumber   string     `json:"customer_sp_number"`
 		CustomerSPDate     *time.Time `json:"customer_sp_date"`
+		DeliveryDate       *time.Time `json:"delivery_date"`
+		DeliveryMethod     string     `json:"delivery_method"`
 		CustomerSPType     string     `json:"customer_sp_type"`
 		PBFOriginInvoiceNo string     `json:"pbf_origin_invoice_no"`
 		ComputerName       string     `json:"computer_name"`
 		Items              []struct {
-			ProductID uuid.UUID `json:"product_id" binding:"required"`
-			UnitID    uuid.UUID `json:"unit_id" binding:"required"`
-			Qty       float64   `json:"qty" binding:"required"`
-			UnitPrice float64   `json:"unit_price" binding:"required"`
-			Discount  float64   `json:"discount"`
+			ProductID   uuid.UUID  `json:"product_id" binding:"required"`
+			UnitID      uuid.UUID  `json:"unit_id" binding:"required"`
+			Qty         float64    `json:"qty" binding:"required"`
+			UnitPrice   float64    `json:"unit_price" binding:"required"`
+			Discount    float64    `json:"discount"`
+			BatchNumber string     `json:"batch_number"`
+			ExpiredDate *time.Time `json:"expired_date"`
 		} `json:"items"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -503,9 +530,12 @@ func (h *SalesHandler) UpdateSalesOrder(c *gin.Context) {
 	if req.ExpectedDate != nil {
 		so.ExpectedDate = req.ExpectedDate
 	}
-	if req.Notes != "" {
-		so.Notes = req.Notes
+	if req.DeliveryDate != nil {
+		so.DeliveryDate = req.DeliveryDate
+	} else if req.CustomerSPDate != nil {
+		so.DeliveryDate = req.CustomerSPDate
 	}
+	so.Notes = req.Notes
 	if req.Status != "" && req.Status != "Select..." {
 		so.Status = req.Status
 	}
@@ -514,6 +544,9 @@ func (h *SalesHandler) UpdateSalesOrder(c *gin.Context) {
 	}
 	if req.CustomerSPType != "" {
 		so.CustomerSPType = req.CustomerSPType
+	}
+	if strings.ToUpper(req.DeliveryMethod) == "DIAMBIL" || strings.ToUpper(req.DeliveryMethod) == "DIKIRIM" {
+		so.DeliveryMethod = strings.ToUpper(req.DeliveryMethod)
 	}
 	so.CustomerSPNumber = req.CustomerSPNumber
 	so.CustomerSPDate = req.CustomerSPDate
@@ -541,6 +574,8 @@ func (h *SalesHandler) UpdateSalesOrder(c *gin.Context) {
 				UnitPrice:    it.UnitPrice,
 				Discount:     it.Discount,
 				TotalAmount:  lineTot,
+				BatchNumber:  it.BatchNumber,
+				ExpiredDate:  it.ExpiredDate,
 			}
 			tx.Create(&item)
 		}
@@ -579,6 +614,11 @@ func (h *SalesHandler) ProcessSalesOrder(c *gin.Context) {
 	var so models.SalesOrder
 	if err := database.DB.Where("id = ? AND company_id = ?", id, companyID).First(&so).Error; err != nil {
 		utils.SendError(c, http.StatusNotFound, "Pesanan penjualan tidak ditemukan", nil)
+		return
+	}
+
+	if so.Status == "SELESAI" || so.Status == "COMPLETED" || so.ProcessStatus == "Selesai" {
+		utils.SendError(c, http.StatusBadRequest, "Pesanan Penjualan sudah selesai. Transaksi yang sudah selesai tidak dapat diedit.", nil)
 		return
 	}
 
@@ -918,7 +958,7 @@ func (h *SalesHandler) ShipSalesOrder(c *gin.Context) {
 		totalCOGS += costPrice * it.Qty
 
 		// Deduct stock (Barang fisik benar-benar keluar saat dikirim)
-		mutBal, errMut := services.MutateStock(tx, services.StockMutationParams{
+		mutBal, deductedBatches, errMut := services.MutateStockWithBatches(tx, services.StockMutationParams{
 			CompanyID:    companyID,
 			BranchID:     branchID,
 			WarehouseID:  targetWhID,
@@ -939,29 +979,106 @@ func (h *SalesHandler) ShipSalesOrder(c *gin.Context) {
 			return
 		}
 
-		if mutBal != nil {
-			if itemBatch == "" {
-				itemBatch = mutBal.BatchNumber
+		if len(deductedBatches) > 1 {
+			// Update original SO Item with first batch
+			firstDb := deductedBatches[0]
+			prop0 := 1.0
+			if it.Qty > 0 {
+				prop0 = firstDb.Qty / it.Qty
 			}
-			if itemExp == nil {
-				itemExp = mutBal.ExpiredDate
-			}
-		}
+			disc0 := it.Discount * prop0
+			total0 := (firstDb.Qty * it.UnitPrice) - disc0
 
-		// Update SO Item
-		tx.Model(&models.SalesOrderItem{}).Where("id = ?", it.ID).Updates(map[string]interface{}{
-			"batch_number":  itemBatch,
-			"expired_date":  itemExp,
-			"delivered_qty": it.Qty,
-		})
-
-		// Update Sale Item if linked
-		if so.SaleInvoiceID != nil {
-			tx.Model(&models.SaleItem{}).Where("sale_id = ? AND product_id = ?", *so.SaleInvoiceID, it.ProductID).Updates(map[string]interface{}{
-				"batch_number": itemBatch,
-				"expired_date": itemExp,
-				"cost_price":   costPrice,
+			tx.Model(&models.SalesOrderItem{}).Where("id = ?", it.ID).Updates(map[string]interface{}{
+				"qty":           firstDb.Qty,
+				"delivered_qty": firstDb.Qty,
+				"discount":      disc0,
+				"total_amount":  total0,
+				"batch_number":  firstDb.BatchNumber,
+				"expired_date":  firstDb.ExpiredDate,
 			})
+
+			// Insert extra SO items for subsequent batches
+			for _, extraDb := range deductedBatches[1:] {
+				propExtra := 1.0
+				if it.Qty > 0 {
+					propExtra = extraDb.Qty / it.Qty
+				}
+				discExtra := it.Discount * propExtra
+				totalExtra := (extraDb.Qty * it.UnitPrice) - discExtra
+
+				newSoItem := models.SalesOrderItem{
+					SalesOrderID: it.SalesOrderID,
+					ProductID:    it.ProductID,
+					UnitID:       it.UnitID,
+					Qty:          extraDb.Qty,
+					UnitPrice:    it.UnitPrice,
+					Discount:     discExtra,
+					TotalAmount:  totalExtra,
+					DeliveredQty: extraDb.Qty,
+					BatchNumber:  extraDb.BatchNumber,
+					ExpiredDate:  extraDb.ExpiredDate,
+				}
+				tx.Create(&newSoItem)
+			}
+
+			// Update / split Sale Items if linked
+			if so.SaleInvoiceID != nil {
+				tx.Where("sale_id = ? AND product_id = ?", *so.SaleInvoiceID, it.ProductID).Delete(&models.SaleItem{})
+				for _, db := range deductedBatches {
+					prop := 1.0
+					if it.Qty > 0 {
+						prop = db.Qty / it.Qty
+					}
+					disc := it.Discount * prop
+					tot := (db.Qty * it.UnitPrice) - disc
+					cCost := costPrice
+					if db.CostPrice > 0 {
+						cCost = db.CostPrice
+					}
+					newSaleItem := models.SaleItem{
+						SaleID:      *so.SaleInvoiceID,
+						ProductID:   it.ProductID,
+						UnitID:      it.UnitID,
+						Qty:         db.Qty,
+						UnitPrice:   it.UnitPrice,
+						CostPrice:   cCost,
+						Discount:    disc,
+						TotalAmount: tot,
+						BatchNumber: db.BatchNumber,
+						ExpiredDate: db.ExpiredDate,
+					}
+					tx.Create(&newSaleItem)
+				}
+			}
+		} else {
+			if len(deductedBatches) == 1 {
+				itemBatch = deductedBatches[0].BatchNumber
+				itemExp = deductedBatches[0].ExpiredDate
+			} else if mutBal != nil {
+				if itemBatch == "" {
+					itemBatch = mutBal.BatchNumber
+				}
+				if itemExp == nil {
+					itemExp = mutBal.ExpiredDate
+				}
+			}
+
+			// Update SO Item
+			tx.Model(&models.SalesOrderItem{}).Where("id = ?", it.ID).Updates(map[string]interface{}{
+				"batch_number":  itemBatch,
+				"expired_date":  itemExp,
+				"delivered_qty": it.Qty,
+			})
+
+			// Update Sale Item if linked
+			if so.SaleInvoiceID != nil {
+				tx.Model(&models.SaleItem{}).Where("sale_id = ? AND product_id = ?", *so.SaleInvoiceID, it.ProductID).Updates(map[string]interface{}{
+					"batch_number": itemBatch,
+					"expired_date": itemExp,
+					"cost_price":   costPrice,
+				})
+			}
 		}
 	}
 
@@ -1232,6 +1349,8 @@ func (h *SalesHandler) ReceiveSale(c *gin.Context) {
 	sale.ReceivedBy = recBy
 	if req.Courier != "" {
 		sale.DeliveryCourier = req.Courier
+	} else if sale.DeliveryMethod == "DIAMBIL" && sale.DeliveryCourier == "" {
+		sale.DeliveryCourier = "Diambil Pelanggan Langsung"
 	}
 	if req.TrackingNo != "" {
 		sale.DeliveryOrderNo = req.TrackingNo
@@ -1433,7 +1552,7 @@ func (h *SalesHandler) ShipSale(c *gin.Context) {
 		totalCOGS += costPrice * it.Qty
 
 		// Deduct stock (Barang fisik benar-benar keluar saat dikirim)
-		mutBal, errMut := services.MutateStock(tx, services.StockMutationParams{
+		mutBal, deductedBatches, errMut := services.MutateStockWithBatches(tx, services.StockMutationParams{
 			CompanyID:    companyID,
 			BranchID:     branchID,
 			WarehouseID:  targetWhID,
@@ -1454,29 +1573,110 @@ func (h *SalesHandler) ShipSale(c *gin.Context) {
 			return
 		}
 
-		if mutBal != nil {
-			if itemBatch == "" {
-				itemBatch = mutBal.BatchNumber
+		if len(deductedBatches) > 1 {
+			// Update original Sale Item with first batch
+			firstDb := deductedBatches[0]
+			prop0 := 1.0
+			if it.Qty > 0 {
+				prop0 = firstDb.Qty / it.Qty
 			}
-			if itemExp == nil {
-				itemExp = mutBal.ExpiredDate
+			disc0 := it.Discount * prop0
+			total0 := (firstDb.Qty * it.UnitPrice) - disc0
+			cost0 := costPrice
+			if firstDb.CostPrice > 0 {
+				cost0 = firstDb.CostPrice
 			}
-		}
 
-		// Update Sale Item
-		tx.Model(&models.SaleItem{}).Where("id = ?", it.ID).Updates(map[string]interface{}{
-			"batch_number": itemBatch,
-			"expired_date": itemExp,
-			"cost_price":   costPrice,
-		})
-
-		// Update SO Item if linked
-		if sale.SalesOrderID != nil {
-			tx.Model(&models.SalesOrderItem{}).Where("sales_order_id = ? AND product_id = ?", *sale.SalesOrderID, it.ProductID).Updates(map[string]interface{}{
-				"batch_number":  itemBatch,
-				"expired_date":  itemExp,
-				"delivered_qty": it.Qty,
+			tx.Model(&models.SaleItem{}).Where("id = ?", it.ID).Updates(map[string]interface{}{
+				"qty":          firstDb.Qty,
+				"discount":     disc0,
+				"total_amount": total0,
+				"cost_price":   cost0,
+				"batch_number": firstDb.BatchNumber,
+				"expired_date": firstDb.ExpiredDate,
 			})
+
+			// Create new Sale items for remaining batches
+			for _, extraDb := range deductedBatches[1:] {
+				propExtra := 1.0
+				if it.Qty > 0 {
+					propExtra = extraDb.Qty / it.Qty
+				}
+				discExtra := it.Discount * propExtra
+				totalExtra := (extraDb.Qty * it.UnitPrice) - discExtra
+				costExtra := costPrice
+				if extraDb.CostPrice > 0 {
+					costExtra = extraDb.CostPrice
+				}
+
+				newSaleItem := models.SaleItem{
+					SaleID:      it.SaleID,
+					ProductID:   it.ProductID,
+					UnitID:      it.UnitID,
+					Qty:         extraDb.Qty,
+					UnitPrice:   it.UnitPrice,
+					CostPrice:   costExtra,
+					Discount:    discExtra,
+					TotalAmount: totalExtra,
+					BatchNumber: extraDb.BatchNumber,
+					ExpiredDate: extraDb.ExpiredDate,
+				}
+				tx.Create(&newSaleItem)
+			}
+
+			// Update / split SO Item if linked
+			if sale.SalesOrderID != nil {
+				tx.Where("sales_order_id = ? AND product_id = ?", *sale.SalesOrderID, it.ProductID).Delete(&models.SalesOrderItem{})
+				for _, db := range deductedBatches {
+					prop := 1.0
+					if it.Qty > 0 {
+						prop = db.Qty / it.Qty
+					}
+					disc := it.Discount * prop
+					tot := (db.Qty * it.UnitPrice) - disc
+					newSoItem := models.SalesOrderItem{
+						SalesOrderID: *sale.SalesOrderID,
+						ProductID:    it.ProductID,
+						UnitID:       it.UnitID,
+						Qty:          db.Qty,
+						UnitPrice:    it.UnitPrice,
+						Discount:     disc,
+						TotalAmount:  tot,
+						DeliveredQty: db.Qty,
+						BatchNumber:  db.BatchNumber,
+						ExpiredDate:  db.ExpiredDate,
+					}
+					tx.Create(&newSoItem)
+				}
+			}
+		} else {
+			if len(deductedBatches) == 1 {
+				itemBatch = deductedBatches[0].BatchNumber
+				itemExp = deductedBatches[0].ExpiredDate
+			} else if mutBal != nil {
+				if itemBatch == "" {
+					itemBatch = mutBal.BatchNumber
+				}
+				if itemExp == nil {
+					itemExp = mutBal.ExpiredDate
+				}
+			}
+
+			// Update Sale Item
+			tx.Model(&models.SaleItem{}).Where("id = ?", it.ID).Updates(map[string]interface{}{
+				"batch_number": itemBatch,
+				"expired_date": itemExp,
+				"cost_price":   costPrice,
+			})
+
+			// Update SO Item if linked
+			if sale.SalesOrderID != nil {
+				tx.Model(&models.SalesOrderItem{}).Where("sales_order_id = ? AND product_id = ?", *sale.SalesOrderID, it.ProductID).Updates(map[string]interface{}{
+					"batch_number":  itemBatch,
+					"expired_date":  itemExp,
+					"delivered_qty": it.Qty,
+				})
+			}
 		}
 	}
 
@@ -1562,7 +1762,7 @@ func (h *SalesHandler) ShipSale(c *gin.Context) {
 	for _, it := range sale.Items {
 		itemDiscounts += it.Discount
 	}
-	totalDiscount := itemDiscounts + sale.Discount
+	totalDiscount := math.Max(0, itemDiscounts+sale.Discount)
 
 	// 3. Debit Piutang Usaha jika ada sisa tagihan
 	if remainingAmount > 0 {
@@ -1696,6 +1896,13 @@ func (h *SalesHandler) ConvertSalesOrderToInvoice(c *gin.Context) {
 		InvoiceNo:          invNo,
 		Date:               time.Now(),
 		DueDate:            time.Now().AddDate(0, 0, 14),
+		DeliveryMethod: func() string {
+			if so.DeliveryMethod != "" {
+				return so.DeliveryMethod
+			}
+			return "DIKIRIM"
+		}(),
+		DeliveryDate:       so.DeliveryDate,
 		Type:               "BACKOFFICE",
 		Status:             "POSTED",
 		PaymentStatus:      paymentStatus,
@@ -1757,8 +1964,8 @@ func (h *SalesHandler) ConvertSalesOrderToInvoice(c *gin.Context) {
 
 		totalCOGS += costPrice * it.Qty
 
-		// Deduct stock using FEFO (First Expired, First Out)
-		mutBal, errMut := services.MutateStock(tx, services.StockMutationParams{
+		// Deduct stock using chosen Batch/ED (if specified) or FEFO (First Expired, First Out)
+		mutBal, deductedBatches, errMut := services.MutateStockWithBatches(tx, services.StockMutationParams{
 			CompanyID:    companyID,
 			BranchID:     branchID,
 			WarehouseID:  targetWhID,
@@ -1768,6 +1975,8 @@ func (h *SalesHandler) ConvertSalesOrderToInvoice(c *gin.Context) {
 			MovementType: "OUT",
 			Qty:          it.Qty,
 			UnitCost:     costPrice,
+			BatchNumber:  it.BatchNumber,
+			ExpiredDate:  it.ExpiredDate,
 			Notes:        fmt.Sprintf("Penjualan Faktur: %s (dari SO: %s)", sale.InvoiceNo, so.OrderNo),
 			CreatedBy:    userID,
 		})
@@ -1777,26 +1986,54 @@ func (h *SalesHandler) ConvertSalesOrderToInvoice(c *gin.Context) {
 			return
 		}
 
-		batchNo := ""
-		var expDate *time.Time
-		if mutBal != nil {
-			batchNo = mutBal.BatchNumber
-			expDate = mutBal.ExpiredDate
-		}
+		if len(deductedBatches) > 0 {
+			for _, db := range deductedBatches {
+				proportion := 1.0
+				if it.Qty > 0 {
+					proportion = db.Qty / it.Qty
+				}
+				itemDisc := it.Discount * proportion
+				itemTotal := (db.Qty * it.UnitPrice) - itemDisc
+				itemCost := costPrice
+				if db.CostPrice > 0 {
+					itemCost = db.CostPrice
+				}
+				saleItem := models.SaleItem{
+					SaleID:      sale.ID,
+					ProductID:   it.ProductID,
+					UnitID:      it.UnitID,
+					Qty:         db.Qty,
+					UnitPrice:   it.UnitPrice,
+					CostPrice:   itemCost,
+					Discount:    itemDisc,
+					TotalAmount: itemTotal,
+					BatchNumber: db.BatchNumber,
+					ExpiredDate: db.ExpiredDate,
+				}
+				tx.Create(&saleItem)
+			}
+		} else {
+			batchNo := ""
+			var expDate *time.Time
+			if mutBal != nil {
+				batchNo = mutBal.BatchNumber
+				expDate = mutBal.ExpiredDate
+			}
 
-		saleItem := models.SaleItem{
-			SaleID:      sale.ID,
-			ProductID:   it.ProductID,
-			UnitID:      it.UnitID,
-			Qty:         it.Qty,
-			UnitPrice:   it.UnitPrice,
-			CostPrice:   costPrice,
-			Discount:    it.Discount,
-			TotalAmount: it.TotalAmount,
-			BatchNumber: batchNo,
-			ExpiredDate: expDate,
+			saleItem := models.SaleItem{
+				SaleID:      sale.ID,
+				ProductID:   it.ProductID,
+				UnitID:      it.UnitID,
+				Qty:         it.Qty,
+				UnitPrice:   it.UnitPrice,
+				CostPrice:   costPrice,
+				Discount:    it.Discount,
+				TotalAmount: it.TotalAmount,
+				BatchNumber: batchNo,
+				ExpiredDate: expDate,
+			}
+			tx.Create(&saleItem)
 		}
-		tx.Create(&saleItem)
 	}
 
 	// If DP was paid on Sales Order, create a SalePayment record
@@ -1830,10 +2067,10 @@ func (h *SalesHandler) ConvertSalesOrderToInvoice(c *gin.Context) {
 	taxAcc := services.ResolveSettingAccountCode(tx, companyID, "sales_tax", "2-4110", "Utang PPN Keluaran", "LIABILITY", "TAX_PAYABLE", "CREDIT")
 
 	var itemDiscounts float64
-	for _, it := range sale.Items {
+	for _, it := range so.Items {
 		itemDiscounts += it.Discount
 	}
-	totalDiscount := itemDiscounts + sale.Discount
+	totalDiscount := math.Max(0, itemDiscounts+sale.Discount)
 
 	// 2. Debit: Remaining Piutang Usaha
 	if remainingAmount > 0 {
@@ -1940,6 +2177,12 @@ func (h *SalesHandler) DeleteSalesOrder(c *gin.Context) {
 	if err := tx.Where("id = ? AND company_id = ?", id, companyID).First(&so).Error; err != nil {
 		tx.Rollback()
 		utils.SendError(c, http.StatusNotFound, "Pesanan penjualan tidak ditemukan", nil)
+		return
+	}
+
+	if so.Status == "SELESAI" || so.Status == "COMPLETED" || so.ProcessStatus == "Selesai" {
+		tx.Rollback()
+		utils.SendError(c, http.StatusBadRequest, "Pesanan Penjualan sudah selesai. Transaksi yang sudah selesai tidak dapat dihapus.", nil)
 		return
 	}
 
@@ -2185,11 +2428,13 @@ type CheckoutPayment struct {
 }
 
 type CheckoutItem struct {
-	ProductID uuid.UUID `json:"product_id" binding:"required"`
-	UnitID    uuid.UUID `json:"unit_id" binding:"required"`
-	Qty       float64   `json:"qty" binding:"required"`
-	UnitPrice float64   `json:"unit_price" binding:"required"`
-	Discount  float64   `json:"discount"`
+	ProductID   uuid.UUID  `json:"product_id" binding:"required"`
+	UnitID      uuid.UUID  `json:"unit_id" binding:"required"`
+	Qty         float64    `json:"qty" binding:"required"`
+	UnitPrice   float64    `json:"unit_price" binding:"required"`
+	Discount    float64    `json:"discount"`
+	BatchNumber string     `json:"batch_number"`
+	ExpiredDate *time.Time `json:"expired_date"`
 }
 
 type CheckoutRequest struct {
@@ -2205,10 +2450,12 @@ type CheckoutRequest struct {
 	Notes        string            `json:"notes"`
 	CustomerSPNumber   string      `json:"customer_sp_number"`
 	CustomerSPDate     *time.Time  `json:"customer_sp_date"`
+	DeliveryDate       *time.Time  `json:"delivery_date"`
 	CustomerSPType     string      `json:"customer_sp_type"`
 	PBFOriginInvoiceNo string      `json:"pbf_origin_invoice_no"`
 	OriginPurchaseID   *uuid.UUID  `json:"origin_purchase_id"`
 	TaxInvoiceNo       string      `json:"tax_invoice_no"`
+	DeliveryMethod     string      `json:"delivery_method"`
 	DeliveryOrderNo    string      `json:"delivery_order_no"`
 	DueDate            *time.Time  `json:"due_date"`
 	InvoiceDate        *time.Time  `json:"invoice_date"`
@@ -2363,6 +2610,13 @@ func (h *SalesHandler) CreateSale(c *gin.Context) {
 		}
 	}
 
+	saleDeliveryMethod := "DIKIRIM"
+	if strings.ToUpper(req.DeliveryMethod) == "DIAMBIL" {
+		saleDeliveryMethod = "DIAMBIL"
+	} else if req.DeliveryMethod == "" && saleType == "POS" {
+		saleDeliveryMethod = "DIAMBIL"
+	}
+
 	sale := models.Sale{
 		CompanyID:       companyID,
 		BranchID:        branchID,
@@ -2373,6 +2627,13 @@ func (h *SalesHandler) CreateSale(c *gin.Context) {
 		InvoiceNo:       invNo,
 		Date:            saleDate,
 		DueDate:         saleDueDate,
+		DeliveryMethod:  saleDeliveryMethod,
+		DeliveryDate: func() *time.Time {
+			if req.DeliveryDate != nil {
+				return req.DeliveryDate
+			}
+			return req.CustomerSPDate
+		}(),
 		Type:            saleType,
 		Status:          "POSTED",
 		PaymentStatus:   paymentStatus,
@@ -2426,8 +2687,8 @@ func (h *SalesHandler) CreateSale(c *gin.Context) {
 
 		totalCOGS += costPrice * it.Qty
 
-		// Deduct stock using FEFO (First Expired, First Out)
-		mutBal, err := services.MutateStock(tx, services.StockMutationParams{
+		// Deduct stock using chosen Batch/ED (if specified) or FEFO (First Expired, First Out)
+		mutBal, deductedBatches, err := services.MutateStockWithBatches(tx, services.StockMutationParams{
 			CompanyID:    companyID,
 			BranchID:     branchID,
 			WarehouseID:  req.WarehouseID,
@@ -2437,7 +2698,9 @@ func (h *SalesHandler) CreateSale(c *gin.Context) {
 			MovementType: "OUT",
 			Qty:          it.Qty,
 			UnitCost:     costPrice,
-			Notes:        fmt.Sprintf("Penjualan Faktur Kasir: %s", sale.InvoiceNo),
+			BatchNumber:  it.BatchNumber,
+			ExpiredDate:  it.ExpiredDate,
+			Notes:        fmt.Sprintf("Penjualan Faktur: %s", sale.InvoiceNo),
 			CreatedBy:    userID,
 		})
 		if err != nil {
@@ -2446,29 +2709,61 @@ func (h *SalesHandler) CreateSale(c *gin.Context) {
 			return
 		}
 
-		batchNo := ""
-		var expDate *time.Time
-		if mutBal != nil {
-			batchNo = mutBal.BatchNumber
-			expDate = mutBal.ExpiredDate
-		}
+		if len(deductedBatches) > 0 {
+			for _, db := range deductedBatches {
+				proportion := 1.0
+				if it.Qty > 0 {
+					proportion = db.Qty / it.Qty
+				}
+				itemDisc := it.Discount * proportion
+				itemTotal := (db.Qty * it.UnitPrice) - itemDisc
+				itemCost := costPrice
+				if db.CostPrice > 0 {
+					itemCost = db.CostPrice
+				}
+				saleItem := models.SaleItem{
+					SaleID:      sale.ID,
+					ProductID:   it.ProductID,
+					UnitID:      it.UnitID,
+					Qty:         db.Qty,
+					UnitPrice:   it.UnitPrice,
+					CostPrice:   itemCost,
+					Discount:    itemDisc,
+					TotalAmount: itemTotal,
+					BatchNumber: db.BatchNumber,
+					ExpiredDate: db.ExpiredDate,
+				}
+				if err := tx.Create(&saleItem).Error; err != nil {
+					tx.Rollback()
+					utils.SendError(c, http.StatusInternalServerError, "Gagal menyimpan item penjualan", err.Error())
+					return
+				}
+			}
+		} else {
+			batchNo := ""
+			var expDate *time.Time
+			if mutBal != nil {
+				batchNo = mutBal.BatchNumber
+				expDate = mutBal.ExpiredDate
+			}
 
-		saleItem := models.SaleItem{
-			SaleID:      sale.ID,
-			ProductID:   it.ProductID,
-			UnitID:      it.UnitID,
-			Qty:         it.Qty,
-			UnitPrice:   it.UnitPrice,
-			CostPrice:   costPrice,
-			Discount:    it.Discount,
-			TotalAmount: (it.Qty * it.UnitPrice) - it.Discount,
-			BatchNumber: batchNo,
-			ExpiredDate: expDate,
-		}
-		if err := tx.Create(&saleItem).Error; err != nil {
-			tx.Rollback()
-			utils.SendError(c, http.StatusInternalServerError, "Gagal menyimpan item penjualan", err.Error())
-			return
+			saleItem := models.SaleItem{
+				SaleID:      sale.ID,
+				ProductID:   it.ProductID,
+				UnitID:      it.UnitID,
+				Qty:         it.Qty,
+				UnitPrice:   it.UnitPrice,
+				CostPrice:   costPrice,
+				Discount:    it.Discount,
+				TotalAmount: (it.Qty * it.UnitPrice) - it.Discount,
+				BatchNumber: batchNo,
+				ExpiredDate: expDate,
+			}
+			if err := tx.Create(&saleItem).Error; err != nil {
+				tx.Rollback()
+				utils.SendError(c, http.StatusInternalServerError, "Gagal menyimpan item penjualan", err.Error())
+				return
+			}
 		}
 	}
 
@@ -2611,8 +2906,23 @@ func (h *SalesHandler) UpdateSale(c *gin.Context) {
 		return
 	}
 
+	if sale.Status == "POSTED" || sale.Status == "SELESAI" || sale.Status == "DIKIRIM" {
+		utils.SendError(c, http.StatusBadRequest, "Faktur Penjualan sudah selesai/diposting. Transaksi yang sudah selesai tidak dapat diedit.", nil)
+		return
+	}
+
 	var req struct {
+		WarehouseID        *uuid.UUID `json:"warehouse_id"`
+		CustomerID         *uuid.UUID `json:"customer_id"`
+		SalesRepID         *uuid.UUID `json:"sales_rep_id"`
 		Notes              string     `json:"notes"`
+		TaxPercent         float64    `json:"tax_percent"`
+		Discount           float64    `json:"discount"`
+		ShippingFee        float64    `json:"shipping_fee"`
+		PaidAmount         float64    `json:"paid_amount"`
+		DeliveryDate       *time.Time `json:"delivery_date"`
+		DeliveryMethod     string     `json:"delivery_method"`
+		DueDate            *time.Time `json:"due_date"`
 		CustomerSPNumber   string     `json:"customer_sp_number"`
 		CustomerSPDate     *time.Time `json:"customer_sp_date"`
 		CustomerSPType     string     `json:"customer_sp_type"`
@@ -2620,50 +2930,107 @@ func (h *SalesHandler) UpdateSale(c *gin.Context) {
 		OriginPurchaseID   *uuid.UUID `json:"origin_purchase_id"`
 		TaxInvoiceNo       string     `json:"tax_invoice_no"`
 		DeliveryOrderNo    string     `json:"delivery_order_no"`
-		DueDate            *time.Time `json:"due_date"`
 		ComputerName       string     `json:"computer_name"`
+		Items              []struct {
+			ProductID   uuid.UUID  `json:"product_id"`
+			UnitID      uuid.UUID  `json:"unit_id"`
+			Qty         float64    `json:"qty"`
+			UnitPrice   float64    `json:"unit_price"`
+			Discount    float64    `json:"discount"`
+			BatchNumber string     `json:"batch_number"`
+			ExpiredDate *time.Time `json:"expired_date"`
+		} `json:"items"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.SendError(c, http.StatusBadRequest, "Data update tidak valid", err.Error())
 		return
 	}
 
-	updates := map[string]interface{}{}
-	if req.Notes != "" {
-		updates["notes"] = req.Notes
+	tx := database.DB.Begin()
+
+	if req.WarehouseID != nil && *req.WarehouseID != uuid.Nil {
+		sale.WarehouseID = *req.WarehouseID
 	}
-	if req.CustomerSPNumber != "" {
-		updates["customer_sp_number"] = req.CustomerSPNumber
+	if req.CustomerID != nil && *req.CustomerID != uuid.Nil {
+		sale.CustomerID = *req.CustomerID
 	}
-	if req.CustomerSPDate != nil {
-		updates["customer_sp_date"] = req.CustomerSPDate
+	if req.SalesRepID != nil {
+		sale.SalesRepID = req.SalesRepID
 	}
-	if req.CustomerSPType != "" {
-		updates["customer_sp_type"] = req.CustomerSPType
-	}
-	if req.PBFOriginInvoiceNo != "" {
-		updates["pbf_origin_invoice_no"] = req.PBFOriginInvoiceNo
-	}
-	if req.OriginPurchaseID != nil {
-		updates["origin_purchase_id"] = req.OriginPurchaseID
-	}
-	if req.TaxInvoiceNo != "" {
-		updates["tax_invoice_no"] = req.TaxInvoiceNo
-	}
-	if req.DeliveryOrderNo != "" {
-		updates["delivery_order_no"] = req.DeliveryOrderNo
+	sale.Notes = req.Notes
+	sale.TaxPercent = req.TaxPercent
+	sale.Discount = req.Discount
+	sale.ShippingFee = req.ShippingFee
+	if req.DeliveryDate != nil {
+		sale.DeliveryDate = req.DeliveryDate
+	} else if req.CustomerSPDate != nil {
+		sale.DeliveryDate = req.CustomerSPDate
 	}
 	if req.DueDate != nil {
-		updates["due_date"] = req.DueDate
+		sale.DueDate = *req.DueDate
+	}
+	if req.CustomerSPNumber != "" {
+		sale.CustomerSPNumber = req.CustomerSPNumber
+	}
+	if req.CustomerSPDate != nil {
+		sale.CustomerSPDate = req.CustomerSPDate
+	}
+	if req.CustomerSPType != "" {
+		sale.CustomerSPType = req.CustomerSPType
+	}
+	if req.PBFOriginInvoiceNo != "" {
+		sale.PBFOriginInvoiceNo = req.PBFOriginInvoiceNo
+	}
+	if req.OriginPurchaseID != nil {
+		sale.OriginPurchaseID = req.OriginPurchaseID
+	}
+	if req.TaxInvoiceNo != "" {
+		sale.TaxInvoiceNo = req.TaxInvoiceNo
+	}
+	if strings.ToUpper(req.DeliveryMethod) == "DIAMBIL" || strings.ToUpper(req.DeliveryMethod) == "DIKIRIM" {
+		sale.DeliveryMethod = strings.ToUpper(req.DeliveryMethod)
+	}
+	if req.DeliveryOrderNo != "" {
+		sale.DeliveryOrderNo = req.DeliveryOrderNo
 	}
 
 	userID := c.MustGet("user_id").(uuid.UUID)
-	updates["updated_by"] = userID
-	updates["computer_name"] = getComputerName(c, req.ComputerName)
+	sale.UpdatedBy = &userID
+	sale.ComputerName = getComputerName(c, req.ComputerName)
 
-	if len(updates) > 0 {
-		database.DB.Model(&sale).Updates(updates)
+	if len(req.Items) > 0 {
+		tx.Where("sale_id = ?", sale.ID).Delete(&models.SaleItem{})
+		var subtotal float64
+		for _, it := range req.Items {
+			lineTot := (it.Qty * it.UnitPrice) - it.Discount
+			subtotal += lineTot
+			item := models.SaleItem{
+				SaleID:      sale.ID,
+				ProductID:   it.ProductID,
+				UnitID:      it.UnitID,
+				Qty:         it.Qty,
+				UnitPrice:   it.UnitPrice,
+				Discount:    it.Discount,
+				TotalAmount: lineTot,
+				BatchNumber: it.BatchNumber,
+				ExpiredDate: it.ExpiredDate,
+			}
+			tx.Create(&item)
+		}
+		taxAmount := (subtotal - req.Discount) * (req.TaxPercent / 100)
+		totalAmount := subtotal - req.Discount + taxAmount + req.ShippingFee
+		sale.Subtotal = subtotal
+		sale.TaxAmount = taxAmount
+		sale.TotalAmount = totalAmount
+		sale.RemainingAmount = math.Max(0, totalAmount-sale.PaidAmount)
 	}
+
+	if err := tx.Save(&sale).Error; err != nil {
+		tx.Rollback()
+		utils.SendError(c, http.StatusInternalServerError, "Gagal memperbarui faktur penjualan", err.Error())
+		return
+	}
+	tx.Commit()
 
 	utils.SendSuccess(c, "Faktur penjualan berhasil diperbarui", sale)
 }
@@ -2689,6 +3056,12 @@ func (h *SalesHandler) DeleteSale(c *gin.Context) {
 		Preload("Items").First(&sale).Error; err != nil {
 		tx.Rollback()
 		utils.SendError(c, http.StatusNotFound, "Faktur penjualan tidak ditemukan", nil)
+		return
+	}
+
+	if sale.Status == "POSTED" || sale.Status == "SELESAI" || sale.Status == "DIKIRIM" {
+		tx.Rollback()
+		utils.SendError(c, http.StatusBadRequest, "Faktur Penjualan sudah selesai/diposting. Transaksi yang sudah selesai tidak dapat dihapus.", nil)
 		return
 	}
 
@@ -2739,6 +3112,22 @@ func (h *SalesHandler) GetSalesReturns(c *gin.Context) {
 		query = query.Where("sales_returns.warehouse_id = ?", warehouseID)
 	}
 
+	if customerID := c.Query("customer_id"); customerID != "" {
+		query = query.Where("sales_returns.customer_id = ?", customerID)
+	}
+
+	if status := c.Query("status"); status != "" && status != "all" {
+		query = query.Where("sales_returns.status = ?", status)
+	}
+
+	if settlementStatus := c.Query("settlement_status"); settlementStatus != "" {
+		if settlementStatus == "PENDING" {
+			query = query.Where("(sales_returns.settlement_status = 'PENDING' OR sales_returns.settlement_status = '' OR sales_returns.settlement_status IS NULL)")
+		} else {
+			query = query.Where("sales_returns.settlement_status = ?", settlementStatus)
+		}
+	}
+
 	if startDate := c.Query("start_date"); startDate != "" {
 		query = query.Where("sales_returns.date >= ?", startDate)
 	}
@@ -2762,10 +3151,14 @@ func (h *SalesHandler) GetSalesReturns(c *gin.Context) {
 	var returns []models.SalesReturn
 	if err := query.Preload("Customer").
 		Preload("Warehouse").
+		Preload("Sale").
 		Preload("SalesRep").
 		Preload("User").
+		Preload("WarehouseVerifier").
+		Preload("AdminApprover").
 		Preload("Items.Product").
 		Preload("Items.Unit").
+		Preload("StatusLogs.User").
 		Find(&returns).Error; err != nil {
 		utils.SendError(c, http.StatusInternalServerError, "Gagal mengambil data retur penjualan", err.Error())
 		return
@@ -2809,8 +3202,9 @@ func (h *SalesHandler) CreateSalesReturn(c *gin.Context) {
 	userID := c.MustGet("user_id").(uuid.UUID)
 
 	var req struct {
-		ReturnMode   string     `json:"return_mode"` // MODE_1 or MODE_2
-		SaleID       *uuid.UUID `json:"sale_id"`
+		ReturnMode     string     `json:"return_mode"` // MODE_1 or MODE_2
+		DeliveryMethod string     `json:"delivery_method"` // DIAMBIL or DIKIRIM
+		SaleID         *uuid.UUID `json:"sale_id"`
 		WarehouseID  uuid.UUID  `json:"warehouse_id" binding:"required"`
 		CustomerID   uuid.UUID  `json:"customer_id" binding:"required"`
 		SalesRepID   *uuid.UUID `json:"sales_rep_id"`
@@ -2833,6 +3227,8 @@ func (h *SalesHandler) CreateSalesReturn(c *gin.Context) {
 			DiscountPercent   float64    `json:"discount_percent"`
 			BatchNumber       string     `json:"batch_number"`
 			ExpiredDate       *time.Time `json:"expired_date"`
+			ItemCondition     string     `json:"item_condition"`
+			Reason            string     `json:"reason"`
 		} `json:"items" binding:"required"`
 	}
 
@@ -2857,8 +3253,18 @@ func (h *SalesHandler) CreateSalesReturn(c *gin.Context) {
 		subtotal += (itemSub - disc)
 	}
 
-	taxAmount := (subtotal - req.Discount) * (req.TaxPercent / 100)
-	totalAmount := subtotal - req.Discount + taxAmount + req.OtherCost
+	taxAmount := 0.0
+	if req.TaxPercent > 0 {
+		if strings.ToUpper(req.TaxType) == "INCLUDE" {
+			taxAmount = ((subtotal - req.Discount) * req.TaxPercent) / (100 + req.TaxPercent)
+		} else {
+			taxAmount = (subtotal - req.Discount) * (req.TaxPercent / 100)
+		}
+	}
+	totalAmount := subtotal - req.Discount + req.OtherCost
+	if strings.ToUpper(req.TaxType) != "INCLUDE" {
+		totalAmount += taxAmount
+	}
 
 	mode := "MODE_1"
 	if req.ReturnMode == "MODE_2" {
@@ -2877,16 +3283,22 @@ func (h *SalesHandler) CreateSalesReturn(c *gin.Context) {
 		initialStatus = req.Status
 	}
 
+	retDeliveryMethod := "DIAMBIL"
+	if strings.ToUpper(req.DeliveryMethod) == "DIKIRIM" {
+		retDeliveryMethod = "DIKIRIM"
+	}
+
 	salesReturn := models.SalesReturn{
-		CompanyID:    companyID,
-		BranchID:     branchID,
-		WarehouseID:  req.WarehouseID,
-		CustomerID:   req.CustomerID,
-		SalesRepID:   req.SalesRepID,
-		SaleID:       req.SaleID,
-		ReturnNo:     retNo,
-		Date:         time.Now(),
-		ReturnMode:   mode,
+		CompanyID:      companyID,
+		BranchID:       branchID,
+		WarehouseID:    req.WarehouseID,
+		CustomerID:     req.CustomerID,
+		SalesRepID:     req.SalesRepID,
+		SaleID:         req.SaleID,
+		ReturnNo:       retNo,
+		Date:           time.Now(),
+		ReturnMode:     mode,
+		DeliveryMethod: retDeliveryMethod,
 		TaxType:      req.TaxType,
 		TaxPercent:   req.TaxPercent,
 		OtherCost:    req.OtherCost,
@@ -2910,6 +3322,10 @@ func (h *SalesHandler) CreateSalesReturn(c *gin.Context) {
 		disc := itemSub * (it.DiscountPercent / 100)
 		lineTotal := itemSub - disc
 
+		cond := "BAIK"
+		if it.ItemCondition != "" {
+			cond = it.ItemCondition
+		}
 		retItem := models.SalesReturnItem{
 			SalesReturnID:     salesReturn.ID,
 			ProductID:         it.ProductID,
@@ -2924,7 +3340,8 @@ func (h *SalesHandler) CreateSalesReturn(c *gin.Context) {
 			TotalAmount:       lineTotal,
 			BatchNumber:       it.BatchNumber,
 			ExpiredDate:       it.ExpiredDate,
-			Condition:         "BAIK",
+			Condition:         cond,
+			Reason:            it.Reason,
 			AcceptedQty:       it.Qty,
 			RejectedQty:       0,
 		}
@@ -3025,10 +3442,10 @@ func (h *SalesHandler) CreateSalesReturn(c *gin.Context) {
 	utils.SendCreated(c, "Retur penjualan berhasil disimpan", salesReturn)
 }
 
-// 1. Verifikasi Fisik oleh Petugas Gudang
+// 1. Konfirmasi Pemeriksaan Fisik oleh Petugas Gudang (Gudang hanya mengecek & memberi komentar)
 func (h *SalesHandler) VerifyWarehouseSalesReturn(c *gin.Context) {
 	if !isUserGudang(c) {
-		utils.SendError(c, http.StatusForbidden, "Akses ditolak: Verifikasi fisik obat retur penjualan HANYA DAPAT DILAKUKAN OLEH PETUGAS GUDANG.", nil)
+		utils.SendError(c, http.StatusForbidden, "Akses ditolak: Konfirmasi pemeriksaan fisik gudang HANYA DAPAT DILAKUKAN OLEH PETUGAS GUDANG.", nil)
 		return
 	}
 	companyID := c.MustGet("company_id").(uuid.UUID)
@@ -3040,7 +3457,62 @@ func (h *SalesHandler) VerifyWarehouseSalesReturn(c *gin.Context) {
 	}
 
 	var req struct {
-		Notes string `json:"notes"`
+		Notes string `json:"notes"` // Field komentar dari Petugas Gudang
+	}
+	_ = c.ShouldBindJSON(&req)
+
+	var ret models.SalesReturn
+	if err := database.DB.Where("id = ? AND company_id = ?", id, companyID).First(&ret).Error; err != nil {
+		utils.SendError(c, http.StatusNotFound, "Retur penjualan tidak ditemukan", err.Error())
+		return
+	}
+
+	tx := database.DB.Begin()
+	now := time.Now()
+	ret.Status = "VERIFIKASI_GUDANG"
+	ret.WarehouseVerifiedAt = &now
+	ret.WarehouseVerifiedBy = &userID
+	ret.WarehouseNotes = req.Notes
+
+	if err := tx.Save(&ret).Error; err != nil {
+		tx.Rollback()
+		utils.SendError(c, http.StatusInternalServerError, "Gagal mengonfirmasi pemeriksaan gudang", err.Error())
+		return
+	}
+
+	tx.Create(&models.SalesReturnStatusLog{
+		SalesReturnID: ret.ID,
+		Status:        "VERIFIKASI_GUDANG",
+		Action:        "KONFIRMASI_GUDANG",
+		Notes:         fmt.Sprintf("Pemeriksaan fisik telah dikonfirmasi oleh Petugas Gudang. Komentar: %s", req.Notes),
+		UserID:        userID,
+	})
+
+	tx.Commit()
+	database.DB.Preload("Customer").Preload("Warehouse").Preload("WarehouseVerifier").Preload("Items.Product").Preload("Items.Unit").Preload("StatusLogs.User").First(&ret, ret.ID)
+	utils.SendSuccess(c, "Pemeriksaan fisik berhasil dikonfirmasi oleh Petugas Gudang", ret)
+}
+
+// 2. Persetujuan & Verifikasi Input Item oleh Admin / Apoteker
+func (h *SalesHandler) AdminApproveSalesReturn(c *gin.Context) {
+	if isUserGudang(c) {
+		utils.SendError(c, http.StatusForbidden, "Akses ditolak: Persetujuan retur penjualan HANYA DAPAT DILAKUKAN OLEH ADMIN / APOTEKER.", nil)
+		return
+	}
+	companyID := c.MustGet("company_id").(uuid.UUID)
+	branchID := c.MustGet("branch_id").(uuid.UUID)
+	userID := c.MustGet("user_id").(uuid.UUID)
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		utils.SendError(c, http.StatusBadRequest, "ID tidak valid", nil)
+		return
+	}
+
+	var req struct {
+		Notes              string `json:"notes"`
+		ShippingCourier    string `json:"shipping_courier"`
+		ShippingTrackingNo string `json:"shipping_tracking_no"`
+		ShippingNotes      string `json:"shipping_notes"`
 		Items []struct {
 			ID          uuid.UUID  `json:"id"`
 			Condition   string     `json:"condition"`
@@ -3059,17 +3531,42 @@ func (h *SalesHandler) VerifyWarehouseSalesReturn(c *gin.Context) {
 		return
 	}
 
+	if ret.Status == "SELESAI" || ret.Status == "POSTED" {
+		utils.SendError(c, http.StatusBadRequest, "Retur penjualan ini sudah selesai diproses.", nil)
+		return
+	}
+
+	if ret.DeliveryMethod == "DIKIRIM" && strings.TrimSpace(req.ShippingTrackingNo) == "" {
+		utils.SendError(c, http.StatusBadRequest, "Untuk retur melalui pengiriman, No. Resi / Surat Jalan Pengiriman wajib diisi.", nil)
+		return
+	}
+
 	tx := database.DB.Begin()
 	now := time.Now()
-	ret.Status = "VERIFIKASI_GUDANG"
-	ret.WarehouseVerifiedAt = &now
-	ret.WarehouseVerifiedBy = &userID
-	ret.WarehouseNotes = req.Notes
+	ret.Status = "SELESAI"
+	if ret.SettlementStatus == "" {
+		ret.SettlementStatus = "PENDING"
+	}
+	ret.AdminApprovedAt = &now
+	ret.AdminApprovedBy = &userID
+	ret.AdminNotes = req.Notes
+	if ret.DeliveryMethod == "DIKIRIM" {
+		ret.ShippingCourier = req.ShippingCourier
+		ret.ShippingTrackingNo = req.ShippingTrackingNo
+		ret.ShippingNotes = req.ShippingNotes
+	}
+
+	var acceptedSub float64
+	var fullSub float64
+	var totalCost float64
+	for _, it := range ret.Items {
+		fullSub += it.TotalAmount
+	}
 
 	for _, reqIt := range req.Items {
 		cond := "BAIK"
-		if reqIt.Condition == "RUSAK" {
-			cond = "RUSAK"
+		if reqIt.Condition == "RUSAK" || reqIt.Condition == "EXPIRED" {
+			cond = reqIt.Condition
 		}
 		tx.Model(&models.SalesReturnItem{}).
 			Where("id = ? AND sales_return_id = ?", reqIt.ID, ret.ID).
@@ -3080,58 +3577,107 @@ func (h *SalesHandler) VerifyWarehouseSalesReturn(c *gin.Context) {
 				"accepted_qty": reqIt.AcceptedQty,
 				"rejected_qty": reqIt.RejectedQty,
 			})
+
+		var it models.SalesReturnItem
+		if errIt := tx.First(&it, reqIt.ID).Error; errIt == nil {
+			itemNetPrice := it.UnitPrice * (1 - it.DiscountPercent/100)
+			acceptedSub += reqIt.AcceptedQty * itemNetPrice
+
+			// Restock fisik obat layak jual (Kondisi BAIK) langsung ke gudang saat disetujui Admin
+			qtyToRestock := reqIt.AcceptedQty
+			if cond == "RUSAK" || cond == "EXPIRED" {
+				qtyToRestock = 0 // Obat rusak atau expired tidak direstock ke penjualan aktif
+			}
+			if qtyToRestock > 0 && !ret.IsStockRestocked {
+				var prod models.Product
+				costPrice := it.UnitPrice
+				if errProd := tx.First(&prod, it.ProductID).Error; errProd == nil && prod.PurchasePrice > 0 {
+					costPrice = prod.PurchasePrice
+				}
+				totalCost += costPrice * qtyToRestock
+				_, _ = services.MutateStock(tx, services.StockMutationParams{
+					CompanyID:    companyID,
+					BranchID:     branchID,
+					WarehouseID:  ret.WarehouseID,
+					ProductID:    it.ProductID,
+					DocType:      "SALES_RETURN",
+					DocNo:        ret.ReturnNo,
+					MovementType: "IN",
+					Qty:          qtyToRestock,
+					UnitCost:     costPrice,
+					BatchNumber:  reqIt.BatchNumber,
+					ExpiredDate:  reqIt.ExpiredDate,
+					Notes:        fmt.Sprintf("Penerimaan Fisik & Restock Retur Penjualan (%s) yang Disetujui Admin", ret.ReturnNo),
+					CreatedBy:    userID,
+				})
+			}
+		}
 	}
 
-	if err := tx.Save(&ret).Error; err != nil {
-		tx.Rollback()
-		utils.SendError(c, http.StatusInternalServerError, "Gagal menyimpan verifikasi gudang", err.Error())
-		return
+	ret.IsStockRestocked = true
+	ret.RestockedAt = &now
+	ret.RestockedBy = &userID
+
+	acceptedTotal := ret.TotalAmount
+	if len(req.Items) > 0 && fullSub > 0 && acceptedSub+0.01 < fullSub {
+		acceptedTotal = math.Round(acceptedSub*100) / 100
 	}
 
-	tx.Create(&models.SalesReturnStatusLog{
-		SalesReturnID: ret.ID,
-		Status:        "VERIFIKASI_GUDANG",
-		Action:        "VERIFIKASI_GUDANG",
-		Notes:         fmt.Sprintf("Pemeriksaan fisik barang oleh Petugas Gudang: %s", req.Notes),
-		UserID:        userID,
-	})
+	// Buat jurnal awal retur penjualan: Debit Retur Penjualan (4-1300) vs Kredit Kewajiban/Kredit Retur Pelanggan (2-1200)
+	if acceptedTotal > 0 && !ret.IsJournalCreated {
+		returAcc := services.ResolveSettingAccountCodeWithFallback(tx, companyID, "sales_return", "sales_income", "4-1300", "RETUR PENJUALAN", "REVENUE", "SALES", "DEBIT")
+		creditCustAcc := services.ResolveSettingAccountCode(tx, companyID, "sales_credit_customer", "2-1200", "Kewajiban / Kredit Retur Pelanggan", "LIABILITY", "PAYABLE", "CREDIT")
 
-	tx.Commit()
-	database.DB.Preload("Customer").Preload("Warehouse").Preload("WarehouseVerifier").Preload("Items.Product").Preload("Items.Unit").Preload("StatusLogs.User").First(&ret, ret.ID)
-	utils.SendSuccess(c, "Verifikasi fisik obat berhasil disimpan oleh Petugas Gudang", ret)
-}
+		journalEntries := []services.JournalEntryParam{
+			{
+				AccountCode: returAcc,
+				Debit:       acceptedTotal,
+				Credit:      0,
+				Description: fmt.Sprintf("Retur Penjualan %s", ret.ReturnNo),
+			},
+			{
+				AccountCode: creditCustAcc,
+				Debit:       0,
+				Credit:      acceptedTotal,
+				Description: fmt.Sprintf("Kewajiban Penyelesaian Retur Pelanggan %s", ret.ReturnNo),
+			},
+		}
 
-// 2. Persetujuan oleh Admin / Apoteker
-func (h *SalesHandler) AdminApproveSalesReturn(c *gin.Context) {
-	if isUserGudang(c) {
-		utils.SendError(c, http.StatusForbidden, "Akses ditolak: Persetujuan retur penjualan HANYA DAPAT DILAKUKAN OLEH ADMIN / APOTEKER.", nil)
-		return
+		if totalCost > 0 {
+			inventoryAcc := services.ResolveSettingAccountCode(tx, companyID, "item_inventory", "1-1300", "Persediaan Obat & Barang Dagang", "ASSET", "INVENTORY", "DEBIT")
+			cogsAcc := services.ResolveSettingAccountCode(tx, companyID, "sales_cogs", "5-1000", "HARGA POKOK PENJUALAN", "EXPENSE", "COGS", "DEBIT")
+			journalEntries = append(journalEntries,
+				services.JournalEntryParam{
+					AccountCode: inventoryAcc,
+					Debit:       math.Round(totalCost*100) / 100,
+					Credit:      0,
+					Description: fmt.Sprintf("Nilai Persediaan Restock Retur Penjualan %s", ret.ReturnNo),
+				},
+				services.JournalEntryParam{
+					AccountCode: cogsAcc,
+					Debit:       0,
+					Credit:      math.Round(totalCost*100) / 100,
+					Description: fmt.Sprintf("Koreksi HPP Retur Penjualan %s", ret.ReturnNo),
+				},
+			)
+		}
+
+		if _, err := services.PostDoubleEntryJournal(tx, services.JournalPostParams{
+			CompanyID:   companyID,
+			BranchID:    branchID,
+			Date:        now,
+			RefType:     "SALES_RETURN",
+			RefNo:       ret.ReturnNo,
+			Description: fmt.Sprintf("Jurnal Persetujuan Retur Penjualan %s", ret.ReturnNo),
+			CreatedBy:   userID,
+			Entries:     journalEntries,
+		}); err != nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusInternalServerError, "Gagal membuat jurnal retur penjualan: "+err.Error(), nil)
+			return
+		}
+		ret.IsJournalCreated = true
 	}
-	companyID := c.MustGet("company_id").(uuid.UUID)
-	userID := c.MustGet("user_id").(uuid.UUID)
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		utils.SendError(c, http.StatusBadRequest, "ID tidak valid", nil)
-		return
-	}
-
-	var req struct {
-		Notes string `json:"notes"`
-	}
-	_ = c.ShouldBindJSON(&req)
-
-	var ret models.SalesReturn
-	if err := database.DB.Where("id = ? AND company_id = ?", id, companyID).First(&ret).Error; err != nil {
-		utils.SendError(c, http.StatusNotFound, "Retur penjualan tidak ditemukan", err.Error())
-		return
-	}
-
-	tx := database.DB.Begin()
-	now := time.Now()
-	ret.Status = "DISETUJUI_ADMIN"
-	ret.AdminApprovedAt = &now
-	ret.AdminApprovedBy = &userID
-	ret.AdminNotes = req.Notes
 
 	if err := tx.Save(&ret).Error; err != nil {
 		tx.Rollback()
@@ -3139,17 +3685,24 @@ func (h *SalesHandler) AdminApproveSalesReturn(c *gin.Context) {
 		return
 	}
 
+	logNote := "Retur penjualan disetujui Admin (Diambil Pelanggan Langsung) & status langsung SELESAI."
+	if ret.DeliveryMethod == "DIKIRIM" {
+		logNote = fmt.Sprintf("Retur penjualan disetujui Admin & dokumen pengiriman dicatat (Kurir: %s, No. Resi/SJ: %s). Status SELESAI.", req.ShippingCourier, req.ShippingTrackingNo)
+	}
+	if strings.TrimSpace(req.Notes) != "" {
+		logNote += " " + strings.TrimSpace(req.Notes)
+	}
 	tx.Create(&models.SalesReturnStatusLog{
 		SalesReturnID: ret.ID,
-		Status:        "DISETUJUI_ADMIN",
+		Status:        "SELESAI",
 		Action:        "PERSETUJUAN_ADMIN",
-		Notes:         fmt.Sprintf("Persetujuan oleh Admin / Apoteker: %s", req.Notes),
+		Notes:         logNote,
 		UserID:        userID,
 	})
 
 	tx.Commit()
 	database.DB.Preload("Customer").Preload("Warehouse").Preload("AdminApprover").Preload("Items.Product").Preload("Items.Unit").Preload("StatusLogs.User").First(&ret, ret.ID)
-	utils.SendSuccess(c, "Retur penjualan berhasil disetujui Admin", ret)
+	utils.SendSuccess(c, "Retur penjualan berhasil disetujui Admin dan selesai", ret)
 }
 
 // 3. Penolakan Retur oleh Admin
@@ -3373,9 +3926,10 @@ func (h *SalesHandler) FinalizeSalesReturn(c *gin.Context) {
 
 	// JURNAL AKUNTANSI OTOMATIS
 	var journalEntries []services.JournalEntryParam
-	// Debit: Retur Penjualan (4-1000)
+	// Debit: Retur Penjualan (Contra Revenue: 4-1300)
+	returAcc := services.ResolveSettingAccountCodeWithFallback(tx, companyID, "sales_return", "sales_income", "4-1300", "RETUR PENJUALAN", "REVENUE", "SALES", "DEBIT")
 	journalEntries = append(journalEntries, services.JournalEntryParam{
-		AccountCode: "4-1000",
+		AccountCode: returAcc,
 		Debit:       totalVal,
 		Credit:      0,
 		Description: fmt.Sprintf("Retur Penjualan %s (%s)", ret.ReturnNo, req.SettlementType),
@@ -3432,10 +3986,10 @@ func (h *SalesHandler) FinalizeSalesReturn(c *gin.Context) {
 	// Restock Cost Journal: Debit Persediaan (1-1300), Kredit HPP (5-1000)
 	var totalCost float64
 	for _, it := range ret.Items {
-		if it.Condition != "RUSAK" {
+		if it.Condition == "BAIK" {
 			var prod models.Product
 			cost := it.UnitPrice
-			if errP := tx.First(&prod, it.ProductID).Error; errP == nil {
+			if errP := tx.First(&prod, it.ProductID).Error; errP == nil && prod.PurchasePrice > 0 {
 				cost = prod.PurchasePrice
 			}
 			qty := it.Qty
@@ -3492,6 +4046,364 @@ func (h *SalesHandler) FinalizeSalesReturn(c *gin.Context) {
 	utils.SendSuccess(c, "Retur penjualan berhasil difinalisasi. Jurnal akuntansi dan penyesuaian keuangan telah dicatat.", ret)
 }
 
+// SettleSalesReturn menyelesaikan keuangan retur penjualan dari menu Bayar Piutang (Potong Piutang Usaha atau Pengembalian Dana Kas/Bank)
+func (h *SalesHandler) SettleSalesReturn(c *gin.Context) {
+	id := c.Param("id")
+	companyID := c.MustGet("company_id").(uuid.UUID)
+	branchID := c.MustGet("branch_id").(uuid.UUID)
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req struct {
+		SettlementType string     `json:"settlement_type" binding:"required"` // POTONG_PIUTANG | KEMBALI_DANA_KAS
+		SaleID         *uuid.UUID `json:"sale_id"`
+		CashAccountID  *uuid.UUID `json:"cash_account_id"`
+		Notes          string     `json:"notes"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.SendError(c, http.StatusBadRequest, "Data penyelesaian retur penjualan tidak lengkap", err.Error())
+		return
+	}
+
+	var ret models.SalesReturn
+	if err := database.DB.Where("id = ? AND company_id = ?", id, companyID).
+		Preload("Customer").First(&ret).Error; err != nil {
+		utils.SendError(c, http.StatusNotFound, "Retur penjualan tidak ditemukan", nil)
+		return
+	}
+
+	if ret.Status != "SELESAI" {
+		utils.SendError(c, http.StatusBadRequest, "Hanya retur dengan status SELESAI yang dapat diselesaikan keuangannya.", nil)
+		return
+	}
+	if ret.SettlementStatus == "SETTLED" {
+		utils.SendError(c, http.StatusBadRequest, "Keuangan retur penjualan ini sudah diselesaikan sebelumnya.", nil)
+		return
+	}
+
+	tx := database.DB.Begin()
+	now := time.Now()
+	amount := math.Round(ret.TotalAmount*100) / 100
+	creditCustAcc := services.ResolveSettingAccountCode(tx, companyID, "sales_credit_customer", "2-1200", "Kewajiban / Kredit Retur Pelanggan", "LIABILITY", "PAYABLE", "CREDIT")
+
+	var journalEntries []services.JournalEntryParam
+	var logNote string
+
+	switch req.SettlementType {
+	case "POTONG_PIUTANG":
+		if req.SaleID == nil || *req.SaleID == uuid.Nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusBadRequest, "Pilih faktur piutang yang akan dipotong.", nil)
+			return
+		}
+		var sale models.Sale
+		if err := tx.Where("id = ? AND company_id = ? AND customer_id = ?", req.SaleID, companyID, ret.CustomerID).First(&sale).Error; err != nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusNotFound, "Faktur piutang tidak ditemukan untuk pelanggan ini.", nil)
+			return
+		}
+		if sale.RemainingAmount+0.001 < amount {
+			tx.Rollback()
+			utils.SendError(c, http.StatusBadRequest, fmt.Sprintf("Sisa piutang faktur %s (Rp %.0f) lebih kecil dari nilai retur (Rp %.0f). Pilih piutang yang lebih besar atau sama dengan nilai retur.", sale.InvoiceNo, sale.RemainingAmount, amount), nil)
+			return
+		}
+
+		sale.RemainingAmount = math.Round((sale.RemainingAmount-amount)*100) / 100
+		if sale.RemainingAmount <= 0.01 {
+			sale.RemainingAmount = 0
+			sale.PaymentStatus = "PAID"
+		} else {
+			sale.PaymentStatus = "PARTIAL"
+		}
+		if err := tx.Save(&sale).Error; err != nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusInternalServerError, "Gagal memperbarui sisa piutang faktur", err.Error())
+			return
+		}
+
+		receivableAcc := services.ResolveSettingAccountCode(tx, companyID, "sales_credit_receivable", "1-1200", "PIUTANG USAHA", "ASSET", "RECEIVABLE", "DEBIT")
+		journalEntries = []services.JournalEntryParam{
+			{
+				AccountCode: creditCustAcc,
+				Debit:       amount,
+				Credit:      0,
+				Description: fmt.Sprintf("Penyelesaian Klaim Retur %s ke Piutang %s", ret.ReturnNo, sale.InvoiceNo),
+			},
+			{
+				AccountCode: receivableAcc,
+				Debit:       0,
+				Credit:      amount,
+				Description: fmt.Sprintf("Potong Piutang %s dari Retur %s", sale.InvoiceNo, ret.ReturnNo),
+			},
+		}
+
+		ret.SettlementType = "POTONG_PIUTANG"
+		ret.SettledSaleID = &sale.ID
+		ret.DebtDeductionAmount = amount
+		logNote = fmt.Sprintf("Retur %s memotong piutang faktur %s sebesar Rp %.0f. Sisa piutang faktur: Rp %.0f (%s).", ret.ReturnNo, sale.InvoiceNo, amount, sale.RemainingAmount, sale.PaymentStatus)
+
+	case "KEMBALI_DANA_KAS":
+		if req.CashAccountID == nil || *req.CashAccountID == uuid.Nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusBadRequest, "Pilih akun Kas/Bank sumber dana pengembalian.", nil)
+			return
+		}
+		var cashAcc models.Account
+		if err := tx.Where("id = ? AND company_id = ?", req.CashAccountID, companyID).First(&cashAcc).Error; err != nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusNotFound, "Akun Kas/Bank tidak ditemukan.", nil)
+			return
+		}
+
+		realBal := services.GetAccountRealBalance(tx, cashAcc.ID)
+		if realBal < amount {
+			tx.Rollback()
+			utils.SendError(c, http.StatusBadRequest, fmt.Sprintf("Pengembalian dana retur ditolak: Saldo kas/bank %s (%s) tidak mencukupi untuk pengembalian sebesar Rp %.0f (Saldo: Rp %.0f).", cashAcc.Name, cashAcc.Code, amount, realBal), nil)
+			return
+		}
+
+		journalEntries = []services.JournalEntryParam{
+			{
+				AccountCode: creditCustAcc,
+				Debit:       amount,
+				Credit:      0,
+				Description: fmt.Sprintf("Penyelesaian Klaim Retur %s via Pengembalian Dana", ret.ReturnNo),
+			},
+			{
+				AccountCode: cashAcc.Code,
+				Debit:       0,
+				Credit:      amount,
+				Description: fmt.Sprintf("Pengembalian Dana Kas/Bank Retur Penjualan %s", ret.ReturnNo),
+			},
+		}
+
+		custName := "Pelanggan"
+		if ret.Customer != nil && ret.Customer.Name != "" {
+			custName = ret.Customer.Name
+		}
+		var oppositeAcc models.Account
+		_ = tx.Where("company_id = ? AND code = ?", companyID, creditCustAcc).First(&oppositeAcc).Error
+		docNo := services.GenerateCashTransactionNumber(tx, companyID, "KASO", now)
+		cashTrx := models.CashTransaction{
+			CompanyID:      companyID,
+			BranchID:       branchID,
+			TrxNo:          docNo,
+			Date:           now,
+			Type:           "OUT",
+			AccountID:      cashAcc.ID,
+			Amount:         amount,
+			PayeeRecipient: custName,
+			Description:    fmt.Sprintf("Pengembalian Dana Retur Penjualan %s (%s)", ret.ReturnNo, custName),
+			CreatedBy:      userID,
+		}
+		if oppositeAcc.ID != uuid.Nil {
+			cashTrx.OppositeAccID = &oppositeAcc.ID
+		}
+		if err := tx.Create(&cashTrx).Error; err != nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusInternalServerError, "Gagal mencatat kas keluar pengembalian retur", err.Error())
+			return
+		}
+
+		ret.SettlementType = "KEMBALI_DANA_KAS"
+		ret.CashAccountID = &cashAcc.ID
+		ret.RefundAmount = amount
+		logNote = fmt.Sprintf("Pengembalian dana retur %s sebesar Rp %.0f keluar dari akun %s (%s).", ret.ReturnNo, amount, cashAcc.Code, cashAcc.Name)
+
+	default:
+		tx.Rollback()
+		utils.SendError(c, http.StatusBadRequest, "Metode penyelesaian tidak valid (gunakan POTONG_PIUTANG atau KEMBALI_DANA_KAS).", nil)
+		return
+	}
+
+	if amount > 0 {
+		if _, err := services.PostDoubleEntryJournal(tx, services.JournalPostParams{
+			CompanyID:   companyID,
+			BranchID:    branchID,
+			Date:        now,
+			RefType:     "SALES_RETURN_SETTLEMENT",
+			RefNo:       ret.ReturnNo,
+			Description: fmt.Sprintf("Penyelesaian Keuangan Retur Penjualan %s (%s)", ret.ReturnNo, req.SettlementType),
+			CreatedBy:   userID,
+			Entries:     journalEntries,
+		}); err != nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusInternalServerError, "Gagal membuat jurnal penyelesaian retur penjualan: "+err.Error(), nil)
+			return
+		}
+	}
+
+	ret.SettlementStatus = "SETTLED"
+	ret.SettledAt = &now
+	ret.SettledBy = &userID
+	if err := tx.Save(&ret).Error; err != nil {
+		tx.Rollback()
+		utils.SendError(c, http.StatusInternalServerError, "Gagal menyimpan status penyelesaian retur penjualan", err.Error())
+		return
+	}
+
+	if strings.TrimSpace(req.Notes) != "" {
+		logNote += " Catatan: " + strings.TrimSpace(req.Notes)
+	}
+	tx.Create(&models.SalesReturnStatusLog{
+		SalesReturnID: ret.ID,
+		Status:        "SELESAI",
+		Action:        "PENYELESAIAN_KEUANGAN",
+		Notes:         logNote,
+		UserID:        userID,
+	})
+
+	tx.Commit()
+	database.DB.Preload("Customer").Preload("Warehouse").Preload("Sale").First(&ret, ret.ID)
+	utils.SendSuccess(c, "Penyelesaian keuangan retur penjualan berhasil diproses", ret)
+}
+
+// GetReturnableSalesItems mengembalikan daftar item faktur penjualan asal beserta sisa qty yang masih dapat diretur (Mode 1)
+func (h *SalesHandler) GetReturnableSalesItems(c *gin.Context) {
+	companyID := c.MustGet("company_id").(uuid.UUID)
+	saleID := c.Query("sale_id")
+	invoiceNo := c.Query("invoice_no")
+	customerID := c.Query("customer_id")
+	warehouseID := c.Query("warehouse_id")
+	search := strings.TrimSpace(c.Query("search"))
+
+	query := database.DB.Where("sales.company_id = ? AND sales.status != 'CANCELLED'", companyID)
+	if saleID != "" {
+		query = query.Where("sales.id = ?", saleID)
+	}
+	if invoiceNo != "" {
+		query = query.Where("sales.invoice_no ILIKE ?", "%"+invoiceNo+"%")
+	}
+	if customerID != "" && customerID != "all" {
+		query = query.Where("sales.customer_id = ?", customerID)
+	}
+	if warehouseID != "" && warehouseID != "all" {
+		query = query.Where("sales.warehouse_id = ?", warehouseID)
+	}
+
+	var sales []models.Sale
+	if err := query.Order("sales.date DESC").
+		Preload("Items.Product.Brand").
+		Preload("Items.Unit").
+		Preload("Customer").
+		Preload("Warehouse").
+		Find(&sales).Error; err != nil {
+		utils.SendError(c, http.StatusInternalServerError, "Gagal mengambil data faktur penjualan", err.Error())
+		return
+	}
+
+	type ReturnableSaleItemDTO struct {
+		SaleID           uuid.UUID  `json:"sale_id"`
+		InvoiceNo        string     `json:"invoice_no"`
+		CustomerID       uuid.UUID  `json:"customer_id"`
+		CustomerName     string     `json:"customer_name"`
+		WarehouseID      uuid.UUID  `json:"warehouse_id"`
+		SaleItemID       uuid.UUID  `json:"sale_item_id"`
+		ProductID        uuid.UUID  `json:"product_id"`
+		ProductCode      string     `json:"product_code"`
+		ProductName      string     `json:"product_name"`
+		Brand            string     `json:"brand"`
+		UnitID           uuid.UUID  `json:"unit_id"`
+		UnitName         string     `json:"unit_name"`
+		SoldQty          float64    `json:"sold_qty"`
+		AlreadyReturnQty float64    `json:"already_returned_qty"`
+		RemainingQty     float64    `json:"remaining_qty"`
+		CurrentStock     float64    `json:"current_stock"`
+		UnitPrice        float64    `json:"unit_price"`
+		Discount         float64    `json:"discount"`
+		DiscountPercent  float64    `json:"discount_percent"`
+		BatchNumber      string     `json:"batch_number"`
+		ExpiredDate      *time.Time `json:"expired_date"`
+	}
+
+	results := make([]ReturnableSaleItemDTO, 0)
+	searchLower := strings.ToLower(search)
+
+	for _, s := range sales {
+		custName := "-"
+		if s.Customer != nil && s.Customer.Name != "" {
+			custName = s.Customer.Name
+		}
+
+		for _, it := range s.Items {
+			prodCode := "-"
+			prodName := "-"
+			brandName := "-"
+			if it.Product != nil {
+				prodCode = it.Product.Code
+				prodName = it.Product.Name
+				if it.Product.Brand != nil && it.Product.Brand.Name != "" {
+					brandName = it.Product.Brand.Name
+				} else if it.Product.Rack != "" {
+					brandName = it.Product.Rack
+				}
+			}
+
+			if searchLower != "" {
+				matched := strings.Contains(strings.ToLower(s.InvoiceNo), searchLower) ||
+					strings.Contains(strings.ToLower(prodCode), searchLower) ||
+					strings.Contains(strings.ToLower(prodName), searchLower) ||
+					strings.Contains(strings.ToLower(it.BatchNumber), searchLower) ||
+					strings.Contains(strings.ToLower(custName), searchLower)
+				if !matched {
+					continue
+				}
+			}
+
+			var priorRet float64
+			database.DB.Model(&models.SalesReturnItem{}).
+				Joins("JOIN sales_returns ON sales_returns.id = sales_return_items.sales_return_id").
+				Where("sales_returns.company_id = ? AND sales_returns.sale_id = ? AND sales_return_items.product_id = ? AND sales_returns.status NOT IN ('CANCELLED', 'DITOLAK')",
+					companyID, s.ID, it.ProductID).
+				Select("COALESCE(SUM(sales_return_items.qty), 0)").
+				Scan(&priorRet)
+
+			remaining := it.Qty - priorRet
+			if remaining <= 0 {
+				continue
+			}
+
+			var stockBal models.StockBalance
+			database.DB.Where("warehouse_id = ? AND product_id = ?", s.WarehouseID, it.ProductID).First(&stockBal)
+
+			discPct := 0.0
+			if it.Qty*it.UnitPrice > 0 {
+				discPct = (it.Discount / (it.Qty * it.UnitPrice)) * 100
+			}
+
+			unitName := "PCS"
+			if it.Unit != nil && it.Unit.Name != "" {
+				unitName = it.Unit.Name
+			}
+
+			results = append(results, ReturnableSaleItemDTO{
+				SaleID:           s.ID,
+				InvoiceNo:        s.InvoiceNo,
+				CustomerID:       s.CustomerID,
+				CustomerName:     custName,
+				WarehouseID:      s.WarehouseID,
+				SaleItemID:       it.ID,
+				ProductID:        it.ProductID,
+				ProductCode:      prodCode,
+				ProductName:      prodName,
+				Brand:            brandName,
+				UnitID:           it.UnitID,
+				UnitName:         unitName,
+				SoldQty:          it.Qty,
+				AlreadyReturnQty: priorRet,
+				RemainingQty:     remaining,
+				CurrentStock:     stockBal.Qty,
+				UnitPrice:        it.UnitPrice,
+				Discount:         it.Discount,
+				DiscountPercent:  discPct,
+				BatchNumber:      it.BatchNumber,
+				ExpiredDate:      it.ExpiredDate,
+			})
+		}
+	}
+
+	utils.SendSuccess(c, "Daftar item faktur penjualan yang dapat diretur", results)
+}
+
 func (h *SalesHandler) DeleteSalesReturn(c *gin.Context) {
 	companyID := c.MustGet("company_id").(uuid.UUID)
 	branchID := c.MustGet("branch_id").(uuid.UUID)
@@ -3508,6 +4420,12 @@ func (h *SalesHandler) DeleteSalesReturn(c *gin.Context) {
 		Preload("Items").First(&ret).Error; err != nil {
 		tx.Rollback()
 		utils.SendError(c, http.StatusNotFound, "Retur penjualan tidak ditemukan", nil)
+		return
+	}
+
+	if ret.Status == "SELESAI" {
+		tx.Rollback()
+		utils.SendError(c, http.StatusBadRequest, "Retur penjualan yang sudah selesai tidak dapat dihapus demi integritas stok dan akuntansi.", nil)
 		return
 	}
 
@@ -3547,7 +4465,26 @@ func (h *SalesHandler) GetSalesPriceHistory(c *gin.Context) {
 	companyID := c.MustGet("company_id").(uuid.UUID)
 
 	query := database.DB.Table("sale_items").
-		Select("sales.invoice_no, sales.date as transaction_date, customers.name as customer_name, products.sku as product_code, products.name as product_name, sale_items.qty, units.name as unit_name, sale_items.unit_price, sale_items.discount, sales.tax_percent").
+		Select(`
+			sales.invoice_no, 
+			sales.date,
+			sales.date as transaction_date, 
+			customers.id as customer_id,
+			customers.code as customer_code,
+			customers.name as customer_name, 
+			products.id as product_id,
+			products.sku as product_code, 
+			products.name as product_name, 
+			sale_items.qty, 
+			units.name as unit_name, 
+			sale_items.unit_price, 
+			sale_items.discount,
+			CASE WHEN (sale_items.qty * sale_items.unit_price) > 0 
+				THEN ROUND(((sale_items.discount / (sale_items.qty * sale_items.unit_price)) * 100)::numeric, 2) 
+				ELSE 0 END as discount_percent,
+			sale_items.total_amount,
+			sales.tax_percent
+		`).
 		Joins("JOIN sales ON sales.id = sale_items.sale_id").
 		Joins("JOIN products ON products.id = sale_items.product_id").
 		Joins("LEFT JOIN customers ON customers.id = sales.customer_id").
@@ -3572,16 +4509,22 @@ func (h *SalesHandler) GetSalesPriceHistory(c *gin.Context) {
 	}
 
 	var results []struct {
-		InvoiceNo       string    `json:"invoice_no"`
-		TransactionDate time.Time `json:"transaction_date"`
-		CustomerName    string    `json:"customer_name"`
-		ProductCode     string    `json:"product_code"`
-		ProductName     string    `json:"product_name"`
-		Qty             float64   `json:"qty"`
-		UnitName        string    `json:"unit_name"`
-		UnitPrice       float64   `json:"unit_price"`
-		Discount        float64   `json:"discount"`
-		TaxPercent      float64   `json:"tax_percent"`
+		InvoiceNo       string     `json:"invoice_no"`
+		TransactionDate time.Time  `json:"transaction_date"`
+		Date            time.Time  `json:"date"`
+		CustomerID      *uuid.UUID `json:"customer_id"`
+		CustomerCode    string     `json:"customer_code"`
+		CustomerName    string     `json:"customer_name"`
+		ProductID       uuid.UUID  `json:"product_id"`
+		ProductCode     string     `json:"product_code"`
+		ProductName     string     `json:"product_name"`
+		Qty             float64    `json:"qty"`
+		UnitName        string     `json:"unit_name"`
+		UnitPrice       float64    `json:"unit_price"`
+		Discount        float64    `json:"discount"`
+		DiscountPercent float64    `json:"discount_percent"`
+		TotalAmount     float64    `json:"total_amount"`
+		TaxPercent      float64    `json:"tax_percent"`
 	}
 
 	if err := query.Order("sales.date DESC").Limit(200).Scan(&results).Error; err != nil {
@@ -4516,6 +5459,11 @@ func (h *SalesHandler) PrintSalesOrder(c *gin.Context) {
 	var so models.SalesOrder
 	if err := database.DB.Where("id = ? AND company_id = ?", id, companyID).First(&so).Error; err != nil {
 		utils.SendError(c, http.StatusNotFound, "Pesanan penjualan tidak ditemukan", nil)
+		return
+	}
+
+	if so.Status == "SELESAI" || so.Status == "COMPLETED" || so.ProcessStatus == "Selesai" {
+		utils.SendError(c, http.StatusBadRequest, "Pesanan Penjualan sudah selesai. Transaksi yang sudah selesai tidak dapat diedit.", nil)
 		return
 	}
 

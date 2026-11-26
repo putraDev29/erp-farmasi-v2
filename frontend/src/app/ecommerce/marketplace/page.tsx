@@ -63,9 +63,7 @@ export default function MarketplaceHistoryPage() {
               <Smartphone className="w-4 h-4 text-emerald-600" />
               <span>History Pesanan Marketplace &amp; Mobile</span>
             </h1>
-            <p className="text-[10px] text-slate-400">
-              Riwayat transaksi pesanan marketplace dan mobile yang telah selesai
-            </p>
+            
           </div>
         </div>
         <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-600">

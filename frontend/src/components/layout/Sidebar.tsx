@@ -227,6 +227,8 @@ const menuItems: MenuItem[] = [
       { title: "Kas Transfer", href: "/accounting/cash-transfer" },
       { title: "Jurnal", href: "/accounting/journals" },
       { title: "Buku Besar", href: "/accounting/ledger" },
+      { title: "Laba Rugi", href: "/accounting/profit-and-loss" },
+      { title: "Neraca", href: "/accounting/balance-sheet" },
       {
         title: "Deposit",
         href: "/accounting/deposits/supplier",

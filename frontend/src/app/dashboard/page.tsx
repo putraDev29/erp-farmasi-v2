@@ -36,6 +36,8 @@ import { api, formatCurrency, formatDate } from "@/lib/api";
 
 export default function DashboardPage() {
   const [showExpiryModal, setShowExpiryModal] = useState(false);
+  const [showReceivablesModal, setShowReceivablesModal] = useState(false);
+  const [showPayablesModal, setShowPayablesModal] = useState(false);
   const [purchaseSearch, setPurchaseSearch] = useState("");
   const [purchaseTab, setPurchaseTab] = useState<string>("ALL");
   const [purchasePageSize, setPurchasePageSize] = useState<number>(8);
@@ -122,6 +124,10 @@ export default function DashboardPage() {
   const recentSales = data?.recent_sales || [];
   const expiringCount = data?.expiring_critical_count || 0;
   const expiringItems = data?.expiring_critical_items || [];
+  const dueReceivables = data?.due_receivables || { count: 0, total_amount: 0, overdue_count: 0, items: [] };
+  const duePayables = data?.due_payables || { count: 0, total_amount: 0, overdue_count: 0, items: [] };
+  const dueReceivablesItems: any[] = dueReceivables.items || [];
+  const duePayablesItems: any[] = duePayables.items || [];
 
   return (
     <div className="flex flex-col h-full min-h-0 space-y-3 text-xs select-none relative">
@@ -131,12 +137,30 @@ export default function DashboardPage() {
           <h1 className="text-xl sm:text-2xl font-bold text-slate-800 tracking-tight">
             Ringkasan Eksekutif &amp; Dasbor
           </h1>
-          <p className="text-xs sm:text-sm text-slate-500">
-            Pemantauan performa penjualan, pembelian, kasir, dan persediaan apotek secara real-time.
-          </p>
+          
         </div>
 
         <div className="flex items-center gap-2">
+          {dueReceivables.count > 0 && (
+            <button
+              onClick={() => setShowReceivablesModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-xs sm:text-sm font-semibold transition shadow-2xs"
+            >
+              <Clock className="w-4 h-4 text-amber-600" />
+              <span>Piutang Tempo ({dueReceivables.count})</span>
+            </button>
+          )}
+
+          {duePayables.count > 0 && (
+            <button
+              onClick={() => setShowPayablesModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 rounded-xl text-xs sm:text-sm font-semibold transition shadow-2xs"
+            >
+              <AlertTriangle className="w-4 h-4 text-rose-600" />
+              <span>Hutang Tempo ({duePayables.count})</span>
+            </button>
+          )}
+
           {expiringCount > 0 && (
             <button
               onClick={() => setShowExpiryModal(true)}
@@ -147,13 +171,6 @@ export default function DashboardPage() {
             </button>
           )}
 
-          <Link
-            href="/pos"
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs sm:text-sm font-semibold transition shadow-sm"
-          >
-            <ShoppingBag className="w-4 h-4" />
-            <span>Kasir POS Cepat</span>
-          </Link>
           <Link
             href="/purchasing/invoices"
             className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-xl text-xs sm:text-sm font-medium transition shadow-sm"
@@ -290,34 +307,6 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Receivables (Piutang) */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Piutang Usaha (AR)</p>
-              <h3 className="text-xl font-bold text-amber-600 mt-1">
-                {formatCurrency(fin.receivables)}
-              </h3>
-              <p className="text-[11px] text-slate-500 mt-1">Faktur Belum Terbayar</p>
-            </div>
-            <div className="w-12 h-12 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 shrink-0">
-              <FileText className="w-6 h-6" />
-            </div>
-          </div>
-
-          {/* Payables (Utang) */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Utang Usaha (AP)</p>
-              <h3 className="text-xl font-bold text-red-600 mt-1">
-                {formatCurrency(fin.payables)}
-              </h3>
-              <p className="text-[11px] text-slate-500 mt-1">Tagihan PBF / Supplier</p>
-            </div>
-            <div className="w-12 h-12 bg-red-50 rounded-xl flex items-center justify-center text-red-600 shrink-0">
-              <TrendingDown className="w-6 h-6" />
-            </div>
-          </div>
-
           {/* Low Stock Alert */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm flex items-center justify-between">
             <div>
@@ -353,6 +342,248 @@ export default function DashboardPage() {
             </div>
             <div className="w-12 h-12 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600 shrink-0">
               <ShieldAlert className="w-6 h-6" />
+            </div>
+          </div>
+        </div>
+
+        {/* ======================================================== */}
+        {/* CARD LIST: PERINGATAN PIUTANG & HUTANG JATUH TEMPO (< 7 HARI) */}
+        {/* ======================================================== */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Card List 1: Piutang Jatuh Tempo (< 7 Hari) */}
+          <div className="bg-white p-5 rounded-2xl border border-amber-200/90 shadow-sm flex flex-col justify-between space-y-3 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-1.5 h-full bg-amber-500 rounded-l-2xl"></div>
+
+            {/* Header Card List */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600 shrink-0">
+                  <Clock className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-slate-800">
+                      Piutang Jatuh Tempo (&lt; 7 Hari)
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300">
+                      {dueReceivablesItems.length} Faktur
+                    </span>
+                    {dueReceivables.overdue_count > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200">
+                        {dueReceivables.overdue_count} Lewat
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] font-bold text-amber-700 font-mono">
+                    Total Sisa Piutang: {formatCurrency(dueReceivables.total_amount)}
+                  </span>
+                </div>
+              </div>
+              <Link
+                href="/sales/invoices"
+                className="text-xs font-semibold text-amber-700 hover:text-amber-800 flex items-center gap-1 hover:underline"
+              >
+                <span>Lihat Semua</span>
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+
+            {/* List Table */}
+            <div className="overflow-x-auto min-h-[160px] max-h-72 overflow-y-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-600 uppercase font-semibold text-[10px] sticky top-0 z-10">
+                  <tr>
+                    <th className="py-2 px-2.5 rounded-l-lg">No. Faktur</th>
+                    <th className="py-2 px-2.5">Pelanggan</th>
+                    <th className="py-2 px-2.5">Jatuh Tempo</th>
+                    <th className="py-2 px-2.5 text-right">Sisa Piutang</th>
+                    <th className="py-2 px-2.5 text-center rounded-r-lg">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {dueReceivablesItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-10 text-center text-slate-400">
+                        <div className="flex flex-col items-center justify-center gap-1">
+                          <span className="text-emerald-600 font-bold text-xs">Arus Kas Piutang Lancar</span>
+                          <span className="text-[11px] text-slate-400">Tidak ada faktur piutang yang jatuh tempo dalam 7 hari ke depan.</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    dueReceivablesItems.map((item: any, idx: number) => {
+                      const isOverdue = item.status === "OVERDUE";
+                      const isToday = item.status === "TODAY";
+                      return (
+                        <tr key={item.id || idx} className="hover:bg-amber-50/50 transition">
+                          <td className="py-2 px-2.5">
+                            <Link
+                              href={`/sales/invoices?search=${encodeURIComponent(item.invoice_no)}`}
+                              className="font-mono font-bold text-slate-800 hover:text-amber-700 hover:underline block"
+                            >
+                              {item.invoice_no}
+                            </Link>
+                            <span className="text-[10px] text-slate-400 font-sans">{formatDate(item.date)}</span>
+                          </td>
+                          <td className="py-2 px-2.5 font-medium text-slate-700">
+                            {item.customer_name || "Pelanggan Umum"}
+                          </td>
+                          <td className="py-2 px-2.5 text-slate-600 whitespace-nowrap">
+                            {formatDate(item.due_date)}
+                          </td>
+                          <td className="py-2 px-2.5 text-right font-mono font-bold text-amber-700 whitespace-nowrap">
+                            {formatCurrency(item.remaining_amount)}
+                          </td>
+                          <td className="py-2 px-2.5 text-center whitespace-nowrap">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                isOverdue
+                                  ? "bg-rose-100 text-rose-800 border border-rose-300"
+                                  : isToday
+                                  ? "bg-amber-100 text-amber-800 border border-amber-300"
+                                  : "bg-yellow-100 text-yellow-800 border border-yellow-300"
+                              }`}
+                            >
+                              {item.status_label || (isOverdue ? "Lewat Tempo" : "Jatuh Tempo")}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer */}
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+              <span>{dueReceivablesItems.length} transaksi memerlukan penagihan</span>
+              <button
+                type="button"
+                onClick={() => setShowReceivablesModal(true)}
+                className="text-amber-700 hover:text-amber-800 font-semibold hover:underline"
+              >
+                Buka Popup Detail &rarr;
+              </button>
+            </div>
+          </div>
+
+          {/* Card List 2: Hutang Supplier Jatuh Tempo (< 7 Hari) */}
+          <div className="bg-white p-5 rounded-2xl border border-rose-200/90 shadow-sm flex flex-col justify-between space-y-3 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-1.5 h-full bg-rose-500 rounded-l-2xl"></div>
+
+            {/* Header Card List */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600 shrink-0">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-slate-800">
+                      Hutang Supplier Jatuh Tempo (&lt; 7 Hari)
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-300">
+                      {duePayablesItems.length} Faktur PBF
+                    </span>
+                    {duePayables.overdue_count > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">
+                        {duePayables.overdue_count} Lewat
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[11px] font-bold text-rose-700 font-mono">
+                    Total Tagihan: {formatCurrency(duePayables.total_amount)}
+                  </span>
+                </div>
+              </div>
+              <Link
+                href="/purchasing/payments"
+                className="text-xs font-semibold text-rose-700 hover:text-rose-800 flex items-center gap-1 hover:underline"
+              >
+                <span>Bayar Hutang</span>
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+
+            {/* List Table */}
+            <div className="overflow-x-auto min-h-[160px] max-h-72 overflow-y-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-600 uppercase font-semibold text-[10px] sticky top-0 z-10">
+                  <tr>
+                    <th className="py-2 px-2.5 rounded-l-lg">No. Faktur PBF / Inv</th>
+                    <th className="py-2 px-2.5">Supplier (PBF)</th>
+                    <th className="py-2 px-2.5">Jatuh Tempo</th>
+                    <th className="py-2 px-2.5 text-right">Sisa Hutang</th>
+                    <th className="py-2 px-2.5 text-center rounded-r-lg">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {duePayablesItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="py-10 text-center text-slate-400">
+                        <div className="flex flex-col items-center justify-center gap-1">
+                          <span className="text-emerald-600 font-bold text-xs">Pembayaran Tagihan PBF Tertib</span>
+                          <span className="text-[11px] text-slate-400">Tidak ada tagihan supplier yang jatuh tempo dalam 7 hari ke depan.</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    duePayablesItems.map((item: any, idx: number) => {
+                      const isOverdue = item.status === "OVERDUE";
+                      const isToday = item.status === "TODAY";
+                      return (
+                        <tr key={item.id || idx} className="hover:bg-rose-50/50 transition">
+                          <td className="py-2 px-2.5">
+                            <div className="font-mono font-bold text-slate-800">
+                              {item.pbf_invoice_no || item.invoice_no}
+                            </div>
+                            {item.pbf_invoice_no && (
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                PO: {item.invoice_no}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-2 px-2.5 font-medium text-slate-700">
+                            {item.supplier_name || "Supplier PBF"}
+                          </td>
+                          <td className="py-2 px-2.5 text-slate-600 whitespace-nowrap">
+                            {formatDate(item.due_date)}
+                          </td>
+                          <td className="py-2 px-2.5 text-right font-mono font-bold text-rose-700 whitespace-nowrap">
+                            {formatCurrency(item.remaining_amount)}
+                          </td>
+                          <td className="py-2 px-2.5 text-center whitespace-nowrap">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                isOverdue
+                                  ? "bg-rose-100 text-rose-800 border border-rose-300"
+                                  : isToday
+                                  ? "bg-amber-100 text-amber-800 border border-amber-300"
+                                  : "bg-red-50 text-red-700 border border-red-200"
+                              }`}
+                            >
+                              {item.status_label || (isOverdue ? "Lewat Tempo" : "Jatuh Tempo")}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Footer */}
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
+              <span>{duePayablesItems.length} tagihan PBF aktif</span>
+              <button
+                type="button"
+                onClick={() => setShowPayablesModal(true)}
+                className="text-rose-700 hover:text-rose-800 font-semibold hover:underline"
+              >
+                Buka Popup Detail &rarr;
+              </button>
             </div>
           </div>
         </div>
@@ -876,6 +1107,271 @@ export default function DashboardPage() {
                   className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-sm flex items-center gap-1.5"
                 >
                   Buka Menu Obat ED Lengkap
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Popup Detail Piutang Jatuh Tempo (< 7 Hari) */}
+      {showReceivablesModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[88vh]">
+            {/* Modal Header */}
+            <div className="p-5 bg-gradient-to-r from-amber-500 to-amber-600 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white shrink-0">
+                  <Clock className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base sm:text-lg tracking-tight">
+                    Peringatan Piutang Jatuh Tempo (&lt; 7 Hari)
+                  </h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs text-amber-100 font-medium">
+                      {dueReceivables.count} Faktur belum lunas
+                    </span>
+                    <span className="text-xs bg-white/20 px-2 py-0.5 rounded-full font-bold">
+                      Total Sisa: {formatCurrency(dueReceivables.total_amount)}
+                    </span>
+                    {dueReceivables.overdue_count > 0 && (
+                      <span className="text-xs bg-rose-500 text-white px-2 py-0.5 rounded-full font-bold">
+                        {dueReceivables.overdue_count} Sudah Lewat Jatuh Tempo
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReceivablesModal(false)}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body / Table */}
+            <div className="p-4 overflow-y-auto flex-1">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 font-bold bg-slate-50 sticky top-0">
+                    <th className="py-2.5 px-3">No</th>
+                    <th className="py-2.5 px-3">No. Faktur</th>
+                    <th className="py-2.5 px-3">Pelanggan</th>
+                    <th className="py-2.5 px-3">Tgl Faktur</th>
+                    <th className="py-2.5 px-3">Jatuh Tempo</th>
+                    <th className="py-2.5 px-3 text-right">Sisa Piutang</th>
+                    <th className="py-2.5 px-3 text-center">Status Tempo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {dueReceivablesItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-8 text-slate-400">
+                        Tidak ada faktur piutang yang jatuh tempo dalam 7 hari ke depan.
+                      </td>
+                    </tr>
+                  ) : (
+                    dueReceivablesItems.map((item: any, idx: number) => {
+                      const isOverdue = item.status === "OVERDUE";
+                      const isToday = item.status === "TODAY";
+                      return (
+                        <tr key={item.id || idx} className="hover:bg-amber-50/40 transition">
+                          <td className="py-2.5 px-3 text-slate-400 font-mono">{idx + 1}</td>
+                          <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
+                            {item.invoice_no}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-700">
+                            {item.customer_name || "Umum / Non-Pelanggan"}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-500">
+                            {formatDate(item.date)}
+                          </td>
+                          <td className="py-2.5 px-3 font-medium text-slate-800">
+                            {formatDate(item.due_date)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-amber-700">
+                            {formatCurrency(item.remaining_amount)}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                isOverdue
+                                  ? "bg-rose-100 text-rose-800 border border-rose-300"
+                                  : isToday
+                                  ? "bg-amber-100 text-amber-800 border border-amber-300"
+                                  : "bg-yellow-100 text-yellow-800 border border-yellow-300"
+                              }`}
+                            >
+                              {item.status_label || (isOverdue ? "Lewat Tempo" : "Jatuh Tempo")}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <span className="text-slate-500 text-xs">
+                Monitoring piutang membantu menjaga arus kas lancar dan menghindari kredit macet.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowReceivablesModal(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs transition"
+                >
+                  Tutup
+                </button>
+                <Link
+                  href="/sales/invoices"
+                  onClick={() => setShowReceivablesModal(false)}
+                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition shadow-sm flex items-center gap-1.5"
+                >
+                  Lihat Faktur Penjualan
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Popup Detail Hutang Pembelian Jatuh Tempo (< 7 Hari) */}
+      {showPayablesModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[88vh]">
+            {/* Modal Header */}
+            <div className="p-5 bg-gradient-to-r from-rose-600 to-red-600 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center text-white shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base sm:text-lg tracking-tight">
+                    Peringatan Hutang Supplier Jatuh Tempo (&lt; 7 Hari)
+                  </h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs text-rose-100 font-medium">
+                      {duePayables.count} Faktur PBF
+                    </span>
+                    <span className="text-xs bg-white/20 px-2 py-0.5 rounded-full font-bold">
+                      Total Tagihan: {formatCurrency(duePayables.total_amount)}
+                    </span>
+                    {duePayables.overdue_count > 0 && (
+                      <span className="text-xs bg-white text-rose-700 px-2 py-0.5 rounded-full font-bold shadow-xs">
+                        {duePayables.overdue_count} Sudah Lewat Jatuh Tempo
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPayablesModal(false)}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body / Table */}
+            <div className="p-4 overflow-y-auto flex-1">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-500 font-bold bg-slate-50 sticky top-0">
+                    <th className="py-2.5 px-3">No</th>
+                    <th className="py-2.5 px-3">No. Faktur PBF / Inv</th>
+                    <th className="py-2.5 px-3">Supplier (PBF)</th>
+                    <th className="py-2.5 px-3">Tgl Faktur</th>
+                    <th className="py-2.5 px-3">Jatuh Tempo</th>
+                    <th className="py-2.5 px-3 text-right">Sisa Hutang</th>
+                    <th className="py-2.5 px-3 text-center">Status Tempo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {duePayablesItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-8 text-slate-400">
+                        Tidak ada tagihan hutang supplier yang jatuh tempo dalam 7 hari ke depan.
+                      </td>
+                    </tr>
+                  ) : (
+                    duePayablesItems.map((item: any, idx: number) => {
+                      const isOverdue = item.status === "OVERDUE";
+                      const isToday = item.status === "TODAY";
+                      return (
+                        <tr key={item.id || idx} className="hover:bg-rose-50/40 transition">
+                          <td className="py-2.5 px-3 text-slate-400 font-mono">{idx + 1}</td>
+                          <td className="py-2.5 px-3">
+                            <div className="font-mono font-bold text-slate-800">
+                              {item.pbf_invoice_no || item.invoice_no}
+                            </div>
+                            {item.pbf_invoice_no && (
+                              <div className="text-[10px] text-slate-400 font-mono">
+                                PO: {item.invoice_no}
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-700">
+                            {item.supplier_name || "Supplier PBF"}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-500">
+                            {formatDate(item.date)}
+                          </td>
+                          <td className="py-2.5 px-3 font-medium text-slate-800">
+                            {formatDate(item.due_date)}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-rose-700">
+                            {formatCurrency(item.remaining_amount)}
+                          </td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                isOverdue
+                                  ? "bg-rose-100 text-rose-800 border border-rose-300"
+                                  : isToday
+                                  ? "bg-amber-100 text-amber-800 border border-amber-300"
+                                  : "bg-red-50 text-red-700 border border-red-200"
+                              }`}
+                            >
+                              {item.status_label || (isOverdue ? "Lewat Tempo" : "Jatuh Tempo")}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <span className="text-slate-500 text-xs">
+                Segera jadwalkan pembayaran ke PBF agar alur pengadaan obat apotek tetap lancar.
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPayablesModal(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 font-semibold text-xs transition"
+                >
+                  Tutup
+                </button>
+                <Link
+                  href="/purchasing/payments"
+                  onClick={() => setShowPayablesModal(false)}
+                  className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition shadow-sm flex items-center gap-1.5"
+                >
+                  Ke Pembayaran Hutang
                   <ArrowUpRight className="w-3.5 h-3.5" />
                 </Link>
               </div>

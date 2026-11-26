@@ -364,9 +364,7 @@ export default function MarketplaceOrdersPage() {
               <Smartphone className="w-4 h-4 text-emerald-600" />
               <span>Daftar Pesanan Marketplace &amp; Mobile</span>
             </h1>
-            <p className="text-[10px] text-slate-400">
-              Sinkronisasi otomatis antara pesanan mobile pengguna dan sistem penjualan ERP
-            </p>
+            
           </div>
         </div>
         <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-600">

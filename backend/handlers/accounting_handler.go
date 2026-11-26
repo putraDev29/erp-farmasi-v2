@@ -28,6 +28,9 @@ func (h *AccountingHandler) GetAccounts(c *gin.Context) {
 	category := c.Query("category")
 
 	query := database.DB.Where("company_id = ?", companyID)
+	if c.Query("exclude_headers") == "true" || c.Query("is_header") == "false" {
+		query = query.Where("is_header = ?", false)
+	}
 	if category != "" && category != "Semua Akun" && category != "ALL" {
 		switch category {
 		case "Aktiva":
@@ -455,37 +458,250 @@ func (h *AccountingHandler) GetTrialBalance(c *gin.Context) {
 // Financial Statements: Profit & Loss (Laba Rugi)
 func (h *AccountingHandler) GetProfitAndLoss(c *gin.Context) {
 	companyID := c.MustGet("company_id").(uuid.UUID)
-	var revenueAccounts []models.Account
-	var cogsAccounts []models.Account
-	var expenseAccounts []models.Account
+	startDate := c.Query("start_date")
+	endDate := c.Query("end_date")
 
-	database.DB.Where("company_id = ? AND type = 'REVENUE' AND is_header = false", companyID).Find(&revenueAccounts)
-	database.DB.Where("company_id = ? AND type = 'EXPENSE' AND subtype = 'COGS' AND is_header = false", companyID).Find(&cogsAccounts)
-	database.DB.Where("company_id = ? AND type = 'EXPENSE' AND subtype != 'COGS' AND is_header = false", companyID).Find(&expenseAccounts)
-
-	var totalRevenue, totalCOGS, totalExpense float64
-	for _, a := range revenueAccounts {
-		totalRevenue += a.Balance
-	}
-	for _, a := range cogsAccounts {
-		totalCOGS += a.Balance
-	}
-	for _, a := range expenseAccounts {
-		totalExpense += a.Balance
+	// Get all non-header accounts for REVENUE and EXPENSE
+	var accounts []models.Account
+	if err := database.DB.Where("company_id = ? AND is_header = false AND type IN ('REVENUE', 'EXPENSE')", companyID).
+		Order("code ASC").Find(&accounts).Error; err != nil {
+		utils.SendError(c, 500, "Gagal mengambil daftar akun", err.Error())
+		return
 	}
 
+	// Query journal entry movements
+	type AccMovement struct {
+		AccountID   uuid.UUID
+		TotalDebit  float64
+		TotalCredit float64
+	}
+	var movements []AccMovement
+
+	tx := database.DB.Table("journal_entries").
+		Select("journal_entries.account_id, COALESCE(SUM(journal_entries.debit), 0) as total_debit, COALESCE(SUM(journal_entries.credit), 0) as total_credit").
+		Joins("JOIN journals ON journals.id = journal_entries.journal_id").
+		Where("journals.company_id = ? AND journals.status = 'POSTED'", companyID)
+
+	if startDate != "" {
+		tx = tx.Where("journals.date >= ?", startDate)
+	}
+	if endDate != "" {
+		tx = tx.Where("journals.date <= ?", endDate+" 23:59:59")
+	}
+
+	tx.Group("journal_entries.account_id").Scan(&movements)
+
+	movementMap := make(map[uuid.UUID]AccMovement)
+	for _, m := range movements {
+		movementMap[m.AccountID] = m
+	}
+
+	type PnLAccountItem struct {
+		ID            uuid.UUID `json:"id"`
+		Code          string    `json:"code"`
+		Name          string    `json:"name"`
+		Type          string    `json:"type"`
+		Subtype       string    `json:"subtype"`
+		NormalBalance string    `json:"normal_balance"`
+		Debit         float64   `json:"debit"`
+		Credit        float64   `json:"credit"`
+		Balance       float64   `json:"balance"`    // Net balance according to normal balance
+		NetImpact     float64   `json:"net_impact"` // Impact on the section
+	}
+
+	var revenueAccounts []PnLAccountItem
+	var cogsAccounts []PnLAccountItem
+	var operatingExpenseAccounts []PnLAccountItem
+	var otherIncomeAccounts []PnLAccountItem
+	var otherExpenseAccounts []PnLAccountItem
+
+	var totalRevenue float64
+	var totalCOGS float64
+	var totalOperatingExpense float64
+	var totalOtherIncome float64
+	var totalOtherExpense float64
+
+	for _, a := range accounts {
+		mv := movementMap[a.ID]
+		debit := mv.TotalDebit
+		credit := mv.TotalCredit
+
+		// If no journals in period and no date filter, fall back to account.Balance
+		if len(movements) == 0 && startDate == "" && endDate == "" {
+			if a.NormalBalance == "CREDIT" {
+				credit = a.Balance
+			} else {
+				debit = a.Balance
+			}
+		}
+
+		var balance float64
+		if a.NormalBalance == "CREDIT" {
+			balance = credit - debit
+		} else {
+			balance = debit - credit
+		}
+
+		item := PnLAccountItem{
+			ID:            a.ID,
+			Code:          a.Code,
+			Name:          a.Name,
+			Type:          a.Type,
+			Subtype:       a.Subtype,
+			NormalBalance: a.NormalBalance,
+			Debit:         debit,
+			Credit:        credit,
+			Balance:       balance,
+		}
+
+		// Categorize by Code & Subtype
+		if a.Type == "REVENUE" {
+			if a.Subtype == "OTHER_INCOME" || strings.HasPrefix(a.Code, "7-") {
+				// Other Income (Kepala 7)
+				impact := credit - debit
+				item.NetImpact = impact
+				totalOtherIncome += impact
+				otherIncomeAccounts = append(otherIncomeAccounts, item)
+			} else {
+				// Operating Revenue (Kepala 4)
+				impact := credit - debit
+				item.NetImpact = impact
+				totalRevenue += impact
+				revenueAccounts = append(revenueAccounts, item)
+			}
+		} else if a.Type == "EXPENSE" {
+			if a.Subtype == "OTHER_EXPENSE" || strings.HasPrefix(a.Code, "8-") {
+				// Other Expense (Kepala 8)
+				impact := debit - credit
+				item.NetImpact = impact
+				totalOtherExpense += impact
+				otherExpenseAccounts = append(otherExpenseAccounts, item)
+			} else if a.Subtype == "COGS" || strings.HasPrefix(a.Code, "5-") {
+				// COGS (Kepala 5)
+				impact := debit - credit
+				item.NetImpact = impact
+				totalCOGS += impact
+				cogsAccounts = append(cogsAccounts, item)
+			} else {
+				// Operating Expense (Kepala 6)
+				impact := debit - credit
+				item.NetImpact = impact
+				totalOperatingExpense += impact
+				operatingExpenseAccounts = append(operatingExpenseAccounts, item)
+			}
+		}
+	}
+
+	// Calculations
 	grossProfit := totalRevenue - totalCOGS
-	netProfit := grossProfit - totalExpense
+	operatingProfit := grossProfit - totalOperatingExpense
+	netOther := totalOtherIncome - totalOtherExpense
+	ebt := operatingProfit + netOther // Laba Sebelum Pajak
+	taxExpense := 0.0                 // Pajak (0 jika belum ada)
+	netProfit := ebt - taxExpense
+
+	// Margins (%)
+	grossProfitMargin := 0.0
+	netProfitMargin := 0.0
+	opexRatio := 0.0
+	if totalRevenue > 0 {
+		grossProfitMargin = (grossProfit / totalRevenue) * 100
+		netProfitMargin = (netProfit / totalRevenue) * 100
+		opexRatio = (totalOperatingExpense / totalRevenue) * 100
+	}
+
+	// Trends (Monthly & Daily)
+	type TrendRow struct {
+		Period      string  `json:"period"`
+		Label       string  `json:"label"`
+		Revenue     float64 `json:"revenue"`
+		COGS        float64 `json:"cogs"`
+		Expense     float64 `json:"expense"`
+		GrossProfit float64 `json:"gross_profit"`
+		NetProfit   float64 `json:"net_profit"`
+	}
+
+	var monthlyTrends []TrendRow
+	database.DB.Table("journal_entries").
+		Select(`to_char(journals.date, 'YYYY-MM') as period,
+				to_char(journals.date, 'Mon YYYY') as label,
+				ROUND(COALESCE(SUM(CASE WHEN accounts.type = 'REVENUE' AND (accounts.subtype != 'OTHER_INCOME' AND accounts.code NOT LIKE '7-%') THEN (CASE WHEN accounts.normal_balance = 'CREDIT' THEN journal_entries.credit - journal_entries.debit ELSE -(journal_entries.debit - journal_entries.credit) END) ELSE 0 END), 0)::numeric, 2) as revenue,
+				ROUND(COALESCE(SUM(CASE WHEN accounts.type = 'EXPENSE' AND (accounts.subtype = 'COGS' OR accounts.code LIKE '5-%') THEN (CASE WHEN accounts.normal_balance = 'DEBIT' THEN journal_entries.debit - journal_entries.credit ELSE -(journal_entries.credit - journal_entries.debit) END) ELSE 0 END), 0)::numeric, 2) as cogs,
+				ROUND(COALESCE(SUM(CASE WHEN accounts.type = 'EXPENSE' AND (accounts.subtype != 'COGS' AND accounts.code NOT LIKE '5-%' AND accounts.code NOT LIKE '8-%') THEN (CASE WHEN accounts.normal_balance = 'DEBIT' THEN journal_entries.debit - journal_entries.credit ELSE -(journal_entries.credit - journal_entries.debit) END) ELSE 0 END), 0)::numeric, 2) as expense,
+				ROUND(COALESCE(SUM(CASE WHEN accounts.type = 'REVENUE' THEN (journal_entries.credit - journal_entries.debit) WHEN accounts.type = 'EXPENSE' THEN -(journal_entries.debit - journal_entries.credit) ELSE 0 END), 0)::numeric, 2) as net_profit`).
+		Joins("JOIN journals ON journals.id = journal_entries.journal_id AND journals.status = 'POSTED'").
+		Joins("JOIN accounts ON accounts.id = journal_entries.account_id").
+		Where("journals.company_id = ?", companyID).
+		Group("to_char(journals.date, 'YYYY-MM'), to_char(journals.date, 'Mon YYYY')").
+		Having("COALESCE(SUM(CASE WHEN accounts.type IN ('REVENUE', 'EXPENSE') THEN ABS(journal_entries.debit) + ABS(journal_entries.credit) ELSE 0 END), 0) > 0").
+		Order("period ASC").
+		Scan(&monthlyTrends)
+
+	for i := range monthlyTrends {
+		monthlyTrends[i].GrossProfit = monthlyTrends[i].Revenue - monthlyTrends[i].COGS
+	}
+
+	var dailyTrends []TrendRow
+	dailyTx := database.DB.Table("journal_entries").
+		Select(`to_char(journals.date, 'YYYY-MM-DD') as period,
+				to_char(journals.date, 'DD/MM') as label,
+				ROUND(COALESCE(SUM(CASE WHEN accounts.type = 'REVENUE' AND (accounts.subtype != 'OTHER_INCOME' AND accounts.code NOT LIKE '7-%') THEN (CASE WHEN accounts.normal_balance = 'CREDIT' THEN journal_entries.credit - journal_entries.debit ELSE -(journal_entries.debit - journal_entries.credit) END) ELSE 0 END), 0)::numeric, 2) as revenue,
+				ROUND(COALESCE(SUM(CASE WHEN accounts.type = 'EXPENSE' AND (accounts.subtype = 'COGS' OR accounts.code LIKE '5-%') THEN (CASE WHEN accounts.normal_balance = 'DEBIT' THEN journal_entries.debit - journal_entries.credit ELSE -(journal_entries.credit - journal_entries.debit) END) ELSE 0 END), 0)::numeric, 2) as cogs,
+				ROUND(COALESCE(SUM(CASE WHEN accounts.type = 'EXPENSE' AND (accounts.subtype != 'COGS' AND accounts.code NOT LIKE '5-%' AND accounts.code NOT LIKE '8-%') THEN (CASE WHEN accounts.normal_balance = 'DEBIT' THEN journal_entries.debit - journal_entries.credit ELSE -(journal_entries.credit - journal_entries.debit) END) ELSE 0 END), 0)::numeric, 2) as expense,
+				ROUND(COALESCE(SUM(CASE WHEN accounts.type = 'REVENUE' THEN (journal_entries.credit - journal_entries.debit) WHEN accounts.type = 'EXPENSE' THEN -(journal_entries.debit - journal_entries.credit) ELSE 0 END), 0)::numeric, 2) as net_profit`).
+		Joins("JOIN journals ON journals.id = journal_entries.journal_id AND journals.status = 'POSTED'").
+		Joins("JOIN accounts ON accounts.id = journal_entries.account_id").
+		Where("journals.company_id = ?", companyID)
+
+	if startDate != "" {
+		dailyTx = dailyTx.Where("journals.date >= ?", startDate)
+	}
+	if endDate != "" {
+		dailyTx = dailyTx.Where("journals.date <= ?", endDate+" 23:59:59")
+	}
+
+	dailyTx.Group("to_char(journals.date, 'YYYY-MM-DD'), to_char(journals.date, 'DD/MM')").
+		Having("COALESCE(SUM(CASE WHEN accounts.type IN ('REVENUE', 'EXPENSE') THEN ABS(journal_entries.debit) + ABS(journal_entries.credit) ELSE 0 END), 0) > 0").
+		Order("period ASC").
+		Scan(&dailyTrends)
+
+	for i := range dailyTrends {
+		dailyTrends[i].GrossProfit = dailyTrends[i].Revenue - dailyTrends[i].COGS
+	}
+
+	// Expense accounts list for legacy backward-compatibility
+	var allExpenseAccounts []PnLAccountItem
+	allExpenseAccounts = append(allExpenseAccounts, operatingExpenseAccounts...)
+	allExpenseAccounts = append(allExpenseAccounts, otherExpenseAccounts...)
 
 	utils.SendSuccess(c, "Laporan Laba Rugi", gin.H{
-		"revenue_accounts": revenueAccounts,
-		"total_revenue":    totalRevenue,
-		"cogs_accounts":    cogsAccounts,
-		"total_cogs":       totalCOGS,
-		"gross_profit":     grossProfit,
-		"expense_accounts": expenseAccounts,
-		"total_expense":    totalExpense,
-		"net_profit":       netProfit,
+		"start_date":                 startDate,
+		"end_date":                   endDate,
+		"revenue_accounts":           revenueAccounts,
+		"total_revenue":              totalRevenue,
+		"cogs_accounts":              cogsAccounts,
+		"total_cogs":                 totalCOGS,
+		"gross_profit":               grossProfit,
+		"gross_profit_margin":        grossProfitMargin,
+		"operating_expense_accounts": operatingExpenseAccounts,
+		"total_operating_expense":    totalOperatingExpense,
+		"opex_ratio":                 opexRatio,
+		"operating_profit":           operatingProfit,
+		"other_income_accounts":      otherIncomeAccounts,
+		"total_other_income":         totalOtherIncome,
+		"other_expense_accounts":     otherExpenseAccounts,
+		"total_other_expense":        totalOtherExpense,
+		"net_other":                  netOther,
+		"earnings_before_tax":        ebt,
+		"tax_expense":                taxExpense,
+		"net_profit":                 netProfit,
+		"net_profit_margin":          netProfitMargin,
+		// Legacy compatibility
+		"expense_accounts":           allExpenseAccounts,
+		"total_expense":              totalOperatingExpense + totalOtherExpense,
+		// Trends
+		"monthly_trends":             monthlyTrends,
+		"daily_trends":               dailyTrends,
 	})
 }
 

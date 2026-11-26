@@ -150,10 +150,17 @@ type ProductImage struct {
 
 type UnitConversion struct {
 	BaseModel
-	ProductID  uuid.UUID `gorm:"type:uuid;not null;index" json:"product_id"`
-	FromUnitID uuid.UUID `gorm:"type:uuid;not null" json:"from_unit_id"`
-	ToUnitID   uuid.UUID `gorm:"type:uuid;not null" json:"to_unit_id"`
-	Multiplier float64   `gorm:"type:numeric(12,4);not null;default:1" json:"multiplier"`
+	ProductID       uuid.UUID `gorm:"type:uuid;not null;index" json:"product_id"`
+	FromUnitID      uuid.UUID `gorm:"type:uuid;not null" json:"from_unit_id"`
+	ToUnitID        uuid.UUID `gorm:"type:uuid;not null" json:"to_unit_id"`
+	Multiplier      float64   `gorm:"type:numeric(12,4);not null;default:1" json:"multiplier"`
+	Barcode         string    `gorm:"size:50" json:"barcode"`
+	SKU             string    `gorm:"size:100" json:"sku"`
+	Points          float64   `gorm:"type:numeric(10,2);default:0" json:"points"`
+	SalesCommission float64   `gorm:"type:numeric(15,2);default:0" json:"sales_commission"`
+	PurchasePrice   float64   `gorm:"type:numeric(15,2);default:0" json:"purchase_price"`
+	MarkupPercent   float64   `gorm:"type:numeric(7,2);default:0" json:"markup_percent"`
+	SellingPrice    float64   `gorm:"type:numeric(15,2);default:0" json:"selling_price"`
 
 	FromUnit *Unit `gorm:"foreignKey:FromUnitID" json:"from_unit,omitempty"`
 	ToUnit   *Unit `gorm:"foreignKey:ToUnitID" json:"to_unit,omitempty"`
@@ -164,7 +171,10 @@ type ProductPrice struct {
 	ProductID       uuid.UUID  `gorm:"type:uuid;not null;index" json:"product_id"`
 	UnitID          uuid.UUID  `gorm:"type:uuid;not null" json:"unit_id"`
 	CustomerGroupID *uuid.UUID `gorm:"type:uuid;index" json:"customer_group_id"`
+	PriceType       string     `gorm:"size:20;default:'SATUAN'" json:"price_type"` // SATUAN, LEVEL, JUMLAH
+	TierIndex       int        `gorm:"default:1" json:"tier_index"`               // 1..6 for LEVEL, 1..4 for JUMLAH
 	MinQty          float64    `gorm:"type:numeric(12,2);default:1" json:"min_qty"`
+	MarkupPercent   float64    `gorm:"type:numeric(7,2);default:0" json:"markup_percent"`
 	Price           float64    `gorm:"type:numeric(15,2);not null" json:"price"`
 
 	Unit          *Unit          `gorm:"foreignKey:UnitID" json:"unit,omitempty"`

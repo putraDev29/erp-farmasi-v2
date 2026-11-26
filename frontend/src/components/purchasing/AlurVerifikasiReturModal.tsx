@@ -28,6 +28,7 @@ import {
   Printer,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { useAuthStore } from "@/lib/auth-store";
 import PbfDocumentUpload from "@/components/common/PbfDocumentUpload";
 import SearchableAccountSelect from "@/components/common/SearchableAccountSelect";
 
@@ -39,12 +40,10 @@ interface AlurVerifikasiReturModalProps {
 }
 
 const STAGES = [
-  { key: "DRAFT", label: "Draft", step: 1, desc: "Pengajuan oleh Admin" },
-  { key: "VERIFIKASI_GUDANG", label: "Verifikasi Gudang", step: 2, desc: "Pemeriksaan fisik obat & bets" },
-  { key: "DISETUJUI_ADMIN", label: "Persetujuan Admin", step: 3, desc: "Approval & validasi manajerial" },
-  { key: "DALAM_PENGIRIMAN", label: "Dalam Pengiriman", step: 4, desc: "Obat dikirim ke PBF (Stok berkurang)" },
-  { key: "MENUNGGU_KONFIRMASI_PBF", label: "Konfirmasi PBF", step: 5, desc: "Pencatatan nota retur diterima PBF" },
-  { key: "SELESAI", label: "Selesai", step: 6, desc: "Finalisasi hutang, kas & jurnal" },
+  { key: "DRAFT", label: "Buat Retur", step: 1, desc: "Pengajuan retur" },
+  { key: "VERIFIKASI_GUDANG", label: "Gudang Konfirmasi", step: 2, desc: "Pemeriksaan fisik obat" },
+  { key: "DISETUJUI_ADMIN", label: "Admin Setuju", step: 3, desc: "Persetujuan & dokumen kirim" },
+  { key: "SELESAI", label: "Selesai", step: 4, desc: "Retur selesai" },
 ];
 
 export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> = ({
@@ -54,6 +53,14 @@ export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> =
   onSuccess,
 }) => {
   const queryClient = useQueryClient();
+  const { user } = useAuthStore();
+  const isGudang = Boolean(
+    user?.roles?.some((r: any) => {
+      const roleName = (typeof r === "string" ? r : r?.name || "").toUpperCase();
+      return roleName.includes("GUDANG");
+    }) || user?.username?.toLowerCase() === "gudang"
+  );
+  const isAdmin = !isGudang;
   const [activeTab, setActiveTab] = useState<"action" | "items" | "documents" | "history">("action");
 
   // Local Form States for specific stages
@@ -122,18 +129,24 @@ export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> =
     }
   }, [ret]);
 
-  // Stage Index Calculator
+  // Current Step Calculator (1=Buat Retur, 2=Gudang Konfirmasi, 3=Admin Setuju, 4=Selesai)
   const currentStatus = ret?.status || "DRAFT";
-  const getStageIndex = (status: string) => {
-    if (status === "POSTED" || status === "SELESAI") return 5;
-    if (status === "MENUNGGU_KONFIRMASI_PBF") return 4;
-    if (status === "DALAM_PENGIRIMAN") return 3;
-    if (status === "DISETUJUI_ADMIN") return 2;
-    if (status === "VERIFIKASI_GUDANG") return 1;
-    if (status === "DITOLAK") return -1;
-    return 0; // DRAFT
+  const deliveryMethod = ret?.delivery_method || "DIAMBIL";
+  const isSelesai = currentStatus === "SELESAI" || currentStatus === "POSTED" || currentStatus === "DISETUJUI_ADMIN";
+  const getCurrentStep = (status: string) => {
+    if (status === "SELESAI" || status === "POSTED" || status === "DISETUJUI_ADMIN") return 4;
+    if (status === "VERIFIKASI_GUDANG") return 3;
+    return 2; // DRAFT or DITOLAK -> Gudang Konfirmasi
   };
-  const currentStageIndex = getStageIndex(currentStatus);
+  const currentStep = getCurrentStep(currentStatus);
+  const [viewedStep, setViewedStep] = useState<number>(currentStep);
+
+  React.useEffect(() => {
+    setViewedStep(currentStep);
+  }, [ret?.id, currentStep, isOpen]);
+
+  const canEditStep2 = isGudang && currentStep === 2;
+  const canEditStep3 = isAdmin && !isGudang && currentStep === 3 && !isSelesai;
 
   // Helper Mutation Handlers
   const invalidateAll = () => {
@@ -171,15 +184,25 @@ export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> =
     onError: (err: any) => alert(err.response?.data?.message || err.message),
   });
 
-  // 2. Admin Approve Mutation
+  // 2. Admin Approve Mutation (jika DIAMBIL langsung selesai; jika DIKIRIM sertakan dokumen pengiriman)
   const approveMutation = useMutation({
     mutationFn: async () => {
+      if (deliveryMethod === "DIKIRIM" && !shippingTrackingNo.trim()) {
+        throw new Error("Untuk retur yang dikirim, No. Resi / Surat Jalan Pengiriman wajib diisi.");
+      }
       return await api.post(`/purchases/returns/${returnId}/admin-approve`, {
-        notes: adminNotes || "Retur disetujui untuk dikirim ke supplier PBF",
+        notes: adminNotes || "Retur disetujui oleh Admin",
+        shipping_courier: deliveryMethod === "DIKIRIM" ? shippingCourier : "",
+        shipping_tracking_no: deliveryMethod === "DIKIRIM" ? shippingTrackingNo : "",
+        shipping_notes: deliveryMethod === "DIKIRIM" ? shippingNotes : "",
       });
     },
     onSuccess: () => {
-      alert("Retur berhasil disetujui Admin! Silakan siapkan pengiriman barang ke PBF.");
+      alert(
+        deliveryMethod === "DIKIRIM"
+          ? "Retur disetujui & dokumen pengiriman dicatat! Status retur SELESAI dan stok otomatis dipotong."
+          : "Retur disetujui Admin (Diambil Supplier)! Status retur SELESAI dan stok otomatis dipotong."
+      );
       invalidateAll();
     },
     onError: (err: any) => alert(err.response?.data?.message || err.message),
@@ -305,8 +328,11 @@ export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> =
               </div>
               <p className="text-[11px] text-slate-400">
                 Supplier: <strong className="text-slate-200">{ret?.supplier?.name || "-"}</strong> • Gudang:{" "}
-                <strong className="text-slate-200">{ret?.warehouse?.name || "Utama"}</strong> • Total:{" "}
-                <strong className="text-rose-300 font-mono">{formatCurrency(ret?.total_amount || 0)}</strong>
+                <strong className="text-slate-200">{ret?.warehouse?.name || "Utama"}</strong> • Metode:{" "}
+                <strong className="text-amber-300">
+                  {deliveryMethod === "DIKIRIM" ? "Dikirim ke Supplier" : "Diambil Supplier"}
+                </strong>{" "}
+                • Total: <strong className="text-rose-300 font-mono">{formatCurrency(ret?.total_amount || 0)}</strong>
               </p>
             </div>
           </div>
@@ -319,46 +345,72 @@ export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> =
           </button>
         </div>
 
-        {/* 6-STAGE VISUAL STEPPER */}
-        <div className="shrink-0 bg-slate-50 border-b border-slate-200 px-4 py-2.5">
-          <div className="flex items-center justify-between">
+        {/* 4-STAGE VISUAL STEPPER (Clickable 1-4, teks di bawah ikon) */}
+        <div className="shrink-0 bg-slate-50 border-b border-slate-200 px-4 py-3">
+          <div className="flex items-center justify-between max-w-3xl mx-auto">
             {STAGES.map((s, idx) => {
-              const isPast = currentStageIndex > idx && currentStatus !== "DITOLAK";
-              const isCurrent = currentStageIndex === idx && currentStatus !== "DITOLAK";
+              const isPast = (s.step < currentStep || (s.step === 4 && isSelesai)) && currentStatus !== "DITOLAK";
+              const isCurrent = s.step === currentStep && !(s.step === 4 && isSelesai) && currentStatus !== "DITOLAK";
               const isRejected = currentStatus === "DITOLAK";
+              const isLocked = s.step > currentStep;
+              const isViewing = viewedStep === s.step && activeTab === "action";
+              const canClick = !isLocked;
 
               return (
                 <React.Fragment key={s.key}>
-                  <div className="flex flex-col items-center relative group">
+                  <button
+                    type="button"
+                    disabled={!canClick}
+                    onClick={() => {
+                      if (!canClick) return;
+                      setViewedStep(s.step);
+                      setActiveTab("action");
+                    }}
+                    className={`flex flex-col items-center gap-1.5 text-center px-2 py-0.5 rounded-lg transition shrink-0 ${
+                      canClick ? "cursor-pointer hover:opacity-90" : "cursor-not-allowed opacity-70"
+                    }`}
+                  >
                     <div
-                      className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs transition-all ${
-                        isPast
-                          ? "bg-emerald-600 text-white shadow-xs"
+                      className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs transition-all shadow-2xs ${
+                        isViewing
+                          ? isPast
+                            ? "bg-emerald-600 text-white ring-4 ring-sky-300 scale-110"
+                            : "bg-blue-600 text-white ring-4 ring-blue-200 scale-110"
+                          : isPast
+                          ? "bg-emerald-600 text-white ring-4 ring-emerald-200"
                           : isCurrent
-                          ? "bg-rose-600 text-white ring-4 ring-rose-100 shadow-xs animate-pulse"
-                          : isRejected && idx === 2
+                          ? "bg-blue-600 text-white ring-4 ring-blue-100 scale-105"
+                          : isRejected && s.step === 3
                           ? "bg-rose-500 text-white"
-                          : "bg-white border-2 border-slate-300 text-slate-400"
+                          : "bg-slate-200 text-slate-400 border border-slate-300"
                       }`}
                     >
-                      {isPast ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : s.step}
+                      {isPast ? <Check className="w-4 h-4 stroke-[3]" /> : s.step}
                     </div>
                     <span
-                      className={`text-[10px] font-semibold mt-1 tracking-tight text-center ${
-                        isCurrent
-                          ? "text-rose-700 font-bold"
+                      className={`text-[11px] font-bold tracking-tight whitespace-nowrap ${
+                        isViewing
+                          ? isPast
+                            ? "text-emerald-900 underline decoration-sky-500 decoration-2 underline-offset-4"
+                            : "text-blue-700 underline decoration-blue-500 decoration-2 underline-offset-4"
                           : isPast
-                          ? "text-emerald-700 font-medium"
+                          ? "text-emerald-800"
+                          : isCurrent
+                          ? "text-blue-600"
                           : "text-slate-400"
                       }`}
                     >
                       {s.label}
                     </span>
-                  </div>
+                  </button>
                   {idx < STAGES.length - 1 && (
                     <div
-                      className={`flex-1 h-0.5 mx-2 rounded ${
-                        isPast ? "bg-emerald-500" : "bg-slate-200"
+                      className={`flex-1 h-0.5 mx-2 -mt-5 rounded transition-colors ${
+                        idx < currentStep - 1 || isSelesai
+                          ? "bg-emerald-500"
+                          : idx === currentStep - 1
+                          ? "bg-blue-300"
+                          : "bg-slate-200"
                       }`}
                     />
                   )}
@@ -437,8 +489,49 @@ export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> =
           ) : activeTab === "action" ? (
             /* TAB 1: ACTION ACCORDING TO STAGE */
             <div className="space-y-4">
-              {/* STAGE 1 / 2: WAREHOUSE VERIFICATION */}
-              {currentStatus === "DRAFT" && (
+              {/* TAHAP 1: BUAT RETUR */}
+              {viewedStep === 1 && (
+                <div className="bg-white p-4 rounded-xl border border-emerald-200 shadow-2xs space-y-3">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                        <Check className="w-4 h-4 stroke-[3]" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-xs text-slate-900">
+                          Tahap 1: Pengajuan Retur Pembelian
+                        </h4>
+                        <p className="text-[10.5px] text-slate-500">
+                          Dibuat pada {formatDate(ret?.date)} • Mode {ret?.return_mode || "MODE_1"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[11px]">
+                    <div>
+                      <span className="text-slate-400 block">Supplier / PBF:</span>
+                      <strong className="text-slate-800">{ret?.supplier?.name || "-"}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block">Gudang Asal:</span>
+                      <strong className="text-slate-800">{ret?.warehouse?.name || "-"}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block">Metode Pengembalian:</span>
+                      <strong className="text-amber-700">
+                        {deliveryMethod === "DIKIRIM" ? "Dikirim ke Supplier" : "Diambil oleh Supplier"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block">Keterangan:</span>
+                      <strong className="text-slate-800">{ret?.reason || "-"}</strong>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAHAP 2: GUDANG KONFIRMASI */}
+              {viewedStep === 2 && (
                 <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-2xs space-y-3">
                   <div className="flex items-start justify-between border-b border-amber-100 pb-2">
                     <div className="flex items-center gap-2">
@@ -449,9 +542,7 @@ export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> =
                         <h4 className="font-bold text-sm text-slate-900">
                           Tahap 2: Verifikasi Fisik oleh Petugas Gudang
                         </h4>
-                        <p className="text-[11px] text-slate-500">
-                          Periksa fisik obat, nomor batch, tanggal kadaluarsa, dan kemasan sebelum diserahkan ke Admin.
-                        </p>
+                        
                       </div>
                     </div>
                     {ret?.warehouse_verified_at && (
@@ -491,6 +582,7 @@ export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> =
                                 </td>
                                 <td className="p-2">
                                   <select
+                                    disabled={!canEditStep2}
                                     value={conf.condition}
                                     onChange={(e) =>
                                       setItemConfirmations((prev) => ({
@@ -498,7 +590,7 @@ export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> =
                                         [it.id]: { ...conf, condition: e.target.value },
                                       }))
                                     }
-                                    className="h-6 px-2 border border-slate-300 rounded text-[11px] bg-white font-medium"
+                                    className="h-6 px-2 border border-slate-300 rounded text-[11px] bg-white font-medium disabled:bg-slate-100"
                                   >
                                     <option value="BAIK">Kondisi Baik / Utuh</option>
                                     <option value="RUSAK">Kemasan / Fisik Rusak</option>
@@ -519,44 +611,104 @@ export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> =
                       </label>
                       <textarea
                         rows={2}
+                        disabled={!canEditStep2}
                         value={warehouseNotes}
                         onChange={(e) => setWarehouseNotes(e.target.value)}
                         placeholder="Contoh: Seluruh fisik obat telah dicek, kemasan utuh, batch dan ED sesuai fisik."
-                        className="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 focus:outline-none"
+                        className="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 focus:outline-none disabled:bg-slate-100"
                       />
                     </div>
 
-                    <div className="flex justify-end pt-2">
-                      <button
-                        type="button"
-                        disabled={verifyMutation.isPending}
-                        onClick={() => verifyMutation.mutate()}
-                        className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg flex items-center gap-1.5 shadow-2xs"
-                      >
-                        <UserCheck className="w-4 h-4" />
-                        <span>{verifyMutation.isPending ? "Menyimpan..." : "Simpan Hasil Verifikasi Gudang"}</span>
-                      </button>
-                    </div>
+                    {currentStep === 2 && (
+                      <div className="flex justify-end pt-2">
+                        <button
+                          type="button"
+                          disabled={!canEditStep2 || verifyMutation.isPending}
+                          onClick={() => verifyMutation.mutate()}
+                          className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-lg flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          <UserCheck className="w-4 h-4" />
+                          <span>{verifyMutation.isPending ? "Menyimpan..." : "Simpan Hasil Verifikasi Gudang"}</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
 
-              {/* STAGE 3: ADMIN APPROVAL */}
-              {currentStatus === "VERIFIKASI_GUDANG" && (
+              {/* TAHAP 3: ADMIN SETUJU (+ INPUT DOKUMEN PENGIRIMAN JIKA DIKIRIM) */}
+              {viewedStep === 3 && (
                 <div className="bg-white p-4 rounded-xl border border-blue-200 shadow-2xs space-y-3">
-                  <div className="flex items-center gap-2 border-b border-blue-100 pb-2">
-                    <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
-                      <FileCheck2 className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-sm text-slate-900">
-                        Tahap 3: Persetujuan / Penolakan oleh Admin / Apoteker
-                      </h4>
-                      <p className="text-[11px] text-slate-500">
-                        Admin memeriksa hasil verifikasi fisik gudang dan menyetujui barang untuk dikirim ke PBF.
-                      </p>
+                  <div className="flex items-center justify-between border-b border-blue-100 pb-2">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                        <FileCheck2 className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-sm text-slate-900">
+                          Tahap 3: Persetujuan Admin {deliveryMethod === "DIKIRIM" ? "& Input Dokumen Pengiriman" : ""}
+                        </h4>
+                        <p className="text-[11px] text-slate-500">
+                          Metode Retur:{" "}
+                          <strong className="text-slate-800">
+                            {deliveryMethod === "DIKIRIM"
+                              ? "Dikirim ke Supplier (Wajib input dokumen pengiriman)"
+                              : "Diambil oleh Supplier (Setelah Admin setuju langsung Selesai)"}
+                          </strong>
+                        </p>
+                      </div>
                     </div>
                   </div>
+
+                  {deliveryMethod === "DIKIRIM" && (
+                    <div className="p-3 bg-indigo-50/60 border border-indigo-200 rounded-lg space-y-2.5">
+                      <div className="flex items-center gap-1.5 text-indigo-900 font-bold text-xs">
+                        <Truck className="w-4 h-4 text-indigo-600" />
+                        <span>Dokumen Pengiriman Barang Retur ke Supplier / PBF :</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                            Kurir / Ekspedisi :
+                          </label>
+                          <input
+                            type="text"
+                            disabled={!canEditStep3}
+                            value={shippingCourier}
+                            onChange={(e) => setShippingCourier(e.target.value)}
+                            placeholder="Contoh: Kurir Distributor PBF / JNE"
+                            className="w-full h-7 px-2 border border-slate-300 rounded text-xs bg-white disabled:bg-slate-100"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                            No. Resi / Surat Jalan Pengiriman * :
+                          </label>
+                          <input
+                            type="text"
+                            disabled={!canEditStep3}
+                            value={shippingTrackingNo}
+                            onChange={(e) => setShippingTrackingNo(e.target.value)}
+                            placeholder="Contoh: SJ-RET-2026-001"
+                            className="w-full h-7 px-2 border border-slate-300 rounded text-xs font-mono bg-white disabled:bg-slate-100"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                          Catatan Pengiriman :
+                        </label>
+                        <input
+                          type="text"
+                          disabled={!canEditStep3}
+                          value={shippingNotes}
+                          onChange={(e) => setShippingNotes(e.target.value)}
+                          placeholder="Catatan tambahan pengiriman ke PBF..."
+                          className="w-full h-7 px-2 border border-slate-300 rounded text-xs bg-white disabled:bg-slate-100"
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   <div>
                     <label className="block text-[11px] font-semibold text-slate-700 mb-1">
@@ -564,10 +716,11 @@ export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> =
                     </label>
                     <textarea
                       rows={2}
+                      disabled={!canEditStep3}
                       value={adminNotes}
                       onChange={(e) => setAdminNotes(e.target.value)}
-                      placeholder="Contoh: Disetujui untuk dikirim kembali ke supplier PBF."
-                      className="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                      placeholder="Contoh: Disetujui oleh Admin/Apoteker."
+                      className="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-1 focus:ring-blue-500 focus:outline-none disabled:bg-slate-100"
                     />
                   </div>
 
@@ -576,40 +729,48 @@ export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> =
                     <div className="flex items-center justify-between border-b border-slate-200 pb-1">
                       <strong className="text-[11px] text-slate-800 font-bold flex items-center gap-1.5">
                         <Paperclip className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Upload Dokumen Pendukung Persetujuan Admin / Apoteker :</span>
+                        <span>Dokumen Pendukung Retur :</span>
                       </strong>
-                      <span className="text-[10px] text-slate-500">Scan form retur, disposisi apoteker, dll</span>
                     </div>
                     <PbfDocumentUpload
                       entityType="purchase_return"
                       entityId={ret?.id || ""}
-                      title={`Dokumen Persetujuan Retur (${ret?.return_no || "Retur"})`}
-                      subtitle="Upload scan dokumen persetujuan admin atau form permohonan retur ke PBF"
+                      title={`Dokumen Retur (${ret?.return_no || "Retur"})`}
+                      subtitle="Upload scan surat jalan / dokumen persetujuan retur"
                     />
                   </div>
 
-                  <div className="flex items-center justify-between pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowRejectForm(!showRejectForm)}
-                      className="px-3 py-1.5 text-rose-600 hover:bg-rose-50 border border-rose-300 rounded-lg font-bold flex items-center gap-1"
-                    >
-                      <Ban className="w-4 h-4" />
-                      <span>Tolak Retur</span>
-                    </button>
+                  {!isSelesai && (
+                    <div className="flex items-center justify-between pt-2">
+                      <button
+                        type="button"
+                        disabled={!canEditStep3}
+                        onClick={() => setShowRejectForm(!showRejectForm)}
+                        className="px-3 py-1.5 text-rose-600 hover:bg-rose-50 border border-rose-300 rounded-lg font-bold flex items-center gap-1 disabled:opacity-40 cursor-pointer"
+                      >
+                        <Ban className="w-4 h-4" />
+                        <span>Tolak Retur</span>
+                      </button>
 
-                    <button
-                      type="button"
-                      disabled={approveMutation.isPending}
-                      onClick={() => approveMutation.mutate()}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg flex items-center gap-1.5 shadow-2xs"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>{approveMutation.isPending ? "Memproses..." : "Setujui Retur (Admin)"}</span>
-                    </button>
-                  </div>
+                      <button
+                        type="button"
+                        disabled={!canEditStep3 || approveMutation.isPending}
+                        onClick={() => approveMutation.mutate()}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold rounded-lg flex items-center gap-1.5 shadow-2xs cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>
+                          {approveMutation.isPending
+                            ? "Memproses..."
+                            : deliveryMethod === "DIKIRIM"
+                            ? "Setujui & Simpan Pengiriman (Selesai)"
+                            : "Setujui Retur (Langsung Selesai)"}
+                        </span>
+                      </button>
+                    </div>
+                  )}
 
-                  {showRejectForm && (
+                  {showRejectForm && !isSelesai && (
                     <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg space-y-2 mt-2">
                       <label className="block text-[11px] font-bold text-rose-800">
                         Alasan Penolakan Retur (Wajib Diisi):
@@ -643,448 +804,34 @@ export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> =
                 </div>
               )}
 
-              {/* STAGE 4: SHIPPING TO PBF (STOCK DEDUCTION TRIGGER) */}
-              {currentStatus === "DISETUJUI_ADMIN" && (
-                <div className="bg-white p-4 rounded-xl border border-indigo-200 shadow-2xs space-y-3">
-                  <div className="flex items-center gap-2 border-b border-indigo-100 pb-2">
-                    <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
-                      <Truck className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-sm text-slate-900">
-                        Tahap 4: Pengiriman Barang Kembali ke PBF / Distributor
-                      </h4>
-                      <p className="text-[11px] text-slate-500">
-                        Input data ekspedisi / kurir. Saat tombol diklik, stok fisik otomatis dikeluarkan dari apotek.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Stock Notice Alert */}
-                  <div className="p-2.5 bg-indigo-50 border border-indigo-200 rounded-lg flex items-start gap-2 text-indigo-900 text-xs">
-                    <AlertTriangle className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
-                    <div>
-                      <strong className="block font-bold">Perhatian Integrasi Stok Apotek:</strong>
-                      <span>
-                        Mengonfirmasi pengiriman akan <strong>memotong stok tersedia</strong> untuk batch obat ini di sistem.
-                        Stok yang diretur tidak akan dapat dijual kembali kepada pelanggan apotek.
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
-                        Kurir / Ekspedisi / Armada Pengiriman :
-                      </label>
-                      <input
-                        type="text"
-                        value={shippingCourier}
-                        onChange={(e) => setShippingCourier(e.target.value)}
-                        placeholder="Contoh: Driver PBF / JNE / Kurir Internal"
-                        className="w-full h-7 px-2 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
-                        No. Surat Jalan Pengiriman / Resi :
-                      </label>
-                      <input
-                        type="text"
-                        value={shippingTrackingNo}
-                        onChange={(e) => setShippingTrackingNo(e.target.value)}
-                        placeholder="Contoh: SJ-RET-2026/001"
-                        className="w-full h-7 px-2 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
-                      Catatan Pengiriman :
-                    </label>
-                    <textarea
-                      rows={2}
-                      value={shippingNotes}
-                      onChange={(e) => setShippingNotes(e.target.value)}
-                      placeholder="Catatan penyerahan paket obat..."
-                      className="w-full p-2 border border-slate-300 rounded-lg text-xs focus:ring-1 focus:ring-indigo-500 focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="flex justify-end pt-2">
-                    <button
-                      type="button"
-                      disabled={shipMutation.isPending}
-                      onClick={() => shipMutation.mutate()}
-                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg flex items-center gap-1.5 shadow-2xs"
-                    >
-                      <Send className="w-4 h-4" />
-                      <span>{shipMutation.isPending ? "Memproses Pemotongan Stok..." : "Kirim Barang ke PBF (Potong Stok)"}</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* STAGE 5: PBF CONFIRMATION */}
-              {currentStatus === "DALAM_PENGIRIMAN" && (
-                <div className="bg-white p-4 rounded-xl border border-sky-200 shadow-2xs space-y-3">
-                  <div className="flex items-center gap-2 border-b border-sky-100 pb-2">
-                    <div className="w-8 h-8 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center font-bold">
-                      <Building2 className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-sm text-slate-900">
-                        Tahap 5: Konfirmasi Penerimaan & Nota Retur dari PBF
-                      </h4>
-                      <p className="text-[11px] text-slate-500">
-                        Catat jumlah barang yang disetujui (diterima) oleh distributor dan jumlah yang ditolak (jika ada).
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
-                        No. Dokumen Nota Retur / Nota Kredit PBF :
-                      </label>
-                      <input
-                        type="text"
-                        value={pbfReturnDocNo}
-                        onChange={(e) => setPbfReturnDocNo(e.target.value)}
-                        placeholder="Contoh: NR-PBF-98213 / CN-2026-0045"
-                        className="w-full h-7 px-2 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-sky-500 focus:outline-none font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">
-                        Catatan Distributor PBF :
-                      </label>
-                      <input
-                        type="text"
-                        value={pbfNotes}
-                        onChange={(e) => setPbfNotes(e.target.value)}
-                        placeholder="Contoh: Retur diterima lengkap sesuai nota kredit"
-                        className="w-full h-7 px-2 border border-slate-300 rounded text-xs focus:ring-1 focus:ring-sky-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Upload Berkas Nota Retur / Tanda Terima PBF */}
-                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1.5">
-                    <div className="flex items-center justify-between border-b border-slate-200 pb-1">
-                      <strong className="text-[11px] text-slate-800 font-bold flex items-center gap-1.5">
-                        <Paperclip className="w-3.5 h-3.5 text-sky-600" />
-                        <span>Upload Berkas Nota Retur / Tanda Terima PBF :</span>
-                      </strong>
-                      <span className="text-[10px] text-slate-500">Scan Nota Retur resmi, surat penerimaan kurir, atau Nota Kredit</span>
-                    </div>
-                    <PbfDocumentUpload
-                      entityType="purchase_return"
-                      entityId={ret?.id || ""}
-                      title={`Berkas Konfirmasi Distributor PBF (${ret?.return_no || "Retur"})`}
-                      subtitle="Upload scan Nota Retur resmi distributor, bukti tanda terima kurir PBF, atau Nota Kredit (Credit Note)"
-                    />
-                  </div>
-
-                  <div className="overflow-x-auto border border-slate-200 rounded-lg">
-                    <table className="w-full text-left border-collapse text-[11px]">
-                      <thead className="bg-slate-100 font-semibold text-slate-700">
-                        <tr>
-                          <th className="p-2 border-r border-slate-200">Produk</th>
-                          <th className="p-2 border-r border-slate-200 text-right">Qty Dikirim</th>
-                          <th className="p-2 border-r border-slate-200 text-right">Qty Diterima PBF</th>
-                          <th className="p-2 text-right">Qty Ditolak PBF</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {ret?.items?.map((it: any) => {
-                          const conf = itemConfirmations[it.id] || { accepted_qty: it.qty, rejected_qty: 0 };
-                          return (
-                            <tr key={it.id}>
-                              <td className="p-2 font-medium text-slate-800 border-r border-slate-100">
-                                {it.product?.name}
-                              </td>
-                              <td className="p-2 text-right font-mono text-slate-600 border-r border-slate-100">
-                                {it.qty} {it.unit?.name || "PCS"}
-                              </td>
-                              <td className="p-2 text-right border-r border-slate-100">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={it.qty}
-                                  value={conf.accepted_qty}
-                                  onChange={(e) => {
-                                    const acc = Math.min(it.qty, Math.max(0, Number(e.target.value) || 0));
-                                    const rej = Math.max(0, it.qty - acc);
-                                    setItemConfirmations((prev) => ({
-                                      ...prev,
-                                      [it.id]: { ...conf, accepted_qty: acc, rejected_qty: rej },
-                                    }));
-                                  }}
-                                  className="w-20 h-6 px-1.5 border border-slate-300 rounded text-right font-bold text-emerald-700 bg-white"
-                                />
-                              </td>
-                              <td className="p-2 text-right">
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={it.qty}
-                                  value={conf.rejected_qty}
-                                  onChange={(e) => {
-                                    const rej = Math.min(it.qty, Math.max(0, Number(e.target.value) || 0));
-                                    const acc = Math.max(0, it.qty - rej);
-                                    setItemConfirmations((prev) => ({
-                                      ...prev,
-                                      [it.id]: { ...conf, accepted_qty: acc, rejected_qty: rej },
-                                    }));
-                                  }}
-                                  className="w-20 h-6 px-1.5 border border-slate-300 rounded text-right font-bold text-rose-700 bg-white"
-                                />
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="flex justify-end pt-2">
-                    <button
-                      type="button"
-                      disabled={pbfConfirmMutation.isPending}
-                      onClick={() => pbfConfirmMutation.mutate()}
-                      className="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white font-bold rounded-lg flex items-center gap-1.5 shadow-2xs"
-                    >
-                      <PackageCheck className="w-4 h-4" />
-                      <span>{pbfConfirmMutation.isPending ? "Menyimpan..." : "Simpan Konfirmasi PBF"}</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* STAGE 6: FINALIZATION & FINANCIAL INTEGRATION */}
-              {currentStatus === "MENUNGGU_KONFIRMASI_PBF" && (
-                <div className="bg-white p-4 rounded-xl border border-emerald-300 shadow-sm space-y-3">
-                  <div className="flex items-center gap-2 border-b border-emerald-100 pb-2">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
-                      <DollarSign className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-sm text-slate-900">
-                        Tahap 6: Finalisasi Retur, Penyesuaian Hutang & Jurnal Otomatis
-                      </h4>
-                      <p className="text-[11px] text-slate-500">
-                        Selesaikan transaksi berdasarkan nilai retur yang disetujui distributor.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Summary of Accepted / Rejected Values */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 bg-emerald-50/50 border border-emerald-200 rounded-lg">
-                    <div>
-                      <span className="text-[11px] text-slate-500 font-medium">Nilai Disetujui PBF :</span>
-                      <p className="text-base font-extrabold text-emerald-700 font-mono">
-                        {formatCurrency(ret?.accepted_total_amount || ret?.total_amount || 0)}
-                      </p>
-                      <span className="text-[10px] text-slate-400">
-                        (Akan memotong hutang atau dikembalikan ke kas/kredit)
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-[11px] text-slate-500 font-medium">Nilai Ditolak PBF :</span>
-                      <p className="text-base font-extrabold text-rose-700 font-mono">
-                        {formatCurrency(ret?.rejected_total_amount || 0)}
-                      </p>
-                      <span className="text-[10px] text-slate-400">
-                        (Barang yang ditolak otomatis dipulihkan kembali ke stok apotek)
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Settlement Type Selector */}
-                  <div className="space-y-2">
-                    <label className="block text-[11px] font-bold text-slate-700">
-                      Pilih Mekanisme Penyelesaian Keuangan :
-                    </label>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      <label
-                        className={`p-2.5 rounded-lg border cursor-pointer flex flex-col gap-1 transition ${
-                          settlementType === "POTONG_HUTANG"
-                            ? "border-emerald-600 bg-emerald-50/60 ring-2 ring-emerald-500/30"
-                            : "border-slate-200 bg-white hover:bg-slate-50"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <input
-                            type="radio"
-                            name="settlement"
-                            value="POTONG_HUTANG"
-                            checked={settlementType === "POTONG_HUTANG"}
-                            onChange={() => setSettlementType("POTONG_HUTANG")}
-                            className="text-emerald-600 focus:ring-emerald-500"
-                          />
-                          <Wallet className="w-4 h-4 text-emerald-600" />
-                        </div>
-                        <strong className="text-xs text-slate-800">Potong Hutang Faktur</strong>
-                        <span className="text-[10px] text-slate-500">
-                          Mengurangi sisa hutang pada faktur pembelian asal (bila tempo).
-                        </span>
-                      </label>
-
-                      <label
-                        className={`p-2.5 rounded-lg border cursor-pointer flex flex-col gap-1 transition ${
-                          settlementType === "KREDIT_SUPPLIER"
-                            ? "border-emerald-600 bg-emerald-50/60 ring-2 ring-emerald-500/30"
-                            : "border-slate-200 bg-white hover:bg-slate-50"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <input
-                            type="radio"
-                            name="settlement"
-                            value="KREDIT_SUPPLIER"
-                            checked={settlementType === "KREDIT_SUPPLIER"}
-                            onChange={() => setSettlementType("KREDIT_SUPPLIER")}
-                            className="text-emerald-600 focus:ring-emerald-500"
-                          />
-                          <Building2 className="w-4 h-4 text-blue-600" />
-                        </div>
-                        <strong className="text-xs text-slate-800">Kredit Supplier (Deposit)</strong>
-                        <span className="text-[10px] text-slate-500">
-                          Disimpan sebagai saldo kredit apotek pada supplier untuk order berikutnya.
-                        </span>
-                      </label>
-
-                      <label
-                        className={`p-2.5 rounded-lg border cursor-pointer flex flex-col gap-1 transition ${
-                          settlementType === "KAS_PENGEMBALIAN"
-                            ? "border-emerald-600 bg-emerald-50/60 ring-2 ring-emerald-500/30"
-                            : "border-slate-200 bg-white hover:bg-slate-50"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <input
-                            type="radio"
-                            name="settlement"
-                            value="KAS_PENGEMBALIAN"
-                            checked={settlementType === "KAS_PENGEMBALIAN"}
-                            onChange={() => setSettlementType("KAS_PENGEMBALIAN")}
-                            className="text-emerald-600 focus:ring-emerald-500"
-                          />
-                          <DollarSign className="w-4 h-4 text-amber-600" />
-                        </div>
-                        <strong className="text-xs text-slate-800">Refund Kas / Bank</strong>
-                        <span className="text-[10px] text-slate-500">
-                          Supplier mengembalikan uang tunai / transfer ke rekening apotek.
-                        </span>
-                      </label>
-                    </div>
-
-                    {/* Cash Account Selector if KAS_PENGEMBALIAN */}
-                    {settlementType === "KAS_PENGEMBALIAN" && (
-                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-1">
-                        <label className="block text-[11px] font-bold text-amber-900">
-                          Pilih Akun Kas / Bank Tujuan Penampung Refund :
-                        </label>
-                        <SearchableAccountSelect
-                          accounts={cashAccounts}
-                          value={cashAccountId}
-                          onChange={(val) => setCashAccountId(val)}
-                          placeholder="-- Pilih Akun Kas / Bank --"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Accounting Journal Preview */}
-                  <div className="p-2.5 bg-slate-100 rounded-lg text-slate-600 text-[10.5px] space-y-1">
-                    <strong className="block text-slate-800 font-bold">
-                      Pratinjau Jurnal Otomatis yang Terbentuk:
-                    </strong>
-                    <div className="font-mono text-[10px] space-y-0.5">
-                      {settlementType === "POTONG_HUTANG" && (
-                        <>
-                          <div className="text-slate-800">
-                            [Debit] 2-1100 Hutang Usaha : {formatCurrency(ret?.accepted_total_amount || ret?.total_amount || 0)}
-                          </div>
-                          <div className="text-slate-600 pl-4">
-                            [Kredit] 1-1300 Persediaan Obat & Barang Dagang
-                          </div>
-                          {ret?.tax_amount > 0 && (
-                            <div className="text-slate-600 pl-4">[Kredit] 1-1410 PPN Masukan</div>
-                          )}
-                        </>
-                      )}
-                      {settlementType === "KREDIT_SUPPLIER" && (
-                        <>
-                          <div className="text-slate-800">
-                            [Debit] 1-1200 Piutang / Saldo Kredit Supplier : {formatCurrency(ret?.accepted_total_amount || ret?.total_amount || 0)}
-                          </div>
-                          <div className="text-slate-600 pl-4">
-                            [Kredit] 1-1300 Persediaan Obat & Barang Dagang
-                          </div>
-                          {ret?.tax_amount > 0 && (
-                            <div className="text-slate-600 pl-4">[Kredit] 1-1410 PPN Masukan</div>
-                          )}
-                        </>
-                      )}
-                      {settlementType === "KAS_PENGEMBALIAN" && (
-                        <>
-                          <div className="text-slate-800">
-                            [Debit] Kas / Bank Masuk : {formatCurrency(ret?.accepted_total_amount || ret?.total_amount || 0)}
-                          </div>
-                          <div className="text-slate-600 pl-4">
-                            [Kredit] 1-1300 Persediaan Obat & Barang Dagang
-                          </div>
-                          {ret?.tax_amount > 0 && (
-                            <div className="text-slate-600 pl-4">[Kredit] 1-1410 PPN Masukan</div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end pt-2">
-                    <button
-                      type="button"
-                      disabled={finalizeMutation.isPending}
-                      onClick={() => finalizeMutation.mutate()}
-                      className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl flex items-center gap-2 shadow-md transition active:scale-95"
-                    >
-                      <CheckCircle2 className="w-5 h-5" />
-                      <span>{finalizeMutation.isPending ? "Memproses Finalisasi..." : "Finalisasi Retur Pembelian (SELESAI)"}</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* FINISHED STATE BANNER */}
-              {(currentStatus === "SELESAI" || currentStatus === "POSTED") && (
+              {/* TAHAP 4: SELESAI */}
+              {viewedStep === 4 && isSelesai && (
                 <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl space-y-3">
                   <div className="flex items-center gap-2 text-emerald-800">
                     <CheckCircle2 className="w-5 h-5 text-emerald-600" />
                     <h4 className="font-extrabold text-sm">
-                      Retur Pembelian Ini Telah Selesai Difinalisasi
+                      Retur Pembelian Selesai
                     </h4>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                     <div className="bg-white p-3 rounded-lg border border-emerald-100">
-                      <span className="text-slate-500 text-[10px]">Potongan Hutang Faktur</span>
-                      <p className="font-bold text-slate-800 font-mono">
-                        {formatCurrency(ret?.debt_deduction_amount || 0)}
+                      <span className="text-slate-500 text-[10px]">Metode Pengembalian</span>
+                      <p className="font-bold text-slate-800">
+                        {deliveryMethod === "DIKIRIM" ? "Dikirim ke Supplier" : "Diambil oleh Supplier"}
                       </p>
                     </div>
+                    {deliveryMethod === "DIKIRIM" && (
+                      <div className="bg-white p-3 rounded-lg border border-emerald-100">
+                        <span className="text-slate-500 text-[10px]">Kurir &amp; No. Resi / SJ</span>
+                        <p className="font-bold text-slate-800 font-mono">
+                          {ret?.shipping_courier || "-"} • {ret?.shipping_tracking_no || "-"}
+                        </p>
+                      </div>
+                    )}
                     <div className="bg-white p-3 rounded-lg border border-emerald-100">
-                      <span className="text-slate-500 text-[10px]">Saldo Kredit Supplier</span>
-                      <p className="font-bold text-slate-800 font-mono">
-                        {formatCurrency(ret?.credit_balance_amount || 0)}
-                      </p>
-                    </div>
-                    <div className="bg-white p-3 rounded-lg border border-emerald-100">
-                      <span className="text-slate-500 text-[10px]">Pengembalian Kas/Bank</span>
-                      <p className="font-bold text-slate-800 font-mono">
-                        {formatCurrency(ret?.refund_amount || 0)}
+                      <span className="text-slate-500 text-[10px]">Total Nilai Retur</span>
+                      <p className="font-bold text-emerald-700 font-mono">
+                        {formatCurrency(ret?.total_amount || 0)}
                       </p>
                     </div>
                   </div>
@@ -1099,7 +846,7 @@ export const AlurVerifikasiReturModal: React.FC<AlurVerifikasiReturModalProps> =
                   entityType="purchase_return"
                   entityId={ret?.id || ""}
                   title={`Lampiran Berkas & Dokumen Retur: ${ret?.return_no || "Retur"}`}
-                  subtitle="Kelola dan lihat seluruh scan berkas fisik retur: Nota Retur PBF, Surat Jalan Pengiriman, Bukti Tanda Terima & Nota Kredit"
+                  subtitle=""
                 />
               </div>
 

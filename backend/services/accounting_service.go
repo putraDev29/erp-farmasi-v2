@@ -33,15 +33,37 @@ type JournalPostParams struct {
 
 // PostDoubleEntryJournal creates a balanced journal and updates COA balances
 func PostDoubleEntryJournal(tx *gorm.DB, params JournalPostParams) (*models.Journal, error) {
-	if len(params.Entries) < 2 {
-		return nil, errors.New("jurnal minimal harus memiliki 2 baris entri (debit & kredit)")
+	// Filter out non-contributing entries (0 debit and 0 credit) and validate amounts
+	var validEntries []JournalEntryParam
+	var totalDebit, totalCredit float64
+
+	for idx, e := range params.Entries {
+		if math.IsNaN(e.Debit) || math.IsNaN(e.Credit) || math.IsInf(e.Debit, 0) || math.IsInf(e.Credit, 0) {
+			return nil, fmt.Errorf("entri jurnal baris %d (%s) bernilai NaN atau Inf yang tidak valid", idx+1, e.AccountCode)
+		}
+		if e.Debit < -0.0001 || e.Credit < -0.0001 {
+			return nil, fmt.Errorf("entri jurnal baris %d (%s) tidak valid: Nilai debit (%.2f) dan kredit (%.2f) tidak boleh negatif/minus", idx+1, e.AccountCode, e.Debit, e.Credit)
+		}
+
+		// Clean floating point epsilon
+		d := math.Round(math.Max(0, e.Debit)*100) / 100
+		c := math.Round(math.Max(0, e.Credit)*100) / 100
+
+		if d > 0 || c > 0 {
+			e.Debit = d
+			e.Credit = c
+			validEntries = append(validEntries, e)
+			totalDebit += d
+			totalCredit += c
+		}
 	}
 
-	var totalDebit, totalCredit float64
-	for _, e := range params.Entries {
-		totalDebit += e.Debit
-		totalCredit += e.Credit
+	if len(validEntries) < 2 {
+		return nil, errors.New("jurnal minimal harus memiliki 2 baris entri valid (debit & kredit)")
 	}
+
+	totalDebit = math.Round(totalDebit*100) / 100
+	totalCredit = math.Round(totalCredit*100) / 100
 
 	// Validate balanced journal: math.Abs(totalDebit - totalCredit) < 0.01
 	if math.Abs(totalDebit-totalCredit) > 0.01 {
@@ -75,7 +97,7 @@ func PostDoubleEntryJournal(tx *gorm.DB, params JournalPostParams) (*models.Jour
 		return nil, err
 	}
 
-	for _, entry := range params.Entries {
+	for _, entry := range validEntries {
 		var account models.Account
 		err := tx.Where("company_id = ? AND code = ?", params.CompanyID, entry.AccountCode).First(&account).Error
 		if err != nil {

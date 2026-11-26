@@ -23,7 +23,7 @@ export default function SalesReportPage() {
       <div className="shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-1">
         <div>
           <h1 className="text-sm font-bold text-slate-800">Laporan Penjualan & Kasir Apotek</h1>
-          <p className="text-[11px] text-slate-500">Rekapitulasi omset, pelunasan kasir, dan piutang penjualan.</p>
+          
         </div>
 
         {/* Excel Export Button */}

@@ -597,7 +597,7 @@ export default function SalesOrdersPage() {
         <table className="w-full text-[11px] text-left border-collapse whitespace-nowrap">
           <thead className="bg-slate-50 text-slate-700 font-bold border-b border-slate-200 h-6 sticky top-0 z-10 shadow-2xs">
             <tr>
-              <th className="py-0.5 px-2 border-r border-slate-200 text-center w-24">Aksi</th>
+              <th className="py-0.5 px-2 border-r border-slate-200 text-center w-14">Aksi</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">No Transaksi</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">Tanggal</th>
               <th className="py-0.5 px-2.5 border-r border-slate-200">Tanggal Kirim</th>
@@ -679,33 +679,6 @@ export default function SalesOrdersPage() {
                             <span>Setujui</span>
                           </button>
                         )}
-
-                        {(so.status === "APPROVED" || so.status === "DIPROSES") && (
-                          <span
-                            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-300 inline-flex items-center gap-1"
-                            title="Pesanan telah disetujui Admin dan masuk ke Menu Penjualan untuk proses pengiriman"
-                          >
-                            ✓ Masuk Penjualan
-                          </span>
-                        )}
-
-                        {so.status === "DIKIRIM" && (
-                          <span
-                            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-300 inline-flex items-center gap-1"
-                            title="Surat Jalan sudah dibuat, barang dalam pengiriman"
-                          >
-                            🚚 Dikirim
-                          </span>
-                        )}
-
-                        {so.status === "SELESAI" && (
-                          <span
-                            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-1"
-                            title="Barang telah diterima dan alur pesanan selesai"
-                          >
-                            ✓ Selesai
-                          </span>
-                        )}
                       </div>
                     </td>
 
@@ -771,14 +744,14 @@ export default function SalesOrdersPage() {
                             ? "bg-teal-100 text-teal-800 border border-teal-300"
                             : so.status === "DIKIRIM"
                             ? "bg-indigo-100 text-indigo-800 border border-indigo-300"
-                            : so.status === "DIPROSES"
-                            ? "bg-sky-100 text-sky-800 border border-sky-300"
+                            : so.status === "APPROVED" || so.status === "DIPROSES"
+                            ? "bg-blue-100 text-blue-800 border border-blue-300"
                             : so.status === "BATAL"
                             ? "bg-red-100 text-red-800 border border-red-300"
                             : "bg-amber-100 text-amber-800 border border-amber-300"
                         }`}
                       >
-                        {so.status || "PENDING"}
+                        {so.status === "APPROVED" ? "MASUK PENJUALAN" : (so.status || "PENDING")}
                       </span>
                     </td>
 

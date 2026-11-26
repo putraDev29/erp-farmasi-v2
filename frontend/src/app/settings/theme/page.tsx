@@ -94,7 +94,7 @@ export default function ThemePage() {
           {/* Header Title & Subtitle */}
           <div>
             <h2 className="text-base font-bold text-slate-900">Pengaturan Tema Website</h2>
-            <p className="text-slate-500 text-xs mt-0.5">Ubah tampilan tema website Anda</p>
+            
           </div>
 
           {/* Section 1: WARNA SIDEBAR */}

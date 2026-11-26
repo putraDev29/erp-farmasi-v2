@@ -24,12 +24,12 @@ export default function RootLayout({
   );
 
   return (
-    <html lang="id">
+    <html lang="id" suppressHydrationWarning>
       <head>
         <title>ERP Farmasi & POS Ketoko 2.0</title>
         <meta name="description" content="Sistem Terpadu ERP, POS, Inventori & Akuntansi Farmasi" />
       </head>
-      <body>
+      <body suppressHydrationWarning>
         <QueryClientProvider client={queryClient}>
           <AppLayout>{children}</AppLayout>
         </QueryClientProvider>

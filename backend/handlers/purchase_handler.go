@@ -163,6 +163,68 @@ func (h *PurchaseHandler) GetPurchaseOrder(c *gin.Context) {
 	utils.SendSuccess(c, "Detail pesanan pembelian", po)
 }
 
+func updateProductMasterCost(tx *gorm.DB, productID uuid.UUID, unitID uuid.UUID, unitPrice float64) {
+	if unitPrice <= 0 || productID == uuid.Nil {
+		return
+	}
+	var prod models.Product
+	if err := tx.Where("id = ?", productID).First(&prod).Error; err != nil {
+		return
+	}
+	unitCost := unitPrice
+	if prod.BaseUnitID != nil && unitID != uuid.Nil && unitID != *prod.BaseUnitID {
+		var conv models.UnitConversion
+		if errConv := tx.Where("product_id = ? AND from_unit_id = ? AND to_unit_id = ?", prod.ID, unitID, *prod.BaseUnitID).First(&conv).Error; errConv == nil && conv.Multiplier > 0 {
+			unitCost = unitPrice / conv.Multiplier
+		}
+	}
+	prod.PurchasePrice = unitCost
+	if !prod.LockPriceOnSale && prod.MarkupPercent != 0 {
+		prod.SellingPrice = math.Round(unitCost*(1.0+prod.MarkupPercent/100.0)*100) / 100
+	}
+	tx.Save(&prod)
+
+	// Update multi-unit conversion costs and prices keeping each unit's proc% fixed
+	var conversions []models.UnitConversion
+	if err := tx.Where("product_id = ?", prod.ID).Find(&conversions).Error; err == nil {
+		for _, conv := range conversions {
+			if conv.Multiplier > 0 {
+				conv.PurchasePrice = math.Round(unitCost*conv.Multiplier*100) / 100
+				if !prod.LockPriceOnSale && conv.MarkupPercent != 0 {
+					conv.SellingPrice = math.Round(conv.PurchasePrice*(1.0+conv.MarkupPercent/100.0)*100) / 100
+				}
+				tx.Save(&conv)
+			}
+		}
+	}
+
+	// Update product_prices keeping each tier's proc% fixed
+	if !prod.LockPriceOnSale {
+		var prices []models.ProductPrice
+		if err := tx.Where("product_id = ?", prod.ID).Find(&prices).Error; err == nil {
+			convMap := make(map[uuid.UUID]float64)
+			for _, conv := range conversions {
+				if conv.Multiplier > 0 {
+					convMap[conv.FromUnitID] = conv.Multiplier
+				}
+			}
+			for _, pp := range prices {
+				if pp.MarkupPercent != 0 {
+					mult := 1.0
+					if prod.BaseUnitID != nil && pp.UnitID != *prod.BaseUnitID {
+						if m, ok := convMap[pp.UnitID]; ok && m > 0 {
+							mult = m
+						}
+					}
+					costForUnit := unitCost * mult
+					pp.Price = math.Round(costForUnit*(1.0+pp.MarkupPercent/100.0)*100) / 100
+					tx.Save(&pp)
+				}
+			}
+		}
+	}
+}
+
 func (h *PurchaseHandler) CreatePurchaseOrder(c *gin.Context) {
 	companyID := c.MustGet("company_id").(uuid.UUID)
 	branchID := c.MustGet("branch_id").(uuid.UUID)
@@ -172,8 +234,9 @@ func (h *PurchaseHandler) CreatePurchaseOrder(c *gin.Context) {
 		ID           *uuid.UUID `json:"id"`
 		WarehouseID  *uuid.UUID `json:"warehouse_id"`
 		SupplierID   uuid.UUID  `json:"supplier_id" binding:"required"`
-		ExpectedDate *time.Time `json:"expected_date"`
-		Notes        string     `json:"notes"`
+		ExpectedDate   *time.Time `json:"expected_date"`
+		DeliveryMethod string     `json:"delivery_method"`
+		Notes          string     `json:"notes"`
 		TaxPercent   float64    `json:"tax_percent"`
 		Discount     float64    `json:"discount"`
 		ShippingFee  float64    `json:"shipping_fee"`
@@ -186,8 +249,9 @@ func (h *PurchaseHandler) CreatePurchaseOrder(c *gin.Context) {
 		RemainingAmount float64    `json:"remaining_amount"`
 		PaymentStatus   string     `json:"payment_status"`
 		CashAccountID   *uuid.UUID `json:"cash_account_id"`
-		PbfDocumentURL  string     `json:"pbf_document_url"`
-		ComputerName    string     `json:"computer_name"`
+		PbfDocumentURL   string     `json:"pbf_document_url"`
+		ComputerName     string     `json:"computer_name"`
+		UpdateMasterCost bool       `json:"update_master_cost"`
 		Items        []struct {
 			SupplierID *uuid.UUID `json:"supplier_id"`
 			ProductID uuid.UUID `json:"product_id" binding:"required"`
@@ -262,6 +326,11 @@ func (h *PurchaseHandler) CreatePurchaseOrder(c *gin.Context) {
 		apjSipaNo = "503/16/1151/SIPA/125270016/DPMPTSP/2025"
 	}
 
+	deliveryMethod := "DIKIRIM"
+	if strings.ToUpper(req.DeliveryMethod) == "DIAMBIL" {
+		deliveryMethod = "DIAMBIL"
+	}
+
 	po := models.PurchaseOrder{
 		CompanyID:        companyID,
 		BranchID:         branchID,
@@ -270,6 +339,7 @@ func (h *PurchaseHandler) CreatePurchaseOrder(c *gin.Context) {
 		OrderNo:          poNo,
 		Date:             time.Now(),
 		ExpectedDate:     req.ExpectedDate,
+		DeliveryMethod:   deliveryMethod,
 		Status:           "PENDING",
 		ProcessStatus:    "Belum Proses",
 		PaymentStatus:    paymentStatus,
@@ -335,6 +405,9 @@ func (h *PurchaseHandler) CreatePurchaseOrder(c *gin.Context) {
 			TotalAmount:     lineTotal,
 		}
 		tx.Create(&item)
+		if req.UpdateMasterCost {
+			updateProductMasterCost(tx, it.ProductID, unitID, it.UnitPrice)
+		}
 	}
 
 	if err := syncPurchaseOrderAccountingAndCash(tx, &po, companyID, branchID, userID, req.CashAccountID); err != nil {
@@ -359,11 +432,17 @@ func (h *PurchaseHandler) UpdatePurchaseOrder(c *gin.Context) {
 		return
 	}
 
+	if po.Status == "COMPLETED" || po.ProcessStatus == "Selesai" {
+		utils.SendError(c, http.StatusBadRequest, "Pesanan Pembelian sudah selesai. Transaksi yang sudah selesai tidak dapat diedit.", nil)
+		return
+	}
+
 	var req struct {
 		WarehouseID   *uuid.UUID `json:"warehouse_id"`
 		SupplierID    uuid.UUID  `json:"supplier_id"`
-		ExpectedDate  *time.Time `json:"expected_date"`
-		Notes         string     `json:"notes"`
+		ExpectedDate   *time.Time `json:"expected_date"`
+		DeliveryMethod string     `json:"delivery_method"`
+		Notes          string     `json:"notes"`
 		TaxPercent    float64    `json:"tax_percent"`
 		Discount      float64    `json:"discount"`
 		ShippingFee   float64    `json:"shipping_fee"`
@@ -378,8 +457,9 @@ func (h *PurchaseHandler) UpdatePurchaseOrder(c *gin.Context) {
 		RemainingAmount *float64   `json:"remaining_amount"`
 		PaymentStatus   string     `json:"payment_status"`
 		CashAccountID   *uuid.UUID `json:"cash_account_id"`
-		PbfDocumentURL  string     `json:"pbf_document_url"`
-		ComputerName    string     `json:"computer_name"`
+		PbfDocumentURL   string     `json:"pbf_document_url"`
+		ComputerName     string     `json:"computer_name"`
+		UpdateMasterCost bool       `json:"update_master_cost"`
 		Items         []struct {
 			ID          *uuid.UUID `json:"id"`
 			SupplierID  *uuid.UUID `json:"supplier_id"`
@@ -409,6 +489,9 @@ func (h *PurchaseHandler) UpdatePurchaseOrder(c *gin.Context) {
 	}
 	if req.ExpectedDate != nil {
 		po.ExpectedDate = req.ExpectedDate
+	}
+	if strings.ToUpper(req.DeliveryMethod) == "DIAMBIL" || strings.ToUpper(req.DeliveryMethod) == "DIKIRIM" {
+		po.DeliveryMethod = strings.ToUpper(req.DeliveryMethod)
 	}
 	if req.Notes != "" {
 		po.Notes = req.Notes
@@ -578,6 +661,9 @@ func (h *PurchaseHandler) UpdatePurchaseOrder(c *gin.Context) {
 				usedIDs[item.ID] = true
 			}
 			tx.Create(&item)
+			if req.UpdateMasterCost {
+				updateProductMasterCost(tx, it.ProductID, unitID, it.UnitPrice)
+			}
 		}
 		po.Subtotal = subtotal
 		po.TotalOrderedQty = totalQty
@@ -646,6 +732,11 @@ func (h *PurchaseHandler) DeletePurchaseOrder(c *gin.Context) {
 		return
 	}
 
+	if po.Status == "COMPLETED" || po.ProcessStatus == "Selesai" {
+		utils.SendError(c, http.StatusBadRequest, "Pesanan Pembelian sudah selesai. Transaksi yang sudah selesai tidak dapat dihapus.", nil)
+		return
+	}
+
 	tx := database.DB.Begin()
 	deleteExistingJournal(tx, companyID, "PURCHASE_ORDER", po.OrderNo)
 	var oldTrxs []models.CashTransaction
@@ -707,14 +798,18 @@ func (h *PurchaseHandler) GetPurchases(c *gin.Context) {
 
 	if isVerified := c.Query("is_verified"); isVerified != "" && isVerified != "all" {
 		if isVerified == "true" {
-			query = query.Where("(purchases.is_verified = true OR purchases.verification_status = 'APPROVED')")
+			query = query.Where("(purchases.is_verified = true OR purchases.verification_status IN ('APPROVED', 'SELESAI'))")
 		} else if isVerified == "false" {
-			query = query.Where("purchases.is_verified = false AND (purchases.verification_status IS NULL OR purchases.verification_status != 'APPROVED')")
+			query = query.Where("purchases.is_verified = false AND (purchases.verification_status IS NULL OR purchases.verification_status NOT IN ('APPROVED', 'SELESAI'))")
 		}
 	}
 
 	if verificationStatus := c.Query("verification_status"); verificationStatus != "" && verificationStatus != "all" {
-		query = query.Where("purchases.verification_status = ?", verificationStatus)
+		if verificationStatus == "APPROVED" || verificationStatus == "SELESAI" {
+			query = query.Where("purchases.verification_status IN ('APPROVED', 'SELESAI')")
+		} else {
+			query = query.Where("purchases.verification_status = ?", verificationStatus)
+		}
 	}
 
 	if status := c.Query("status"); status != "" && status != "all" {
@@ -781,6 +876,7 @@ func (h *PurchaseHandler) CreatePurchase(c *gin.Context) {
 		SupplierID      uuid.UUID  `json:"supplier_id" binding:"required"`
 		PurchaseOrderID *uuid.UUID `json:"purchase_order_id"`
 		DueDate         time.Time  `json:"due_date"`
+		DeliveryMethod  string     `json:"delivery_method"`
 		Notes           string     `json:"notes"`
 		TaxPercent      float64    `json:"tax_percent"`
 		Discount        float64    `json:"discount"`
@@ -793,6 +889,7 @@ func (h *PurchaseHandler) CreatePurchase(c *gin.Context) {
 		PBFDeliveryOrderNo string  `json:"pbf_delivery_order_no"`
 		TaxInvoiceNo       string  `json:"tax_invoice_no"`
 		IsVerified         *bool   `json:"is_verified"`
+		UpdateMasterCost   bool    `json:"update_master_cost"`
 		Items           []struct {
 			ProductID   uuid.UUID   `json:"product_id" binding:"required"`
 			UnitID      uuid.UUID   `json:"unit_id"`
@@ -870,6 +967,16 @@ func (h *PurchaseHandler) CreatePurchase(c *gin.Context) {
 
 	computer := getComputerName(c, req.ComputerName)
 
+	deliveryMethod := "DIKIRIM"
+	if strings.ToUpper(req.DeliveryMethod) == "DIAMBIL" {
+		deliveryMethod = "DIAMBIL"
+	} else if req.DeliveryMethod == "" && req.PurchaseOrderID != nil {
+		var linkedPO models.PurchaseOrder
+		if errPO := tx.Select("delivery_method").First(&linkedPO, *req.PurchaseOrderID).Error; errPO == nil && linkedPO.DeliveryMethod != "" {
+			deliveryMethod = linkedPO.DeliveryMethod
+		}
+	}
+
 	// ERP Farmasi CDOB Alur Pembelian:
 	// Faktur pembelian baru SELALU berstatus DRAFT & MENUNGGU_PENERIMAAN.
 	// Stok obat, hutang, dan jurnal akuntansi HANYA terbentuk setelah verifikasi Petugas Gudang (Fisik) & Admin (Approval).
@@ -882,6 +989,7 @@ func (h *PurchaseHandler) CreatePurchase(c *gin.Context) {
 		InvoiceNo:          invNo,
 		Date:               time.Now(),
 		DueDate:            dueDate,
+		DeliveryMethod:     deliveryMethod,
 		Status:             "DRAFT",
 		VerificationStatus: "MENUNGGU_PENERIMAAN",
 		PaymentStatus:      paymentStatus,
@@ -943,6 +1051,9 @@ func (h *PurchaseHandler) CreatePurchase(c *gin.Context) {
 			ExpiredDate: parseFlexibleDate(it.ExpiredDate),
 		}
 		tx.Create(&item)
+		if req.UpdateMasterCost {
+			updateProductMasterCost(tx, it.ProductID, unitID, it.UnitPrice)
+		}
 	}
 
 	if err := tx.Commit().Error; err != nil {
@@ -969,7 +1080,12 @@ func (h *PurchaseHandler) GetPurchase(c *gin.Context) {
 		Preload("WarehouseVerifier").
 		Preload("AdminApprover").
 		Preload("PurchaseOrder").
+		Preload("PurchaseOrder.Supplier").
+		Preload("PurchaseOrder.Items").
+		Preload("PurchaseOrder.Items.Product").
 		Preload("Items.Product").
+		Preload("Items.Product.Brand").
+		Preload("Items.Product.BaseUnit").
 		Preload("Items.Unit").
 		First(&purchase).Error; err != nil {
 		utils.SendError(c, http.StatusNotFound, "Faktur pembelian tidak ditemukan", err.Error())
@@ -990,8 +1106,8 @@ func (h *PurchaseHandler) UpdatePurchase(c *gin.Context) {
 		return
 	}
 
-	if purchase.IsVerified || purchase.VerificationStatus == "APPROVED" {
-		utils.SendError(c, http.StatusBadRequest, "Faktur pembelian sudah diverifikasi & disetujui Admin. Tidak boleh ada perubahan.", nil)
+	if purchase.IsVerified || purchase.VerificationStatus == "APPROVED" || purchase.VerificationStatus == "SELESAI" || purchase.Status == "POSTED" {
+		utils.SendError(c, http.StatusBadRequest, "Faktur pembelian sudah diverifikasi & disetujui Admin. Transaksi yang sudah selesai tidak boleh diedit.", nil)
 		return
 	}
 
@@ -1000,6 +1116,7 @@ func (h *PurchaseHandler) UpdatePurchase(c *gin.Context) {
 		SupplierID      uuid.UUID  `json:"supplier_id"`
 		PurchaseOrderID *uuid.UUID `json:"purchase_order_id"`
 		DueDate         time.Time  `json:"due_date"`
+		DeliveryMethod  string     `json:"delivery_method"`
 		Notes           string     `json:"notes"`
 		TaxPercent      float64    `json:"tax_percent"`
 		Discount        float64    `json:"discount"`
@@ -1011,6 +1128,7 @@ func (h *PurchaseHandler) UpdatePurchase(c *gin.Context) {
 		PBFDeliveryOrderNo string  `json:"pbf_delivery_order_no"`
 		TaxInvoiceNo       string  `json:"tax_invoice_no"`
 		IsVerified         *bool   `json:"is_verified"`
+		UpdateMasterCost   bool    `json:"update_master_cost"`
 		Items           []struct {
 			ProductID uuid.UUID `json:"product_id"`
 			UnitID    uuid.UUID `json:"unit_id"`
@@ -1038,6 +1156,9 @@ func (h *PurchaseHandler) UpdatePurchase(c *gin.Context) {
 	}
 	if !req.DueDate.IsZero() {
 		purchase.DueDate = req.DueDate
+	}
+	if strings.ToUpper(req.DeliveryMethod) == "DIAMBIL" || strings.ToUpper(req.DeliveryMethod) == "DIKIRIM" {
+		purchase.DeliveryMethod = strings.ToUpper(req.DeliveryMethod)
 	}
 	purchase.Notes = req.Notes
 	purchase.PBFInvoiceNo = req.PBFInvoiceNo
@@ -1125,6 +1246,9 @@ func (h *PurchaseHandler) UpdatePurchase(c *gin.Context) {
 				TotalAmount: lineTotal,
 			}
 			tx.Create(&item)
+			if req.UpdateMasterCost {
+				updateProductMasterCost(tx, it.ProductID, unitID, it.UnitPrice)
+			}
 
 			// Only mutate stock IN if purchase is verified
 			if purchase.IsVerified {
@@ -1327,8 +1451,8 @@ func (h *PurchaseHandler) DeletePurchase(c *gin.Context) {
 		return
 	}
 
-	if purchase.IsVerified || purchase.VerificationStatus == "APPROVED" {
-		utils.SendError(c, http.StatusBadRequest, "Faktur pembelian sudah diverifikasi & disetujui Admin. Tidak dapat dihapus.", nil)
+	if purchase.IsVerified || purchase.VerificationStatus == "APPROVED" || purchase.VerificationStatus == "SELESAI" || purchase.Status == "POSTED" {
+		utils.SendError(c, http.StatusBadRequest, "Faktur pembelian sudah diverifikasi & disetujui Admin. Transaksi yang sudah selesai tidak dapat dihapus.", nil)
 		return
 	}
 
@@ -1449,6 +1573,10 @@ func (h *PurchaseHandler) VerifyPurchase(c *gin.Context) {
 
 	// 1. Mutasi Stok IN ke Gudang & Update Harga Pokok / Harga Jual Obat
 	for _, it := range purchase.Items {
+		batchNo := it.BatchNumber
+		if batchNo == "" {
+			batchNo = "DEFAULT"
+		}
 		_, err := services.MutateStock(tx, services.StockMutationParams{
 			CompanyID:    companyID,
 			BranchID:     branchID,
@@ -1459,7 +1587,9 @@ func (h *PurchaseHandler) VerifyPurchase(c *gin.Context) {
 			MovementType: "IN",
 			Qty:          it.Qty,
 			UnitCost:     it.UnitPrice,
-			Notes:        fmt.Sprintf("Verifikasi Penerimaan Faktur: %s", purchase.InvoiceNo),
+			BatchNumber:  batchNo,
+			ExpiredDate:  it.ExpiredDate,
+			Notes:        fmt.Sprintf("Verifikasi Penerimaan Faktur: %s (Batch: %s)", purchase.InvoiceNo, batchNo),
 			CreatedBy:    userID,
 		})
 		if err != nil {
@@ -1487,7 +1617,7 @@ func (h *PurchaseHandler) VerifyPurchase(c *gin.Context) {
 					}
 					if effectiveMargin > 0 {
 						prod.MarkupPercent = effectiveMargin
-						prod.SellingPrice = math.Round(unitCost * (1.0 + effectiveMargin/100.0))
+						prod.SellingPrice = math.Ceil(unitCost * (1.0 + effectiveMargin/100.0))
 					}
 				}
 				tx.Save(&prod)
@@ -1791,7 +1921,11 @@ func (h *PurchaseHandler) ReceiveAndVerifyPO(c *gin.Context) {
 	} else {
 		purchase.PaymentStatus = "UNPAID"
 	}
-	purchase.Notes = req.Notes
+	if req.Notes != "" {
+		purchase.Notes = req.Notes
+	} else if purchase.Notes == "" && po.Notes != "" {
+		purchase.Notes = po.Notes
+	}
 	if req.PBFInvoiceNo != "" {
 		purchase.PBFInvoiceNo = req.PBFInvoiceNo
 	}
@@ -1982,7 +2116,8 @@ func (h *PurchaseHandler) ReceivePurchaseInvoice(c *gin.Context) {
 		existingDiscountMap[oldIt.ProductID] = oldIt.Discount
 	}
 
-	tx.Where("purchase_id = ?", purchase.ID).Delete(&models.PurchaseItem{})
+	tx.Exec("DELETE FROM purchase_items WHERE purchase_id = ?", purchase.ID)
+	purchase.Items = nil
 
 	var subtotal float64
 	for _, it := range req.Items {
@@ -2038,7 +2173,7 @@ func (h *PurchaseHandler) ReceivePurchaseInvoice(c *gin.Context) {
 	}
 	purchase.RemainingAmount = remaining
 
-	if err := tx.Save(&purchase).Error; err != nil {
+	if err := tx.Omit("Items").Save(&purchase).Error; err != nil {
 		tx.Rollback()
 		utils.SendError(c, http.StatusInternalServerError, "Gagal memperbarui faktur pembelian: "+err.Error(), nil)
 		return
@@ -2117,7 +2252,41 @@ func (h *PurchaseHandler) AdminApprovePurchase(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&req)
 
+	// Validasi duplikasi dokumen PBF, Surat Jalan, & Faktur Pajak terhadap transaksi lain di database
+	pbfInv := strings.TrimSpace(req.PBFInvoiceNo)
+	if pbfInv != "" {
+		var dup models.Purchase
+		if err := database.DB.Select("id, invoice_no").Where("company_id = ? AND id != ? AND LOWER(pbf_invoice_no) = LOWER(?)", companyID, purchase.ID, pbfInv).First(&dup).Error; err == nil {
+			utils.SendError(c, http.StatusBadRequest, fmt.Sprintf("No. Faktur PBF / Supplier \"%s\" sudah ada di database (Faktur %s). Gunakan nomor yang berbeda.", pbfInv, dup.InvoiceNo), nil)
+			return
+		}
+	}
+	pbfSJ := strings.TrimSpace(req.PBFDeliveryOrderNo)
+	if pbfSJ != "" {
+		var dup models.Purchase
+		if err := database.DB.Select("id, invoice_no").Where("company_id = ? AND id != ? AND LOWER(pbf_delivery_order_no) = LOWER(?)", companyID, purchase.ID, pbfSJ).First(&dup).Error; err == nil {
+			utils.SendError(c, http.StatusBadRequest, fmt.Sprintf("No. Surat Jalan / DO Kurir \"%s\" sudah ada di database (Faktur %s). Gunakan nomor yang berbeda.", pbfSJ, dup.InvoiceNo), nil)
+			return
+		}
+	}
+	taxInv := strings.TrimSpace(req.TaxInvoiceNo)
+	if taxInv != "" {
+		var dup models.Purchase
+		if err := database.DB.Select("id, invoice_no").Where("company_id = ? AND id != ? AND LOWER(tax_invoice_no) = LOWER(?)", companyID, purchase.ID, taxInv).First(&dup).Error; err == nil {
+			utils.SendError(c, http.StatusBadRequest, fmt.Sprintf("No. Faktur Pajak \"%s\" sudah ada di database (Faktur %s). Gunakan nomor yang berbeda.", taxInv, dup.InvoiceNo), nil)
+			return
+		}
+	}
+
 	tx := database.DB.Begin()
+
+	// Reload fresh purchase items in transaction
+	purchase.Items = nil
+	if err := tx.Where("purchase_id = ?", purchase.ID).Find(&purchase.Items).Error; err != nil {
+		tx.Rollback()
+		utils.SendError(c, http.StatusInternalServerError, "Gagal mengambil rincian faktur pembelian", err.Error())
+		return
+	}
 
 	// Update Purchase Items with Admin verified Batch Number and Expired Date
 	if len(req.Items) > 0 {
@@ -2204,9 +2373,9 @@ func (h *PurchaseHandler) AdminApprovePurchase(c *gin.Context) {
 		purchase.PaymentStatus = "UNPAID"
 	}
 
-	if err := tx.Save(&purchase).Error; err != nil {
+	if err := tx.Omit("Items").Save(&purchase).Error; err != nil {
 		tx.Rollback()
-		utils.SendError(c, http.StatusInternalServerError, "Gagal mengupdate persetujuan pembelian: "+err.Error(), nil)
+		utils.SendError(c, http.StatusInternalServerError, "Gagal memperbarui faktur pembelian: "+err.Error(), nil)
 		return
 	}
 
@@ -2269,7 +2438,7 @@ func (h *PurchaseHandler) AdminApprovePurchase(c *gin.Context) {
 					}
 					if effectiveMargin > 0 {
 						prod.MarkupPercent = effectiveMargin
-						prod.SellingPrice = math.Round(unitCost * (1.0 + effectiveMargin/100.0))
+						prod.SellingPrice = math.Ceil(unitCost * (1.0 + effectiveMargin/100.0))
 					}
 				}
 			}
@@ -2593,8 +2762,27 @@ func (h *PurchaseHandler) FulfillPurchaseOrderItems(c *gin.Context) {
 		for _, it := range supItems {
 			subtotal += (it.Qty * it.UnitPrice) - it.Discount
 		}
-		taxAmount := subtotal * (po.TaxPercent / 100)
-		totalAmount := subtotal + taxAmount
+
+		discount := po.Discount
+		shippingFee := po.ShippingFee
+		notes := po.Notes
+		if notes == "" {
+			notes = fmt.Sprintf("Dipindahkan dari PO %s (Supplier: %s)", po.OrderNo, supName)
+		}
+		afterDiscount := subtotal - discount
+		if afterDiscount < 0 {
+			afterDiscount = 0
+		}
+		taxAmount := afterDiscount * (po.TaxPercent / 100)
+		totalAmount := afterDiscount + taxAmount + shippingFee
+		paidAmount := po.PaidAmount
+		if paidAmount == 0 && po.DPAmount > 0 {
+			paidAmount = po.DPAmount
+		}
+		remaining := totalAmount - paidAmount
+		if remaining < 0 {
+			remaining = 0
+		}
 
 		purchase := models.Purchase{
 			CompanyID:          companyID,
@@ -2610,10 +2798,14 @@ func (h *PurchaseHandler) FulfillPurchaseOrderItems(c *gin.Context) {
 			Subtotal:           subtotal,
 			TaxPercent:         po.TaxPercent,
 			TaxAmount:          taxAmount,
+			Discount:           discount,
+			ShippingFee:        shippingFee,
 			TotalAmount:        totalAmount,
-			RemainingAmount:    totalAmount,
-			PaymentStatus:      "UNPAID",
-			Notes:              fmt.Sprintf("Dipindahkan dari PO %s (Supplier: %s)", po.OrderNo, supName),
+			DPAmount:           po.DPAmount,
+			PaidAmount:         paidAmount,
+			RemainingAmount:    remaining,
+			PaymentStatus:      po.PaymentStatus,
+			Notes:              notes,
 			ComputerName:       getComputerName(c),
 			CreatedBy:          po.CreatedBy,
 		}
@@ -2776,7 +2968,12 @@ func (h *PurchaseHandler) SendPOToSupplier(c *gin.Context) {
 			TotalAmount:        po.TotalAmount,
 			PaidAmount:         po.PaidAmount,
 			RemainingAmount:    po.TotalAmount - po.PaidAmount,
-			Notes:              fmt.Sprintf("PO Dikirim ke Supplier: %s", po.OrderNo),
+			Notes: func() string {
+				if po.Notes != "" {
+					return po.Notes
+				}
+				return fmt.Sprintf("PO Dikirim ke Supplier: %s", po.OrderNo)
+			}(),
 			ComputerName:       getComputerName(c),
 			CreatedBy:          po.CreatedBy,
 		}
@@ -3013,7 +3210,7 @@ func updatePOReceivedStatus(tx *gorm.DB, poID uuid.UUID) error {
 		var itemReceived float64
 		tx.Table("purchase_items").
 			Joins("JOIN purchases ON purchase_items.purchase_id = purchases.id").
-			Where("purchases.purchase_order_id = ? AND purchase_items.product_id = ? AND purchases.is_verified = true AND purchases.status != 'CANCELLED'", po.ID, po.Items[i].ProductID).
+			Where("purchases.purchase_order_id = ? AND purchase_items.product_id = ? AND purchases.is_verified = true AND purchases.status != 'CANCELLED' AND purchase_items.deleted_at IS NULL AND purchases.deleted_at IS NULL", po.ID, po.Items[i].ProductID).
 			Select("COALESCE(SUM(purchase_items.qty), 0)").
 			Scan(&itemReceived)
 
@@ -3053,6 +3250,22 @@ func (h *PurchaseHandler) GetPurchaseReturns(c *gin.Context) {
 
 	if warehouseID := c.Query("warehouse_id"); warehouseID != "" && warehouseID != "all" {
 		query = query.Where("purchase_returns.warehouse_id = ?", warehouseID)
+	}
+
+	if supplierID := c.Query("supplier_id"); supplierID != "" {
+		query = query.Where("purchase_returns.supplier_id = ?", supplierID)
+	}
+
+	if status := c.Query("status"); status != "" && status != "all" {
+		query = query.Where("purchase_returns.status = ?", status)
+	}
+
+	if settlementStatus := c.Query("settlement_status"); settlementStatus != "" {
+		if settlementStatus == "PENDING" {
+			query = query.Where("(purchase_returns.settlement_status = 'PENDING' OR purchase_returns.settlement_status = '' OR purchase_returns.settlement_status IS NULL)")
+		} else {
+			query = query.Where("purchase_returns.settlement_status = ?", settlementStatus)
+		}
 	}
 
 	if startDate := c.Query("start_date"); startDate != "" {
@@ -3130,7 +3343,7 @@ func (h *PurchaseHandler) CreatePurchaseReturn(c *gin.Context) {
 
 	type ReturnItemReq struct {
 		ProductID         uuid.UUID  `json:"product_id" binding:"required"`
-		UnitID            uuid.UUID  `json:"unit_id" binding:"required"`
+		UnitID            uuid.UUID  `json:"unit_id"`
 		OriginalInvoiceNo string     `json:"original_invoice_no"`
 		Brand             string     `json:"brand"`
 		PurchasedQty      float64    `json:"purchased_qty"`
@@ -3145,8 +3358,9 @@ func (h *PurchaseHandler) CreatePurchaseReturn(c *gin.Context) {
 	}
 
 	var req struct {
-		ReturnMode   string          `json:"return_mode"` // MODE_1 or MODE_2
-		PurchaseID   *uuid.UUID      `json:"purchase_id"`
+		ReturnMode     string          `json:"return_mode"` // MODE_1 or MODE_2
+		DeliveryMethod string          `json:"delivery_method"` // DIAMBIL or DIKIRIM
+		PurchaseID     *uuid.UUID      `json:"purchase_id"`
 		WarehouseID  uuid.UUID       `json:"warehouse_id" binding:"required"`
 		SupplierID   uuid.UUID       `json:"supplier_id" binding:"required"`
 		TaxType      string          `json:"tax_type"` // NON, INCLUDE, EXCLUDE
@@ -3176,6 +3390,12 @@ func (h *PurchaseHandler) CreatePurchaseReturn(c *gin.Context) {
 			Preload("Items").First(&purchase).Error; err != nil {
 			tx.Rollback()
 			utils.SendError(c, http.StatusBadRequest, "Faktur pembelian asal tidak ditemukan", nil)
+			return
+		}
+
+		if !purchase.IsVerified && purchase.Status != "POSTED" && purchase.Status != "APPROVED" {
+			tx.Rollback()
+			utils.SendError(c, http.StatusBadRequest, "Retur pembelian hanya dapat diajukan untuk faktur pembelian yang sudah diverifikasi fisik dan disetujui (POSTED).", nil)
 			return
 		}
 
@@ -3270,6 +3490,11 @@ func (h *PurchaseHandler) CreatePurchaseReturn(c *gin.Context) {
 
 	computer := getComputerName(c, req.ComputerName)
 
+	deliveryMethod := req.DeliveryMethod
+	if deliveryMethod != "DIKIRIM" {
+		deliveryMethod = "DIAMBIL"
+	}
+
 	ret := models.PurchaseReturn{
 		CompanyID:           companyID,
 		BranchID:            branchID,
@@ -3278,6 +3503,7 @@ func (h *PurchaseHandler) CreatePurchaseReturn(c *gin.Context) {
 		PurchaseID:          req.PurchaseID,
 		ReturnNo:            retNo,
 		ReturnMode:          mode,
+		DeliveryMethod:      deliveryMethod,
 		Date:                time.Now(),
 		TaxType:             req.TaxType,
 		Subtotal:            subtotal,
@@ -3302,10 +3528,23 @@ func (h *PurchaseHandler) CreatePurchaseReturn(c *gin.Context) {
 		lineDiscount := (it.Qty * it.UnitPrice) * (it.DiscountPercent / 100)
 		lineTotal := (it.Qty * it.UnitPrice) - lineDiscount
 
+		unitID := it.UnitID
+		if unitID == uuid.Nil {
+			var prod models.Product
+			if err := tx.Select("base_unit_id").First(&prod, it.ProductID).Error; err == nil && prod.BaseUnitID != nil {
+				unitID = *prod.BaseUnitID
+			} else {
+				var fallbackUnit models.Unit
+				if err := tx.Where("company_id = ?", companyID).First(&fallbackUnit).Error; err == nil {
+					unitID = fallbackUnit.ID
+				}
+			}
+		}
+
 		item := models.PurchaseReturnItem{
 			PurchaseReturnID:  ret.ID,
 			ProductID:         it.ProductID,
-			UnitID:            it.UnitID,
+			UnitID:            unitID,
 			OriginalInvoiceNo: it.OriginalInvoiceNo,
 			Brand:             it.Brand,
 			PurchasedQty:      it.PurchasedQty,
@@ -3434,19 +3673,24 @@ func (h *PurchaseHandler) WarehouseVerifyPurchaseReturn(c *gin.Context) {
 	utils.SendSuccess(c, "Verifikasi fisik gudang berhasil disimpan", ret)
 }
 
-// 3. Persetujuan Admin
+// 3. Persetujuan Admin (Sekaligus input dokumen pengiriman jika DIKIRIM, dan langsung SELESAI)
 func (h *PurchaseHandler) AdminApprovePurchaseReturn(c *gin.Context) {
 	id := c.Param("id")
 	companyID := c.MustGet("company_id").(uuid.UUID)
+	branchID := c.MustGet("branch_id").(uuid.UUID)
 	userID := c.MustGet("user_id").(uuid.UUID)
 
 	var req struct {
-		Notes string `json:"notes"`
+		Notes              string `json:"notes"`
+		ShippingCourier    string `json:"shipping_courier"`
+		ShippingTrackingNo string `json:"shipping_tracking_no"`
+		ShippingNotes      string `json:"shipping_notes"`
 	}
 	_ = c.ShouldBindJSON(&req)
 
 	var ret models.PurchaseReturn
-	if err := database.DB.Where("id = ? AND company_id = ?", id, companyID).First(&ret).Error; err != nil {
+	if err := database.DB.Where("id = ? AND company_id = ?", id, companyID).
+		Preload("Items").First(&ret).Error; err != nil {
 		utils.SendError(c, http.StatusNotFound, "Retur pembelian tidak ditemukan", nil)
 		return
 	}
@@ -3456,12 +3700,118 @@ func (h *PurchaseHandler) AdminApprovePurchaseReturn(c *gin.Context) {
 		return
 	}
 
+	if ret.DeliveryMethod == "DIKIRIM" && strings.TrimSpace(req.ShippingTrackingNo) == "" {
+		utils.SendError(c, http.StatusBadRequest, "Untuk retur yang dikirim ke supplier, No. Resi / Surat Jalan Pengiriman wajib diisi.", nil)
+		return
+	}
+
 	tx := database.DB.Begin()
+
+	// Potong stok fisik keluar dari gudang saat Admin menyetujui retur
+	if !ret.IsStockDeducted {
+		for _, it := range ret.Items {
+			_, err := services.MutateStock(tx, services.StockMutationParams{
+				CompanyID:    companyID,
+				BranchID:     branchID,
+				WarehouseID:  ret.WarehouseID,
+				ProductID:    it.ProductID,
+				DocType:      "PURCHASE_RETURN",
+				DocNo:        ret.ReturnNo,
+				MovementType: "OUT",
+				Qty:          it.Qty,
+				UnitCost:     it.UnitPrice,
+				BatchNumber:  it.BatchNumber,
+				ExpiredDate:  it.ExpiredDate,
+				Notes:        fmt.Sprintf("Retur Pembelian (%s): %s", ret.DeliveryMethod, ret.ReturnNo),
+				CreatedBy:    userID,
+			})
+			if err != nil {
+				tx.Rollback()
+				utils.SendError(c, http.StatusBadRequest, fmt.Sprintf("Gagal memotong stok retur: %s", err.Error()), nil)
+				return
+			}
+		}
+		ret.IsStockDeducted = true
+	}
+
 	now := time.Now()
-	ret.Status = "DISETUJUI_ADMIN"
+	ret.Status = "SELESAI"
+	if ret.SettlementStatus == "" {
+		ret.SettlementStatus = "PENDING"
+	}
 	ret.AdminApprovedAt = &now
 	ret.AdminApprovedBy = &userID
 	ret.AdminNotes = req.Notes
+
+	// Buat jurnal awal retur: Debit Piutang/Klaim Retur Supplier (1-1210), Kredit Persediaan (1-1300) & PPN Masukan (1-1410)
+	if ret.TotalAmount > 0 && !ret.IsJournalCreated {
+		creditSupplierAcc := services.ResolveSettingAccountCode(tx, companyID, "purch_credit_supplier", "1-1210", "Piutang / Kredit Retur Supplier", "ASSET", "RECEIVABLE", "DEBIT")
+		inventoryAcc := services.ResolveSettingAccountCode(tx, companyID, "item_inventory", "1-1300", "Persediaan Obat & Barang Dagang", "ASSET", "INVENTORY", "DEBIT")
+
+		var netInventory float64
+		var taxCredit float64
+		if ret.TaxPercent > 0 {
+			taxCredit = (ret.TotalAmount / (100 + ret.TaxPercent)) * ret.TaxPercent
+			if ret.TaxType == "EXCLUDE" {
+				taxCredit = (ret.TotalAmount - ret.OtherCost) * (ret.TaxPercent / (100 + ret.TaxPercent))
+			}
+			taxCredit = math.Round(taxCredit*100) / 100
+			netInventory = math.Round((ret.TotalAmount-taxCredit)*100) / 100
+		} else {
+			netInventory = math.Round(ret.TotalAmount*100) / 100
+		}
+
+		journalEntries := []services.JournalEntryParam{
+			{
+				AccountCode: creditSupplierAcc,
+				Debit:       ret.TotalAmount,
+				Credit:      0,
+				Description: fmt.Sprintf("Klaim / Piutang Retur Supplier %s", ret.ReturnNo),
+			},
+			{
+				AccountCode: inventoryAcc,
+				Debit:       0,
+				Credit:      netInventory,
+				Description: fmt.Sprintf("Pengurangan Persediaan Barang Retur %s", ret.ReturnNo),
+			},
+		}
+		if taxCredit > 0 {
+			taxAcc := services.ResolveSettingAccountCode(tx, companyID, "purch_tax", "1-1410", "PPN MASUKAN", "ASSET", "TAX", "DEBIT")
+			journalEntries = append(journalEntries, services.JournalEntryParam{
+				AccountCode: taxAcc,
+				Debit:       0,
+				Credit:      taxCredit,
+				Description: fmt.Sprintf("Koreksi PPN Masukan Retur %s", ret.ReturnNo),
+			})
+		}
+
+		if _, err := services.PostDoubleEntryJournal(tx, services.JournalPostParams{
+			CompanyID:   companyID,
+			BranchID:    branchID,
+			Date:        now,
+			RefType:     "PURCHASE_RETURN",
+			RefNo:       ret.ReturnNo,
+			Description: fmt.Sprintf("Jurnal Persetujuan Retur Pembelian %s", ret.ReturnNo),
+			CreatedBy:   userID,
+			Entries:     journalEntries,
+		}); err != nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusInternalServerError, "Gagal membuat jurnal retur: "+err.Error(), nil)
+			return
+		}
+		ret.IsJournalCreated = true
+	}
+
+	logNotes := "Retur pembelian disetujui oleh Admin (Diambil oleh Supplier) dan status langsung SELESAI."
+	if ret.DeliveryMethod == "DIKIRIM" {
+		ret.ShippedAt = &now
+		ret.ShippedBy = &userID
+		ret.ShippingCourier = req.ShippingCourier
+		ret.ShippingTrackingNo = req.ShippingTrackingNo
+		ret.ShippingNotes = req.ShippingNotes
+		logNotes = fmt.Sprintf("Retur pembelian disetujui Admin & dokumen pengiriman dicatat (Kurir: %s, No. Resi/SJ: %s). Status SELESAI.", req.ShippingCourier, req.ShippingTrackingNo)
+	}
+
 	if err := tx.Save(&ret).Error; err != nil {
 		tx.Rollback()
 		utils.SendError(c, http.StatusInternalServerError, "Gagal menyetujui retur", err.Error())
@@ -3470,16 +3820,16 @@ func (h *PurchaseHandler) AdminApprovePurchaseReturn(c *gin.Context) {
 
 	tx.Create(&models.PurchaseReturnStatusLog{
 		PurchaseReturnID: ret.ID,
-		Status:           "DISETUJUI_ADMIN",
+		Status:           "SELESAI",
 		Action:           "PERSETUJUAN_ADMIN",
-		Notes:            "Retur pembelian disetujui oleh admin. Siap untuk proses pengiriman ke PBF. " + req.Notes,
+		Notes:            logNotes + " " + req.Notes,
 		UserID:           userID,
 		CreatedAt:        now,
 	})
 
 	tx.Commit()
-	database.DB.Preload("Supplier").Preload("Warehouse").Preload("AdminApprover").Preload("Items.Product").Preload("StatusLogs.User").First(&ret, ret.ID)
-	utils.SendSuccess(c, "Retur pembelian telah disetujui admin", ret)
+	database.DB.Preload("Supplier").Preload("Warehouse").Preload("AdminApprover").Preload("Shipper").Preload("Items.Product").Preload("StatusLogs.User").First(&ret, ret.ID)
+	utils.SendSuccess(c, "Retur pembelian berhasil disetujui Admin dan selesai", ret)
 }
 
 // Tolak Retur (Admin / Gudang)
@@ -3819,21 +4169,23 @@ func (h *PurchaseHandler) FinalizePurchaseReturn(c *gin.Context) {
 						// 1. Pembelian belum dibayar atau dibayar sebagian: Kurangi sisa hutang
 						if acceptedTotal <= purchase.RemainingAmount {
 							debtDeduction = acceptedTotal
-							purchase.RemainingAmount -= acceptedTotal
+							purchase.RemainingAmount = math.Round((purchase.RemainingAmount-acceptedTotal)*100) / 100
 							if purchase.RemainingAmount == 0 {
 								purchase.PaymentStatus = "PAID"
+							} else {
+								purchase.PaymentStatus = "PARTIAL"
 							}
 						} else {
 							// Nilai retur melebihi sisa hutang: Sisa hutang lunas, kelebihannya menjadi kredit supplier
 							debtDeduction = purchase.RemainingAmount
-							excess := acceptedTotal - purchase.RemainingAmount
+							excess := math.Round((acceptedTotal-purchase.RemainingAmount)*100) / 100
 							purchase.RemainingAmount = 0
 							purchase.PaymentStatus = "PAID"
 							creditSupplier = excess
 
 							var sup models.Supplier
 							if err := tx.Where("id = ?", ret.SupplierID).First(&sup).Error; err == nil {
-								sup.CreditBalance += excess
+								sup.CreditBalance = math.Round((sup.CreditBalance+excess)*100) / 100
 								tx.Save(&sup)
 							}
 						}
@@ -3843,7 +4195,7 @@ func (h *PurchaseHandler) FinalizePurchaseReturn(c *gin.Context) {
 						creditSupplier = acceptedTotal
 						var sup models.Supplier
 						if err := tx.Where("id = ?", ret.SupplierID).First(&sup).Error; err == nil {
-							sup.CreditBalance += acceptedTotal
+							sup.CreditBalance = math.Round((sup.CreditBalance+acceptedTotal)*100) / 100
 							tx.Save(&sup)
 						}
 					}
@@ -3853,7 +4205,7 @@ func (h *PurchaseHandler) FinalizePurchaseReturn(c *gin.Context) {
 				creditSupplier = acceptedTotal
 				var sup models.Supplier
 				if err := tx.Where("id = ?", ret.SupplierID).First(&sup).Error; err == nil {
-					sup.CreditBalance += acceptedTotal
+					sup.CreditBalance = math.Round((sup.CreditBalance+acceptedTotal)*100) / 100
 					tx.Save(&sup)
 				}
 			}
@@ -3868,34 +4220,37 @@ func (h *PurchaseHandler) FinalizePurchaseReturn(c *gin.Context) {
 
 	// C. INTEGRASI AKUNTANSI: JURNAL OTOMATIS SEIMBANG
 	if acceptedTotal > 0 && !ret.IsJournalCreated {
+		payableAcc := services.ResolveSettingAccountCode(tx, companyID, "purch_credit_payable", "2-1100", "HUTANG USAHA", "LIABILITY", "PAYABLE", "CREDIT")
+		inventoryAcc := services.ResolveSettingAccountCode(tx, companyID, "item_inventory", "1-1300", "Persediaan Obat & Barang Dagang", "ASSET", "INVENTORY", "DEBIT")
 		var journalEntries []services.JournalEntryParam
 
 		// 1. Baris Debit:
 		if debtDeduction > 0 {
 			journalEntries = append(journalEntries, services.JournalEntryParam{
-				AccountCode: "2-1100", // Hutang Usaha
+				AccountCode: payableAcc, // Hutang Usaha
 				Debit:       debtDeduction,
 				Credit:      0,
 				Description: fmt.Sprintf("Pengurangan Hutang Usaha Retur %s", ret.ReturnNo),
 			})
 		}
 		if creditSupplier > 0 {
+			creditSupplierAcc := services.ResolveSettingAccountCode(tx, companyID, "purch_credit_supplier", "1-1210", "Piutang / Kredit Retur Supplier", "ASSET", "RECEIVABLE", "DEBIT")
 			journalEntries = append(journalEntries, services.JournalEntryParam{
-				AccountCode: "1-1200", // Piutang / Kredit Supplier
+				AccountCode: creditSupplierAcc, // Piutang / Kredit Supplier (Non-Header 1-1210)
 				Debit:       creditSupplier,
 				Credit:      0,
 				Description: fmt.Sprintf("Kredit/Klaim Retur Supplier %s", ret.ReturnNo),
 			})
 		}
 		if cashRefund > 0 {
-			cashAccountCode := "1-1100" // Default Kas
+			cashAccountCode := "1-1110" // Default non-header Kas Kecil
 			var cashAcc models.Account
 			if req.CashAccountID != nil && *req.CashAccountID != uuid.Nil {
 				if err := tx.Where("id = ?", req.CashAccountID).First(&cashAcc).Error; err == nil && cashAcc.Code != "" {
 					cashAccountCode = cashAcc.Code
 				}
 			} else {
-				_ = tx.Where("company_id = ? AND (code = '1-1100' OR code LIKE '1-11%')", companyID).Order("code ASC").First(&cashAcc).Error
+				_ = tx.Where("company_id = ? AND is_header = false AND code LIKE '1-11%'", companyID).Order("code ASC").First(&cashAcc).Error
 				if cashAcc.Code != "" {
 					cashAccountCode = cashAcc.Code
 				}
@@ -3946,21 +4301,23 @@ func (h *PurchaseHandler) FinalizePurchaseReturn(c *gin.Context) {
 			if ret.TaxType == "EXCLUDE" {
 				taxCredit = (acceptedTotal - ret.OtherCost) * (ret.TaxPercent / (100 + ret.TaxPercent))
 			}
-			netInventory = acceptedTotal - taxCredit
+			taxCredit = math.Round(taxCredit*100) / 100
+			netInventory = math.Round((acceptedTotal-taxCredit)*100) / 100
 		} else {
-			netInventory = acceptedTotal
+			netInventory = math.Round(acceptedTotal*100) / 100
 		}
 
 		journalEntries = append(journalEntries, services.JournalEntryParam{
-			AccountCode: "1-1300", // Persediaan Obat & Barang Dagang
+			AccountCode: inventoryAcc, // Persediaan Obat & Barang Dagang
 			Debit:       0,
 			Credit:      netInventory,
 			Description: fmt.Sprintf("Pengurangan Persediaan Barang Retur %s", ret.ReturnNo),
 		})
 
 		if taxCredit > 0 {
+			taxAcc := services.ResolveSettingAccountCode(tx, companyID, "purch_tax", "1-1410", "PPN MASUKAN", "ASSET", "TAX", "DEBIT")
 			journalEntries = append(journalEntries, services.JournalEntryParam{
-				AccountCode: "1-1410", // PPN Masukan (Koreksi Faktur Pajak Masukan)
+				AccountCode: taxAcc, // PPN Masukan (Koreksi Faktur Pajak Masukan)
 				Debit:       0,
 				Credit:      taxCredit,
 				Description: fmt.Sprintf("Koreksi PPN Masukan Retur %s", ret.ReturnNo),
@@ -4010,6 +4367,211 @@ func (h *PurchaseHandler) FinalizePurchaseReturn(c *gin.Context) {
 	utils.SendSuccess(c, "Retur pembelian berhasil difinalisasi", ret)
 }
 
+// SettlePurchaseReturn menyelesaikan keuangan retur pembelian dari menu Bayar Hutang (Potong Hutang Usaha atau Pengembalian Dana Kas/Bank)
+func (h *PurchaseHandler) SettlePurchaseReturn(c *gin.Context) {
+	id := c.Param("id")
+	companyID := c.MustGet("company_id").(uuid.UUID)
+	branchID := c.MustGet("branch_id").(uuid.UUID)
+	userID := c.MustGet("user_id").(uuid.UUID)
+
+	var req struct {
+		SettlementType string     `json:"settlement_type" binding:"required"` // POTONG_HUTANG | KEMBALI_DANA_KAS
+		PurchaseID     *uuid.UUID `json:"purchase_id"`
+		CashAccountID  *uuid.UUID `json:"cash_account_id"`
+		Notes          string     `json:"notes"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.SendError(c, http.StatusBadRequest, "Data penyelesaian retur tidak lengkap", err.Error())
+		return
+	}
+
+	var ret models.PurchaseReturn
+	if err := database.DB.Where("id = ? AND company_id = ?", id, companyID).
+		Preload("Supplier").First(&ret).Error; err != nil {
+		utils.SendError(c, http.StatusNotFound, "Retur pembelian tidak ditemukan", nil)
+		return
+	}
+
+	if ret.Status != "SELESAI" {
+		utils.SendError(c, http.StatusBadRequest, "Hanya retur dengan status SELESAI yang dapat diselesaikan keuangannya.", nil)
+		return
+	}
+	if ret.SettlementStatus == "SETTLED" {
+		utils.SendError(c, http.StatusBadRequest, "Keuangan retur ini sudah diselesaikan sebelumnya.", nil)
+		return
+	}
+
+	tx := database.DB.Begin()
+	now := time.Now()
+	amount := math.Round(ret.TotalAmount*100) / 100
+	creditSupplierAcc := services.ResolveSettingAccountCode(tx, companyID, "purch_credit_supplier", "1-1210", "Piutang / Kredit Retur Supplier", "ASSET", "RECEIVABLE", "DEBIT")
+
+	var journalEntries []services.JournalEntryParam
+	var logNote string
+
+	switch req.SettlementType {
+	case "POTONG_HUTANG":
+		if req.PurchaseID == nil || *req.PurchaseID == uuid.Nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusBadRequest, "Pilih faktur hutang yang akan dipotong.", nil)
+			return
+		}
+		var purchase models.Purchase
+		if err := tx.Where("id = ? AND company_id = ? AND supplier_id = ?", req.PurchaseID, companyID, ret.SupplierID).First(&purchase).Error; err != nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusNotFound, "Faktur hutang tidak ditemukan untuk supplier ini.", nil)
+			return
+		}
+		if purchase.RemainingAmount+0.001 < amount {
+			tx.Rollback()
+			utils.SendError(c, http.StatusBadRequest, fmt.Sprintf("Sisa hutang faktur %s (Rp %.0f) lebih kecil dari nilai retur (Rp %.0f). Pilih hutang yang lebih besar atau sama dengan nilai retur.", purchase.InvoiceNo, purchase.RemainingAmount, amount), nil)
+			return
+		}
+
+		purchase.RemainingAmount = math.Round((purchase.RemainingAmount-amount)*100) / 100
+		if purchase.RemainingAmount <= 0.01 {
+			purchase.RemainingAmount = 0
+			purchase.PaymentStatus = "PAID"
+		} else {
+			purchase.PaymentStatus = "PARTIAL"
+		}
+		if err := tx.Save(&purchase).Error; err != nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusInternalServerError, "Gagal memperbarui sisa hutang faktur", err.Error())
+			return
+		}
+
+		payableAcc := services.ResolveSettingAccountCode(tx, companyID, "purch_credit_payable", "2-1100", "HUTANG USAHA", "LIABILITY", "PAYABLE", "CREDIT")
+		journalEntries = []services.JournalEntryParam{
+			{
+				AccountCode: payableAcc,
+				Debit:       amount,
+				Credit:      0,
+				Description: fmt.Sprintf("Potong Hutang %s dari Retur %s", purchase.InvoiceNo, ret.ReturnNo),
+			},
+			{
+				AccountCode: creditSupplierAcc,
+				Debit:       0,
+				Credit:      amount,
+				Description: fmt.Sprintf("Penyelesaian Klaim Retur %s ke Hutang %s", ret.ReturnNo, purchase.InvoiceNo),
+			},
+		}
+
+		ret.SettlementType = "POTONG_HUTANG"
+		ret.SettledPurchaseID = &purchase.ID
+		ret.DebtDeductionAmount = amount
+		logNote = fmt.Sprintf("Retur %s memotong hutang faktur %s sebesar Rp %.0f. Sisa hutang faktur: Rp %.0f (%s).", ret.ReturnNo, purchase.InvoiceNo, amount, purchase.RemainingAmount, purchase.PaymentStatus)
+
+	case "KEMBALI_DANA_KAS":
+		if req.CashAccountID == nil || *req.CashAccountID == uuid.Nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusBadRequest, "Pilih akun Kas/Bank penerima pengembalian dana.", nil)
+			return
+		}
+		var cashAcc models.Account
+		if err := tx.Where("id = ? AND company_id = ?", req.CashAccountID, companyID).First(&cashAcc).Error; err != nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusNotFound, "Akun Kas/Bank tidak ditemukan.", nil)
+			return
+		}
+
+		journalEntries = []services.JournalEntryParam{
+			{
+				AccountCode: cashAcc.Code,
+				Debit:       amount,
+				Credit:      0,
+				Description: fmt.Sprintf("Pengembalian Dana Kas/Bank Retur %s", ret.ReturnNo),
+			},
+			{
+				AccountCode: creditSupplierAcc,
+				Debit:       0,
+				Credit:      amount,
+				Description: fmt.Sprintf("Penyelesaian Klaim Retur %s via Pengembalian Dana", ret.ReturnNo),
+			},
+		}
+
+		supplierName := "Supplier PBF"
+		if ret.Supplier != nil && ret.Supplier.Name != "" {
+			supplierName = ret.Supplier.Name
+		}
+		var oppositeAcc models.Account
+		_ = tx.Where("company_id = ? AND code = ?", companyID, creditSupplierAcc).First(&oppositeAcc).Error
+		docNo := services.GenerateCashTransactionNumber(tx, companyID, "KASI", now)
+		cashTrx := models.CashTransaction{
+			CompanyID:      companyID,
+			BranchID:       branchID,
+			TrxNo:          docNo,
+			Date:           now,
+			Type:           "IN",
+			AccountID:      cashAcc.ID,
+			Amount:         amount,
+			PayeeRecipient: supplierName,
+			Description:    fmt.Sprintf("Pengembalian Dana Retur Pembelian %s (%s)", ret.ReturnNo, supplierName),
+			CreatedBy:      userID,
+		}
+		if oppositeAcc.ID != uuid.Nil {
+			cashTrx.OppositeAccID = &oppositeAcc.ID
+		}
+		if err := tx.Create(&cashTrx).Error; err != nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusInternalServerError, "Gagal mencatat kas masuk pengembalian retur", err.Error())
+			return
+		}
+
+		ret.SettlementType = "KEMBALI_DANA_KAS"
+		ret.CashAccountID = &cashAcc.ID
+		ret.RefundAmount = amount
+		logNote = fmt.Sprintf("Pengembalian dana retur %s sebesar Rp %.0f masuk ke akun %s (%s).", ret.ReturnNo, amount, cashAcc.Code, cashAcc.Name)
+
+	default:
+		tx.Rollback()
+		utils.SendError(c, http.StatusBadRequest, "Metode penyelesaian tidak valid (gunakan POTONG_HUTANG atau KEMBALI_DANA_KAS).", nil)
+		return
+	}
+
+	if amount > 0 {
+		if _, err := services.PostDoubleEntryJournal(tx, services.JournalPostParams{
+			CompanyID:   companyID,
+			BranchID:    branchID,
+			Date:        now,
+			RefType:     "PURCHASE_RETURN_SETTLEMENT",
+			RefNo:       ret.ReturnNo,
+			Description: fmt.Sprintf("Penyelesaian Keuangan Retur %s (%s)", ret.ReturnNo, req.SettlementType),
+			CreatedBy:   userID,
+			Entries:     journalEntries,
+		}); err != nil {
+			tx.Rollback()
+			utils.SendError(c, http.StatusInternalServerError, "Gagal membuat jurnal penyelesaian retur: "+err.Error(), nil)
+			return
+		}
+	}
+
+	ret.SettlementStatus = "SETTLED"
+	ret.SettledAt = &now
+	ret.SettledBy = &userID
+	if err := tx.Save(&ret).Error; err != nil {
+		tx.Rollback()
+		utils.SendError(c, http.StatusInternalServerError, "Gagal menyimpan status penyelesaian retur", err.Error())
+		return
+	}
+
+	if strings.TrimSpace(req.Notes) != "" {
+		logNote += " Catatan: " + strings.TrimSpace(req.Notes)
+	}
+	tx.Create(&models.PurchaseReturnStatusLog{
+		PurchaseReturnID: ret.ID,
+		Status:           "SELESAI",
+		Action:           "PENYELESAIAN_KEUANGAN",
+		Notes:            logNote,
+		UserID:           userID,
+		CreatedAt:        now,
+	})
+
+	tx.Commit()
+	database.DB.Preload("Supplier").Preload("Warehouse").Preload("CashAccount").Preload("Purchase").First(&ret, ret.ID)
+	utils.SendSuccess(c, "Penyelesaian keuangan retur pembelian berhasil diproses", ret)
+}
+
 func (h *PurchaseHandler) DeletePurchaseReturn(c *gin.Context) {
 	id := c.Param("id")
 	companyID := c.MustGet("company_id").(uuid.UUID)
@@ -4044,17 +4606,27 @@ func (h *PurchaseHandler) GetReturnablePurchaseItems(c *gin.Context) {
 	companyID := c.MustGet("company_id").(uuid.UUID)
 	purchaseID := c.Query("purchase_id")
 	invoiceNo := c.Query("invoice_no")
+	supplierID := c.Query("supplier_id")
+	warehouseID := c.Query("warehouse_id")
+	search := strings.TrimSpace(c.Query("search"))
 
-	query := database.DB.Where("purchases.company_id = ?", companyID)
+	query := database.DB.Where("purchases.company_id = ? AND purchases.status != 'CANCELLED'", companyID)
 	if purchaseID != "" {
 		query = query.Where("purchases.id = ?", purchaseID)
 	}
 	if invoiceNo != "" {
 		query = query.Where("purchases.invoice_no ILIKE ?", "%"+invoiceNo+"%")
 	}
+	if supplierID != "" && supplierID != "all" {
+		query = query.Where("purchases.supplier_id = ?", supplierID)
+	}
+	if warehouseID != "" && warehouseID != "all" {
+		query = query.Where("purchases.warehouse_id = ?", warehouseID)
+	}
 
 	var purchases []models.Purchase
-	if err := query.Preload("Items.Product").
+	if err := query.Order("purchases.date DESC").
+		Preload("Items.Product.Brand").
 		Preload("Items.Unit").
 		Preload("Supplier").
 		Preload("Warehouse").
@@ -4087,10 +4659,40 @@ func (h *PurchaseHandler) GetReturnablePurchaseItems(c *gin.Context) {
 		ExpiredDate       *time.Time `json:"expired_date"`
 	}
 
-	var results []ReturnableItemDTO
+	results := make([]ReturnableItemDTO, 0)
+	searchLower := strings.ToLower(search)
 
 	for _, p := range purchases {
+		suppName := "-"
+		if p.Supplier != nil && p.Supplier.Name != "" {
+			suppName = p.Supplier.Name
+		}
+
 		for _, it := range p.Items {
+			prodCode := "-"
+			prodName := "-"
+			brandName := "-"
+			if it.Product != nil {
+				prodCode = it.Product.Code
+				prodName = it.Product.Name
+				if it.Product.Brand != nil && it.Product.Brand.Name != "" {
+					brandName = it.Product.Brand.Name
+				} else if it.Product.Rack != "" {
+					brandName = it.Product.Rack
+				}
+			}
+
+			if searchLower != "" {
+				matched := strings.Contains(strings.ToLower(p.InvoiceNo), searchLower) ||
+					strings.Contains(strings.ToLower(prodCode), searchLower) ||
+					strings.Contains(strings.ToLower(prodName), searchLower) ||
+					strings.Contains(strings.ToLower(it.BatchNumber), searchLower) ||
+					strings.Contains(strings.ToLower(suppName), searchLower)
+				if !matched {
+					continue
+				}
+			}
+
 			// Cek retur sebelumnya
 			var priorRet float64
 			database.DB.Model(&models.PurchaseReturnItem{}).
@@ -4123,13 +4725,13 @@ func (h *PurchaseHandler) GetReturnablePurchaseItems(c *gin.Context) {
 				PurchaseID:       p.ID,
 				InvoiceNo:        p.InvoiceNo,
 				SupplierID:       p.SupplierID,
-				SupplierName:     p.Supplier.Name,
+				SupplierName:     suppName,
 				WarehouseID:      p.WarehouseID,
 				PurchaseItemID:   it.ID,
 				ProductID:        it.ProductID,
-				ProductCode:      it.Product.Code,
-				ProductName:      it.Product.Name,
-				Brand:            it.Product.Rack,
+				ProductCode:      prodCode,
+				ProductName:      prodName,
+				Brand:            brandName,
 				UnitID:           it.UnitID,
 				UnitName:         unitName,
 				PurchasedQty:     it.Qty,
@@ -4166,6 +4768,24 @@ func (h *PurchaseHandler) GetProductBatchesForReturn(c *gin.Context) {
 	var batches []models.ProductBatch
 	query.Order("expired_date ASC, created_at ASC").Find(&batches)
 
+	if len(batches) == 0 {
+		var p models.Product
+		if database.DB.Unscoped().First(&p, "id = ?", productID).Error == nil {
+			cleanCode := strings.TrimSuffix(p.Code, "-COPY")
+			var relatedProd models.Product
+			if database.DB.Unscoped().Where("(code = ? OR code = ?) AND id != ?", cleanCode, p.Code+"-COPY", p.ID).First(&relatedProd).Error == nil {
+				q2 := database.DB.Where("product_id = ? AND current_qty > 0", relatedProd.ID)
+				if warehouseID != "" && warehouseID != "all" {
+					q2 = q2.Where("warehouse_id = ?", warehouseID)
+				}
+				q2.Order("expired_date ASC, created_at ASC").Find(&batches)
+				if len(batches) > 0 {
+					database.DB.Model(&models.ProductBatch{}).Where("product_id = ?", relatedProd.ID).Update("product_id", p.ID)
+				}
+			}
+		}
+	}
+
 	utils.SendSuccess(c, "Daftar bets produk tersedia", batches)
 }
 
@@ -4174,17 +4794,19 @@ func (h *PurchaseHandler) GetProductBatchesForReturn(c *gin.Context) {
 // ==========================================
 
 type PriceHistoryRow struct {
-	SupplierCode string    `json:"supplier_code"`
-	SupplierName string    `json:"supplier_name"`
-	InvoiceNo    string    `json:"invoice_no"`
-	Date         time.Time `json:"date"`
-	ItemCode     string    `json:"item_code"`
-	ItemName     string    `json:"item_name"`
-	Qty          float64   `json:"qty"`
-	UnitName     string    `json:"unit_name"`
-	UnitPrice    float64   `json:"unit_price"`
-	Discount     float64   `json:"discount"`
-	TaxAmount    float64   `json:"tax_amount"`
+	SupplierCode    string    `json:"supplier_code"`
+	SupplierName    string    `json:"supplier_name"`
+	InvoiceNo       string    `json:"invoice_no"`
+	Date            time.Time `json:"date"`
+	ItemCode        string    `json:"item_code"`
+	ItemName        string    `json:"item_name"`
+	Qty             float64   `json:"qty"`
+	UnitName        string    `json:"unit_name"`
+	UnitPrice       float64   `json:"unit_price"`
+	Discount        float64   `json:"discount"`
+	DiscountPercent float64   `json:"discount_percent"`
+	TotalAmount     float64   `json:"total_amount"`
+	TaxAmount       float64   `json:"tax_amount"`
 }
 
 func (h *PurchaseHandler) GetPriceHistory(c *gin.Context) {
@@ -4202,6 +4824,10 @@ func (h *PurchaseHandler) GetPriceHistory(c *gin.Context) {
 			units.name as unit_name,
 			purchase_items.unit_price,
 			purchase_items.discount,
+			CASE WHEN (purchase_items.qty * purchase_items.unit_price) > 0 
+				THEN ROUND(((purchase_items.discount / (purchase_items.qty * purchase_items.unit_price)) * 100)::numeric, 2) 
+				ELSE 0 END as discount_percent,
+			purchase_items.total_amount,
 			(purchase_items.total_amount * purchases.tax_percent / 100) as tax_amount
 		`).
 		Joins("JOIN purchases ON purchases.id = purchase_items.purchase_id").

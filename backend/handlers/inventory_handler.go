@@ -80,33 +80,97 @@ func (h *InventoryHandler) GetStockCard(c *gin.Context) {
 	var movements []models.StockMovement
 	query.Order("created_at ASC").Find(&movements)
 
-	var docNos []string
+	var purchaseDocNos []string
+	var saleDocNos []string
+	var soDocNos []string
+
 	for _, m := range movements {
-		if m.DocNo != "" && (m.DocType == "PURCHASE" || strings.HasPrefix(m.DocNo, "PI/")) {
-			docNos = append(docNos, m.DocNo)
+		if m.DocNo == "" {
+			continue
+		}
+		if m.DocType == "PURCHASE" || strings.HasPrefix(m.DocNo, "PI/") {
+			purchaseDocNos = append(purchaseDocNos, m.DocNo)
+		} else if m.DocType == "SALE" || m.DocType == "SALE_INVOICE" || m.DocType == "SALE_VOID" || strings.HasPrefix(m.DocNo, "INV/") {
+			saleDocNos = append(saleDocNos, m.DocNo)
+		} else if m.DocType == "SALES_ORDER" || strings.HasPrefix(m.DocNo, "SO/") {
+			soDocNos = append(soDocNos, m.DocNo)
 		}
 	}
 
 	invoiceMap := make(map[string]uuid.UUID)
-	if len(docNos) > 0 {
+	if len(purchaseDocNos) > 0 {
 		var purchases []models.Purchase
-		database.DB.Select("id, invoice_no").Where("company_id = ? AND invoice_no IN ?", companyID, docNos).Find(&purchases)
+		database.DB.Select("id, invoice_no").Where("company_id = ? AND invoice_no IN ?", companyID, purchaseDocNos).Find(&purchases)
 		for _, p := range purchases {
 			invoiceMap[p.InvoiceNo] = p.ID
 		}
 	}
 
-	type StockMovementWithPurchase struct {
-		models.StockMovement
-		PurchaseID *uuid.UUID `json:"purchase_id,omitempty"`
+	saleMap := make(map[string]uuid.UUID)
+	if len(saleDocNos) > 0 {
+		var sales []models.Sale
+		database.DB.Select("id, invoice_no").Where("company_id = ? AND invoice_no IN ?", companyID, saleDocNos).Find(&sales)
+		for _, s := range sales {
+			saleMap[s.InvoiceNo] = s.ID
+		}
 	}
 
-	result := make([]StockMovementWithPurchase, len(movements))
+	soMap := make(map[string]uuid.UUID)
+	if len(soDocNos) > 0 {
+		var sos []models.SalesOrder
+		database.DB.Select("id, order_no").Where("company_id = ? AND order_no IN ?", companyID, soDocNos).Find(&sos)
+		for _, so := range sos {
+			soMap[so.OrderNo] = so.ID
+		}
+	}
+
+	type StockMovementDetail struct {
+		models.StockMovement
+		PurchaseID   *uuid.UUID `json:"purchase_id,omitempty"`
+		SaleID       *uuid.UUID `json:"sale_id,omitempty"`
+		SalesOrderID *uuid.UUID `json:"sales_order_id,omitempty"`
+		TargetURL    string     `json:"target_url,omitempty"`
+	}
+
+	result := make([]StockMovementDetail, len(movements))
 	for i, m := range movements {
 		result[i].StockMovement = m
+		var targetURL string
+
 		if pid, ok := invoiceMap[m.DocNo]; ok {
 			result[i].PurchaseID = &pid
+			targetURL = fmt.Sprintf("/purchasing/invoices/%s/edit", pid.String())
+		} else if m.DocType == "PURCHASE" || strings.HasPrefix(m.DocNo, "PI/") {
+			targetURL = fmt.Sprintf("/purchasing/invoices?search=%s", m.DocNo)
+		} else if sid, ok := saleMap[m.DocNo]; ok {
+			result[i].SaleID = &sid
+			targetURL = fmt.Sprintf("/sales/invoices/%s/edit", sid.String())
+		} else if m.DocType == "SALE" || m.DocType == "SALE_INVOICE" || m.DocType == "SALE_VOID" || strings.HasPrefix(m.DocNo, "INV/") {
+			targetURL = fmt.Sprintf("/sales/invoices?search=%s", m.DocNo)
+		} else if soid, ok := soMap[m.DocNo]; ok {
+			result[i].SalesOrderID = &soid
+			targetURL = fmt.Sprintf("/sales/orders/%s/edit", soid.String())
+		} else if m.DocType == "SALES_ORDER" || strings.HasPrefix(m.DocNo, "SO/") {
+			targetURL = fmt.Sprintf("/sales/orders?search=%s", m.DocNo)
+		} else if strings.Contains(m.DocType, "PURCHASE_RETURN") || strings.HasPrefix(m.DocNo, "RB/") {
+			targetURL = fmt.Sprintf("/purchasing/returns?keyword=%s", m.DocNo)
+		} else if strings.Contains(m.DocType, "SALE_RETURN") || strings.HasPrefix(m.DocNo, "RS/") || strings.HasPrefix(m.DocNo, "RJ/") {
+			targetURL = fmt.Sprintf("/sales/returns?keyword=%s", m.DocNo)
+		} else if m.DocType == "SALES_DELIVERY" || strings.HasPrefix(m.DocNo, "SJ/") {
+			targetURL = fmt.Sprintf("/sales/deliveries?search=%s", m.DocNo)
+		} else if m.DocType == "OPENING" || strings.HasPrefix(m.DocNo, "OP-STK") {
+			targetURL = "/inventory/initial-stock"
+		} else if m.DocType == "TRANSFER_IN" || m.DocType == "TRANSFER_OUT" || strings.HasPrefix(m.DocNo, "TF/") {
+			targetURL = fmt.Sprintf("/inventory/transfers?search=%s", m.DocNo)
+		} else if m.DocType == "ITEM_IN" || strings.HasPrefix(m.DocNo, "IN/") {
+			targetURL = fmt.Sprintf("/inventory/in?search=%s", m.DocNo)
+		} else if m.DocType == "ITEM_OUT" || strings.HasPrefix(m.DocNo, "OUT/") {
+			targetURL = fmt.Sprintf("/inventory/out?search=%s", m.DocNo)
+		} else if m.DocType == "OPNAME" || strings.HasPrefix(m.DocNo, "OPN") || strings.HasPrefix(m.DocNo, "SO-STK") {
+			targetURL = fmt.Sprintf("/inventory/opname?search=%s", m.DocNo)
 		}
+
+		result[i].TargetURL = targetURL
 	}
 
 	utils.SendSuccess(c, "Kartu stok produk", result)

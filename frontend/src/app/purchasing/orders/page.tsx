@@ -23,6 +23,7 @@ import {
   FileCheck,
   CheckCircle2,
   Send,
+  ShoppingCart,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
 import MasterToolbarButtons from "@/components/common/MasterToolbarButtons";
@@ -414,9 +415,7 @@ export default function PurchaseOrdersPage() {
             <span className="w-2 h-4 bg-emerald-600 rounded-xs inline-block" />
             Daftar Pesanan Pembelian
           </h1>
-          <p className="text-[10.5px] text-slate-500">
-            Manajemen dokumen purchase order (PO) dan pemesanan barang ke pemasok
-          </p>
+          
         </div>
       </div>
 
@@ -577,18 +576,30 @@ export default function PurchaseOrdersPage() {
           />
 
           {selectedId && (
-            <button
-              type="button"
-              onClick={() => {
-                setDocTargetPO(selectedPO);
-                setDocModalOpen(true);
-              }}
-              className="h-6 px-2.5 bg-sky-50 hover:bg-sky-100 border border-sky-300 text-sky-800 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
-              title="Lihat & Cetak Dokumen Surat Pesanan (SP) Resmi"
-            >
-              <FileText className="w-3.5 h-3.5 text-sky-600" />
-              <span>Dokumen SP</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setDocTargetPO(selectedPO);
+                  setDocModalOpen(true);
+                }}
+                className="h-6 px-2.5 bg-sky-50 hover:bg-sky-100 border border-sky-300 text-sky-800 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
+                title="Lihat & Cetak Dokumen Surat Pesanan (SP) Resmi"
+              >
+                <FileText className="w-3.5 h-3.5 text-sky-600" />
+                <span>Dokumen SP</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => router.push(`/purchasing/invoices/new?po_id=${selectedId}`)}
+                className="h-6 px-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
+                title="Proses PO ini ke Faktur Pembelian (Seluruh field otomatis terisi)"
+              >
+                <ShoppingCart className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Proses Pembelian</span>
+              </button>
+            </>
           )}
         </div>
 

@@ -1,75 +1,69 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  Plus,
-  Trash2,
-  Printer,
-  Save,
-  CreditCard,
-  Search,
-  ChevronLeft as BackIcon,
-  AlertCircle,
-} from "lucide-react";
-import { api, formatCurrency } from "@/lib/api";
+import { ChevronLeft, Search, Trash2, Save, RotateCcw } from "lucide-react";
+import { api, formatCurrency, formatDate } from "@/lib/api";
+import { CariPelangganModal } from "@/components/sales/CariPelangganModal";
+import { CariItemSalesModalMode1 } from "@/components/sales/CariItemSalesModalMode1";
+
+export interface SalesReturnItemMode1Row {
+  rowId: string;
+  sale_id?: string;
+  sale_item_id?: string;
+  invoice_no: string;
+  product_id: string;
+  unit_id: string;
+  code: string;
+  name: string;
+  brand: string;
+  batch_number: string;
+  expired_date: string | null;
+  sold_qty: number;
+  sold_unit: string;
+  already_returned_qty: number;
+  remaining_qty: number;
+  current_stock: number;
+  qty: number;
+  unit: string;
+  unit_price: number;
+  discount_percent: number;
+  item_condition: string;
+  reason: string;
+  total: number;
+}
 
 export default function SalesReturnMode1Page() {
   const router = useRouter();
   const queryClient = useQueryClient();
 
-  // Top Form Fields (Matching Image 6)
-  const [returnNo] = useState("Auto");
-  const [transactionDate, setTransactionDate] = useState("18/11/2026 17:21:27");
-  const [customerId, setCustomerId] = useState("");
-  const [salesRepId, setSalesRepId] = useState("");
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+  const [isItemModalOpen, setIsItemModalOpen] = useState(false);
+
+  const [returnNo, setReturnNo] = useState("Auto");
+  const [returnDate] = useState(() => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(
+      now.getHours()
+    )}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  });
+
+  const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
   const [warehouseId, setWarehouseId] = useState("");
-  const [ppnType, setPpnType] = useState("Non");
-
-  // Bottom Calculation Fields (Matching Image 6)
+  const [ppnType, setPpnType] = useState<"Non" | "Include" | "Exclude">("Non");
+  const [taxPercent, setTaxPercent] = useState<number>(0);
   const [notes, setNotes] = useState("");
-  const [otherCost, setOtherCost] = useState(0);
-  const [includeCost, setIncludeCost] = useState(false);
-  const [taxPercent, setTaxPercent] = useState(0);
-  const [taxChecked, setTaxChecked] = useState(false);
+  const [deliveryMethod, setDeliveryMethod] = useState<"DIAMBIL" | "DIKIRIM">("DIAMBIL");
 
-  // Table items state
-  const [items, setItems] = useState<
-    Array<{
-      original_invoice_no: string;
-      product_id: string;
-      product_code: string;
-      product_name: string;
-      brand: string;
-      sold_qty: number;
-      sold_unit: string;
-      qty: number;
-      unit_id: string;
-      unit_name: string;
-      unit_price: number;
-      discount_percent: number;
-      total: number;
-    }>
-  >([]);
-
+  const [items, setItems] = useState<SalesReturnItemMode1Row[]>([]);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
-  const [pickerModalOpen, setPickerModalOpen] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Queries
   const { data: customers = [] } = useQuery({
     queryKey: ["customers"],
     queryFn: async () => {
       const res = await api.get("/customers");
-      return res.data?.data || [];
-    },
-  });
-
-  const { data: salesReps = [] } = useQuery({
-    queryKey: ["sales-reps"],
-    queryFn: async () => {
-      const res = await api.get("/sales-reps");
       return res.data?.data || [];
     },
   });
@@ -82,80 +76,187 @@ export default function SalesReturnMode1Page() {
     },
   });
 
-  const { data: salesInvoices = [] } = useQuery({
-    queryKey: ["sales-for-return", customerId],
-    queryFn: async () => {
-      const params = new URLSearchParams();
-      if (customerId) params.append("customer_id", customerId);
-      const res = await api.get(`/sales?${params.toString()}`);
-      return res.data?.data || [];
-    },
-  });
+  useEffect(() => {
+    if (warehouses.length > 0 && !warehouseId) {
+      setWarehouseId(warehouses[0].id);
+    }
+  }, [warehouses, warehouseId]);
 
-  React.useEffect(() => {
-    if (customers.length > 0 && !customerId) setCustomerId(customers[0].id);
-    if (warehouses.length > 0 && !warehouseId) setWarehouseId(warehouses[0].id);
-  }, [customers, warehouses, customerId, warehouseId]);
+  useEffect(() => {
+    if (ppnType === "Include" || ppnType === "Exclude") {
+      setTaxPercent(11);
+    } else {
+      setTaxPercent(0);
+    }
+  }, [ppnType]);
 
-  // Calculations
-  const totalItemCount = items.reduce((sum, it) => sum + (it.qty || 0), 0);
-  const subTotal = items.reduce((sum, it) => sum + (it.total || 0), 0);
-  const nomPajak = (subTotal * taxPercent) / 100;
-  const totalAkhir = subTotal + (taxChecked ? nomPajak : 0) + (includeCost ? otherCost : 0);
+  const totalItemCount = useMemo(
+    () => items.reduce((sum, it) => sum + (Number(it.qty) || 0), 0),
+    [items]
+  );
 
-  // Handlers
-  const handleAddItemFromInvoice = (invoice: any, item: any) => {
-    const newItem = {
-      original_invoice_no: invoice.invoice_no,
-      product_id: item.product_id,
-      product_code: item.product?.sku || "MED-001",
-      product_name: item.product?.name || "Item Obat",
-      brand: item.product?.brand?.name || "Generic",
-      sold_qty: item.qty,
-      sold_unit: item.unit?.name || "Pcs",
-      qty: 1,
-      unit_id: item.unit_id,
-      unit_name: item.unit?.name || "Pcs",
-      unit_price: item.unit_price,
-      discount_percent: item.discount || 0,
-      total: item.unit_price * (1 - (item.discount || 0) / 100),
-    };
-    setItems([...items, newItem]);
-    setPickerModalOpen(false);
+  const subTotal = useMemo(
+    () => items.reduce((sum, it) => sum + (Number(it.total) || 0), 0),
+    [items]
+  );
+
+  const taxAmount = useMemo(() => {
+    if (taxPercent <= 0) return 0;
+    if (ppnType === "Include") {
+      return (subTotal * taxPercent) / (100 + taxPercent);
+    }
+    return (subTotal * taxPercent) / 100;
+  }, [subTotal, taxPercent, ppnType]);
+
+  const grandTotal = useMemo(() => {
+    if (ppnType === "Include") {
+      return subTotal;
+    }
+    return subTotal + taxAmount;
+  }, [subTotal, taxAmount, ppnType]);
+
+  const handleItemFieldChange = (index: number, field: string, val: any) => {
+    setItems((prev) => {
+      const copy = [...prev];
+      const row = { ...copy[index] };
+
+      if (field === "qty") {
+        let numVal = Number(val) || 0;
+        if (numVal > row.remaining_qty) {
+          alert(
+            `Jumlah retur (${numVal}) tidak boleh melebihi sisa yang bisa diretur (${row.remaining_qty}).`
+          );
+          numVal = row.remaining_qty;
+        }
+        row.qty = numVal;
+      } else if (field === "discount_percent") {
+        row.discount_percent = Number(val) || 0;
+      } else {
+        (row as any)[field] = val;
+      }
+
+      const discount = (row.qty * row.unit_price * (row.discount_percent || 0)) / 100;
+      row.total = row.qty * row.unit_price - discount;
+      copy[index] = row;
+      return copy;
+    });
   };
 
-  const handleUpdateItemQty = (index: number, newQty: number) => {
-    const updated = [...items];
-    const it = updated[index];
-    it.qty = newQty;
-    const itemSub = it.qty * it.unit_price;
-    const disc = (itemSub * it.discount_percent) / 100;
-    it.total = itemSub - disc;
-    setItems(updated);
-  };
-
-  const handleDeleteItem = () => {
-    if (selectedRowIndex === null) return;
-    setItems(items.filter((_, idx) => idx !== selectedRowIndex));
+  const handleDeleteSelectedRow = () => {
+    if (selectedRowIndex === null || !items[selectedRowIndex]) return;
+    setItems((prev) => prev.filter((_, i) => i !== selectedRowIndex));
     setSelectedRowIndex(null);
+  };
+
+  const handleSelectFromMode1Modal = (selectedList: any[]) => {
+    setItems((prev) => {
+      const copy = [...prev];
+      selectedList.forEach((it) => {
+        const rowId = `${it.sale_id}_${it.sale_item_id || it.product_id}`;
+        const exists = copy.some((ex) => ex.rowId === rowId);
+        if (!exists) {
+          const defaultQty = it.remaining_qty > 0 ? it.remaining_qty : it.sold_qty;
+          const discount = (defaultQty * it.unit_price * (it.discount_percent || 0)) / 100;
+
+          if (!selectedCustomer && it.customer_id) {
+            const cust = customers.find((c: any) => c.id === it.customer_id);
+            if (cust) setSelectedCustomer(cust);
+            else setSelectedCustomer({ id: it.customer_id, name: it.customer_name, code: "-" });
+          }
+
+          if (it.warehouse_id && it.warehouse_id !== warehouseId) {
+            setWarehouseId(it.warehouse_id);
+          }
+
+          copy.push({
+            rowId,
+            sale_id: it.sale_id,
+            sale_item_id: it.sale_item_id,
+            invoice_no: it.invoice_no,
+            product_id: it.product_id,
+            unit_id: it.unit_id,
+            code: it.product_code || it.code,
+            name: it.product_name || it.name,
+            brand: it.brand || "-",
+            batch_number: it.batch_number || "",
+            expired_date: it.expired_date || null,
+            sold_qty: Number(it.sold_qty) || 0,
+            sold_unit: it.unit_name || it.unit,
+            already_returned_qty: Number(it.already_returned_qty) || 0,
+            remaining_qty: Number(it.remaining_qty) || 0,
+            current_stock: Number(it.current_stock) || 0,
+            qty: defaultQty,
+            unit: it.unit_name || it.unit,
+            unit_price: Number(it.unit_price) || 0,
+            discount_percent: Number(it.discount_percent) || 0,
+            item_condition: "BAIK",
+            reason: "",
+            total: defaultQty * it.unit_price - discount,
+          });
+        }
+      });
+      return copy;
+    });
+
+    if (selectedRowIndex === null && selectedList.length > 0) {
+      setSelectedRowIndex(0);
+    }
+  };
+
+  const handleResetForm = () => {
+    if (items.length > 0 && !confirm("Kosongkan form untuk membuat Retur Penjualan baru?")) {
+      return;
+    }
+    setReturnNo("Auto");
+    setSelectedCustomer(null);
+    setItems([]);
+    setSelectedRowIndex(null);
+    setNotes("");
+    setDeliveryMethod("DIAMBIL");
   };
 
   const createMutation = useMutation({
     mutationFn: async () => {
+      if (!selectedCustomer?.id) {
+        throw new Error("Pilih pelanggan terlebih dahulu.");
+      }
+      if (!warehouseId) {
+        throw new Error("Pilih gudang terlebih dahulu.");
+      }
+      if (items.length === 0) {
+        throw new Error("Daftar item retur tidak boleh kosong. Klik [+ Item (Faktur Penjualan)].");
+      }
+
+      for (const it of items) {
+        if (it.qty <= 0) {
+          throw new Error(`Jumlah retur untuk obat ${it.name} harus lebih dari 0.`);
+        }
+        if (it.qty > it.remaining_qty) {
+          throw new Error(
+            `Jumlah retur untuk ${it.name} (${it.qty}) melebihi sisa yang bisa diretur (${it.remaining_qty}).`
+          );
+        }
+      }
+
       const payload = {
         return_mode: "MODE_1",
-        customer_id: customerId,
-        sales_rep_id: salesRepId || undefined,
+        delivery_method: deliveryMethod,
+        sale_id: items[0]?.sale_id || undefined,
         warehouse_id: warehouseId,
-        tax_type: ppnType,
-        tax_percent: taxChecked ? taxPercent : 0,
-        other_cost: includeCost ? otherCost : 0,
-        reason: notes || "Retur Penjualan Mode 1",
-        computer_name: "KOMPUTER-01",
+        customer_id: selectedCustomer.id,
+        tax_type: ppnType.toUpperCase(),
+        tax_percent: taxPercent,
+        other_cost: 0,
+        reason: notes || "Retur Faktur Penjualan Obat (Mode 1)",
+        computer_name: "WEB-CLIENT",
         items: items.map((it) => ({
           product_id: it.product_id,
           unit_id: it.unit_id,
-          original_invoice_no: it.original_invoice_no,
+          batch_number: it.batch_number,
+          expired_date: it.expired_date,
+          item_condition: it.item_condition || "BAIK",
+          reason: it.reason || notes || "Retur Faktur Penjualan",
+          original_invoice_no: it.invoice_no,
           brand: it.brand,
           sold_qty: it.sold_qty,
           sold_unit: it.sold_unit,
@@ -164,132 +265,132 @@ export default function SalesReturnMode1Page() {
           discount_percent: it.discount_percent,
         })),
       };
+
       return await api.post("/sales/returns", payload);
     },
-    onSuccess: () => {
+    onSuccess: (res: any) => {
       queryClient.invalidateQueries({ queryKey: ["sales-returns"] });
-      alert("Retur Penjualan Mode 1 berhasil disimpan!");
+      queryClient.invalidateQueries({ queryKey: ["sales-invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["inventory-balances"] });
+      alert(
+        `Draft Retur Penjualan Mode 1 berhasil disimpan dengan No: ${
+          res.data?.data?.return_no || "RJ-OK"
+        }!\nStatus: DRAFT. Silakan lanjutkan ke tahap Konfirmasi Gudang.`
+      );
       router.push("/sales/returns");
     },
     onError: (err: any) => {
-      setErrorMsg(err.response?.data?.message || err.message || "Gagal menyimpan retur penjualan");
+      alert("Gagal menyimpan retur: " + (err.response?.data?.message || err.message));
     },
   });
 
+  const selectedItemRow = selectedRowIndex !== null ? items[selectedRowIndex] : null;
+
   return (
-    <div className="flex flex-col h-full min-h-0 space-y-1 text-xs select-none">
-      {/* 1. TOP HEADER BAR */}
+    <div className="bg-white border border-slate-200 rounded-lg p-1.5 sm:p-2 flex flex-col h-full min-h-0 text-xs select-none gap-1 overflow-y-auto md:overflow-hidden">
+      {/* 1. Header Bar */}
       <div className="shrink-0 flex items-center justify-between border-b border-slate-200 pb-1">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={() => router.push("/sales/returns")}
-            className="text-slate-600 hover:text-slate-900"
+            className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 transition cursor-pointer"
+            title="Kembali ke Daftar Retur Penjualan"
           >
-            <BackIcon className="w-4 h-4" />
+            <ChevronLeft className="w-4 h-4" />
           </button>
-          <h1 className="text-sm font-bold text-slate-800">
-            Retur Penjualan Baru Mode 1
-          </h1>
+          <div className="flex items-center gap-1">
+            <span className="w-1.5 h-3.5 bg-rose-500 rounded-xs inline-block" />
+            <span className="font-bold text-slate-800 text-xs sm:text-sm">
+              Retur Penjualan Baru (Mode 1 - Berdasarkan Nomor Faktur Asal)
+            </span>
+            <span className="text-[10px] text-slate-500 hidden sm:inline">
+              / Input Item Berdasarkan Faktur Penjualan
+            </span>
+          </div>
         </div>
-        <div className="flex items-center gap-2 text-[11px] font-semibold text-slate-600">
-          <span>APOTEK BERKAT PURNAMA [UTAMA]</span>
-          <span className="w-4 h-4 bg-red-600 text-white text-[10px] rounded-full flex items-center justify-center font-bold">
-            33
-          </span>
-          <span className="w-5 h-5 bg-emerald-600 text-white text-[10px] rounded-full flex items-center justify-center font-bold">
-            A
-          </span>
-          <span>ADMIN2</span>
+
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={handleResetForm}
+            className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded text-xs font-medium flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
+          >
+            <RotateCcw className="w-3 h-3 text-slate-500" />
+            <span>Baru</span>
+          </button>
         </div>
       </div>
 
-      {errorMsg && (
-        <div className="p-1.5 bg-red-50 text-red-700 rounded border border-red-200 flex items-center gap-1.5 text-[11px]">
-          <AlertCircle className="w-4 h-4 shrink-0" />
-          <span>{errorMsg}</span>
-        </div>
-      )}
-
-      {/* 2. HEADER FORM (2 Rows Matching Image 6) */}
-      <div className="shrink-0 bg-white p-2 rounded border border-slate-200 shadow-2xs space-y-1.5">
-        {/* Row 1 */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
-          <div>
-            <label className="block text-slate-600 font-semibold mb-0.5">No Transaksi :</label>
+      {/* 2. Top Form Fields */}
+      <div className="shrink-0 bg-slate-50 p-1.5 rounded border border-slate-200 grid grid-cols-1 md:grid-cols-12 gap-1.5 text-xs">
+        {/* Col 1: No Transaksi, Tanggal, Pelanggan */}
+        <div className="md:col-span-5 space-y-1">
+          <div className="grid grid-cols-12 items-center gap-1">
+            <label className="col-span-3 text-slate-600 font-semibold text-[11px]">
+              No Transaksi :
+            </label>
             <input
               type="text"
+              readOnly
               value={returnNo}
-              disabled
-              className="w-full h-6 px-2 border border-slate-300 rounded bg-slate-50 text-slate-600 font-semibold text-[11px]"
+              className="col-span-9 h-6 px-2 border border-slate-300 rounded bg-slate-100 text-[11px] font-mono text-slate-600 cursor-not-allowed"
             />
           </div>
-          <div>
-            <label className="block text-slate-600 font-semibold mb-0.5">Tanggal :</label>
+
+          <div className="grid grid-cols-12 items-center gap-1">
+            <label className="col-span-3 text-slate-600 font-semibold text-[11px]">
+              Tanggal :
+            </label>
             <input
               type="text"
-              value={transactionDate}
-              onChange={(e) => setTransactionDate(e.target.value)}
-              className="w-full h-6 px-2 border border-slate-300 rounded text-[11px]"
+              readOnly
+              value={returnDate}
+              className="col-span-9 h-6 px-2 border border-slate-300 rounded bg-slate-100 text-[11px] font-mono text-slate-600 cursor-not-allowed"
             />
           </div>
-          <div>
-            <label className="block text-slate-600 font-semibold mb-0.5">Pelanggan :</label>
-            <div className="flex gap-1">
-              <select
-                value={customerId}
-                onChange={(e) => setCustomerId(e.target.value)}
-                className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white text-slate-700"
-              >
-                {customers.map((c: any) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
+
+          <div className="grid grid-cols-12 items-center gap-1">
+            <label className="col-span-3 text-slate-600 font-semibold text-[11px]">
+              Pelanggan :
+            </label>
+            <div className="col-span-9 flex gap-1">
+              <input
+                type="text"
+                readOnly
+                placeholder="Pilih Pelanggan atau pilih item faktur..."
+                value={
+                  selectedCustomer
+                    ? `${selectedCustomer.code ? selectedCustomer.code + " - " : ""}${
+                        selectedCustomer.name
+                      }`
+                    : ""
+                }
+                className="flex-1 h-6 px-2 border border-slate-300 rounded bg-white text-[11px] text-slate-800 truncate"
+              />
               <button
                 type="button"
-                className="h-6 w-6 border border-slate-300 rounded flex items-center justify-center text-slate-600 hover:bg-slate-50 shrink-0"
+                onClick={() => setIsCustomerModalOpen(true)}
+                className="w-6 h-6 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded flex items-center justify-center shrink-0 cursor-pointer"
+                title="Cari Pelanggan"
               >
-                <Search className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-          <div>
-            <label className="block text-slate-600 font-semibold mb-0.5">Sales :</label>
-            <div className="flex gap-1">
-              <select
-                value={salesRepId}
-                onChange={(e) => setSalesRepId(e.target.value)}
-                className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white text-slate-500"
-              >
-                <option value="">Select...</option>
-                {salesReps.map((s: any) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="h-6 w-6 border border-slate-300 rounded flex items-center justify-center text-slate-600 hover:bg-slate-50 shrink-0"
-              >
-                <Search className="w-3 h-3" />
+                <Search className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
         </div>
 
-        {/* Row 2 */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
-          <div>
-            <label className="block text-slate-600 font-semibold mb-0.5">Masuk ke :</label>
+        {/* Col 2: Dept/Gudang, Pajak PPN, Keterangan, Pengambilan */}
+        <div className="md:col-span-4 space-y-1">
+          <div className="grid grid-cols-12 items-center gap-1">
+            <label className="col-span-4 text-slate-600 font-semibold text-[11px]">
+              Dept / Gudang :
+            </label>
             <select
               value={warehouseId}
               onChange={(e) => setWarehouseId(e.target.value)}
-              className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white"
+              className="col-span-8 h-6 px-1.5 border border-slate-300 rounded text-[11px] bg-white cursor-pointer truncate"
             >
-              <option value="all">UTAMA - APOTEK BERKAT</option>
               {warehouses.map((w: any) => (
                 <option key={w.id} value={w.id}>
                   {w.name}
@@ -297,329 +398,343 @@ export default function SalesReturnMode1Page() {
               ))}
             </select>
           </div>
-          <div>
-            <label className="block text-slate-600 font-semibold mb-0.5">PPN :</label>
+
+          <div className="grid grid-cols-12 items-center gap-1">
+            <label className="col-span-4 text-slate-600 font-semibold text-[11px]">
+              Pajak PPN :
+            </label>
+            <div className="col-span-8 flex items-center gap-1">
+              <select
+                value={ppnType}
+                onChange={(e) => setPpnType(e.target.value as any)}
+                className="flex-1 h-6 px-1 border border-slate-300 rounded text-[11px] bg-white"
+              >
+                <option value="Non">Non</option>
+                <option value="Include">Include</option>
+                <option value="Exclude">Exclude</option>
+              </select>
+              <input
+                type="number"
+                value={taxPercent}
+                onChange={(e) => setTaxPercent(Number(e.target.value) || 0)}
+                disabled={ppnType === "Non"}
+                className="w-12 h-6 px-1 border border-slate-300 rounded text-right text-[11px] disabled:bg-slate-100"
+              />
+              <span className="text-[11px] text-slate-500">%</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-12 items-center gap-1">
+            <label className="col-span-4 text-slate-600 font-semibold text-[11px]">
+              Keterangan :
+            </label>
+            <input
+              type="text"
+              placeholder="Alasan retur..."
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="col-span-8 h-6 px-2 border border-slate-300 rounded text-[11px] bg-white"
+            />
+          </div>
+
+          <div className="grid grid-cols-12 items-center gap-1">
+            <label className="col-span-4 text-slate-600 font-semibold text-[11px]">
+              Metode Retur :
+            </label>
             <select
-              value={ppnType}
-              onChange={(e) => setPpnType(e.target.value)}
-              className="w-full h-6 px-2 border border-slate-300 rounded text-[11px] bg-white"
+              value={deliveryMethod}
+              onChange={(e) => setDeliveryMethod(e.target.value as "DIAMBIL" | "DIKIRIM")}
+              className="col-span-8 h-6 px-1.5 border border-sky-300 rounded text-[11px] font-semibold bg-sky-50/50 text-sky-900 focus:outline-none focus:border-sky-500 cursor-pointer"
             >
-              <option value="Non">Non</option>
-              <option value="Include">Include</option>
-              <option value="Exclude">Exclude</option>
+              <option value="DIAMBIL">Diambil Pelanggan Langsung</option>
+              <option value="DIKIRIM">Melalui Pengiriman</option>
             </select>
           </div>
         </div>
+
+        {/* Col 3: Grand Total Display Box */}
+        <div className="md:col-span-3 bg-white p-2 rounded border border-rose-200 flex flex-col justify-between shadow-2xs">
+          <div className="flex items-center justify-between text-[11px] text-slate-600">
+            <span>
+              Total Item: <strong className="text-slate-800">{totalItemCount}</strong>
+            </span>
+            <span>
+              Jenis Obat: <strong className="text-slate-800">{items.length}</strong>
+            </span>
+          </div>
+          <div className="text-right">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold block">
+              Total Nilai Retur
+            </span>
+            <span className="text-base sm:text-lg font-black text-rose-600 font-mono leading-none">
+              {formatCurrency(grandTotal)}
+            </span>
+          </div>
+        </div>
       </div>
 
-      {/* 3. TABLE (12 Columns Matching Image 6) */}
-      <div className="flex-1 min-h-0 bg-white rounded border border-slate-200 overflow-auto shadow-2xs">
-        <table className="w-full text-[11px] text-left border-collapse whitespace-nowrap">
-          <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 font-bold border-b border-slate-200 h-6 shadow-2xs">
-            <tr>
-              <th className="py-0.5 px-2 border-r border-slate-200 text-center w-8">No</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200">No Transaksi</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200">Kode Item</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200">Nama</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200">Merek</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200 text-right">Jml Jual</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200">Sat Jual</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200 text-right w-20">Jumlah</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200">Satuan</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200 text-right">Harga</th>
-              <th className="py-0.5 px-2.5 border-r border-slate-200 text-right">Pot %</th>
-              <th className="py-0.5 px-2.5 text-right">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.length === 0 ? (
-              <tr>
-                <td colSpan={12} className="text-center py-16 text-slate-400">
-                  No data
-                </td>
-              </tr>
-            ) : (
-              items.map((it, idx) => {
-                const isSelected = selectedRowIndex === idx;
-
-                return (
-                  <tr
-                    key={idx}
-                    onClick={() => setSelectedRowIndex(isSelected ? null : idx)}
-                    className={`border-b border-slate-100 cursor-pointer h-6 transition-colors ${
-                      isSelected ? "bg-sky-50 text-sky-900 font-medium" : "hover:bg-slate-50/80"
-                    }`}
-                  >
-                    <td className="py-0.5 px-2 border-r border-slate-100 text-center">{idx + 1}</td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 font-mono text-emerald-700">
-                      {it.original_invoice_no}
-                    </td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 font-mono">{it.product_code}</td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 font-medium">{it.product_name}</td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-slate-500">{it.brand}</td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-right">{it.sold_qty}</td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100">{it.sold_unit}</td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-right">
-                      <input
-                        type="number"
-                        min="1"
-                        max={it.sold_qty}
-                        value={it.qty}
-                        onChange={(e) => handleUpdateItemQty(idx, parseFloat(e.target.value) || 0)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-16 h-5 px-1 border rounded text-right text-[11px]"
-                      />
-                    </td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100">{it.unit_name}</td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-right">
-                      {formatCurrency(it.unit_price)}
-                    </td>
-                    <td className="py-0.5 px-2.5 border-r border-slate-100 text-right">
-                      {it.discount_percent}
-                    </td>
-                    <td className="py-0.5 px-2.5 text-right font-bold text-slate-800">
-                      {formatCurrency(it.total)}
+      {/* 3. Middle Content: Table (col-10) + Sidebar (col-2) */}
+      <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 gap-1.5 overflow-hidden">
+        <div className="md:col-span-10 border border-slate-300 rounded bg-white flex flex-col min-h-0 overflow-hidden">
+          <div className="flex-1 overflow-auto">
+            <table className="w-full text-[11px] text-left border-collapse whitespace-nowrap">
+              <thead className="bg-[#f8fafc] text-slate-700 font-bold border-b border-slate-300 sticky top-0 z-10 shadow-2xs">
+                <tr>
+                  <th className="py-1 px-1.5 text-center w-8 border-r border-slate-200">No</th>
+                  <th className="py-1 px-2 border-r border-slate-200">No Faktur Asal</th>
+                  <th className="py-1 px-2 border-r border-slate-200">Kode &amp; Nama Obat</th>
+                  <th className="py-1 px-2 border-r border-slate-200">Batch &amp; ED</th>
+                  <th className="py-1 px-1.5 text-center border-r border-slate-200">Kondisi</th>
+                  <th className="py-1 px-2 text-right border-r border-slate-200">Jml Jual</th>
+                  <th className="py-1 px-2 text-right border-r border-slate-200">Sisa Retur</th>
+                  <th className="py-1 px-2 text-right border-r border-slate-200">Jml Retur</th>
+                  <th className="py-1 px-1.5 border-r border-slate-200">Satuan</th>
+                  <th className="py-1 px-2 text-right border-r border-slate-200">Harga Jual</th>
+                  <th className="py-1 px-1.5 text-right border-r border-slate-200">Pot %</th>
+                  <th className="py-1 px-2 border-r border-slate-200">Alasan</th>
+                  <th className="py-1 px-2 text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-slate-800">
+                {items.length === 0 ? (
+                  <tr>
+                    <td colSpan={13} className="py-16 text-center text-slate-400">
+                      Belum ada item dipilih. Klik tombol{" "}
+                      <strong className="text-emerald-700">[+ Item]</strong> di bawah untuk memilih
+                      item dari faktur penjualan asal.
                     </td>
                   </tr>
-                );
-              })
+                ) : (
+                  items.map((it, idx) => {
+                    const isSelected = selectedRowIndex === idx;
+                    return (
+                      <tr
+                        key={it.rowId || idx}
+                        onClick={() => setSelectedRowIndex(idx)}
+                        className={`cursor-pointer transition hover:bg-rose-50/50 ${
+                          isSelected ? "bg-rose-100/70 font-semibold text-rose-950" : ""
+                        }`}
+                      >
+                        <td className="py-1 px-1.5 text-center text-slate-500 border-r border-slate-100">
+                          {idx + 1}
+                        </td>
+                        <td className="py-1 px-2 font-mono text-[10.5px] border-r border-slate-100">
+                          {it.invoice_no}
+                        </td>
+                        <td className="py-1 px-2 border-r border-slate-100 max-w-[200px] truncate">
+                          <strong className="block text-slate-900">{it.name}</strong>
+                          <span className="font-mono text-[9.5px] text-slate-500">{it.code}</span>
+                        </td>
+                        <td className="py-1 px-2 font-mono text-[10.5px] border-r border-slate-100">
+                          <div>
+                            Batch: <strong className="text-slate-700">{it.batch_number || "-"}</strong>
+                          </div>
+                          <div className="text-slate-500">ED: {formatDate(it.expired_date)}</div>
+                        </td>
+                        <td className="py-0.5 px-1 text-center border-r border-slate-100">
+                          <select
+                            value={it.item_condition}
+                            onChange={(e) =>
+                              handleItemFieldChange(idx, "item_condition", e.target.value)
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-5 px-1 border border-slate-300 rounded text-[10px] bg-white font-medium"
+                          >
+                            <option value="BAIK">Baik</option>
+                            <option value="RUSAK">Rusak</option>
+                            <option value="EXPIRED">Kadaluarsa</option>
+                          </select>
+                        </td>
+                        <td className="py-1 px-2 text-right font-mono text-slate-600 border-r border-slate-100">
+                          {it.sold_qty}
+                        </td>
+                        <td className="py-1 px-2 text-right font-mono font-bold text-emerald-700 border-r border-slate-100">
+                          {it.remaining_qty}
+                        </td>
+                        <td className="py-0.5 px-1 text-right border-r border-slate-100">
+                          <input
+                            type="number"
+                            min="0.01"
+                            max={it.remaining_qty}
+                            step="any"
+                            value={it.qty || ""}
+                            onChange={(e) =>
+                              handleItemFieldChange(idx, "qty", parseFloat(e.target.value) || 0)
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-16 h-5 px-1 py-0 border border-slate-300 rounded text-right text-[11px] font-bold text-rose-700 bg-white focus:outline-none focus:border-rose-500"
+                          />
+                        </td>
+                        <td className="py-1 px-1.5 border-r border-slate-100">{it.unit}</td>
+                        <td className="py-1 px-2 text-right font-mono text-slate-700 border-r border-slate-100">
+                          {formatCurrency(it.unit_price)}
+                        </td>
+                        <td className="py-0.5 px-1 text-right border-r border-slate-100">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="any"
+                            value={it.discount_percent || ""}
+                            onChange={(e) =>
+                              handleItemFieldChange(
+                                idx,
+                                "discount_percent",
+                                parseFloat(e.target.value) || 0
+                              )
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-12 h-5 px-1 py-0 border border-slate-300 rounded text-right text-[11px] font-mono bg-white focus:outline-none focus:border-rose-500"
+                          />
+                        </td>
+                        <td className="py-0.5 px-1 border-r border-slate-100">
+                          <input
+                            type="text"
+                            placeholder="Alasan retur..."
+                            value={it.reason || ""}
+                            onChange={(e) =>
+                              handleItemFieldChange(idx, "reason", e.target.value)
+                            }
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-28 h-5 px-1 py-0 border border-slate-300 rounded text-[10.5px] bg-white focus:outline-none focus:border-rose-500"
+                          />
+                        </td>
+                        <td className="py-1 px-2 text-right font-mono font-bold text-rose-700 whitespace-nowrap">
+                          {formatCurrency(it.total)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Right: Info / Summary Sidebar (col-2) */}
+        <div className="md:col-span-2 border border-slate-300 rounded bg-white p-2 flex flex-col justify-between overflow-y-auto h-full min-h-0 text-xs">
+          <div className="space-y-1.5">
+            <h4 className="text-[10.5px] font-bold text-slate-700 border-b border-slate-100 pb-1 flex items-center justify-between">
+              <span>Detail Item Terpilih</span>
+              {selectedItemRow && (
+                <span className="text-[9.5px] text-rose-600 font-semibold font-mono">
+                  {selectedItemRow.code}
+                </span>
+              )}
+            </h4>
+            {selectedItemRow ? (
+              <div className="space-y-1 text-slate-600 text-[10.5px]">
+                <div>
+                  <span className="text-slate-400 block text-[9.5px]">Nama Obat:</span>
+                  <strong className="text-slate-800 text-[11px] block leading-tight">
+                    {selectedItemRow.name}
+                  </strong>
+                </div>
+                <div className="flex justify-between pt-0.5 border-t border-slate-100">
+                  <span className="text-slate-500">No Faktur:</span>
+                  <span className="font-mono text-slate-800">{selectedItemRow.invoice_no}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Batch:</span>
+                  <span className="font-mono text-slate-800">
+                    {selectedItemRow.batch_number || "-"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Expired Date:</span>
+                  <span className="font-mono text-slate-800">
+                    {formatDate(selectedItemRow.expired_date)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Sisa Bisa Retur:</span>
+                  <span className="font-mono font-bold text-emerald-700">
+                    {selectedItemRow.remaining_qty} {selectedItemRow.unit}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Stok Apotek:</span>
+                  <span className="font-mono text-blue-700">
+                    {selectedItemRow.current_stock} {selectedItemRow.unit}
+                  </span>
+                </div>
+                <div className="flex justify-between border-t border-slate-100 pt-0.5">
+                  <span className="text-slate-500">Jml Retur:</span>
+                  <span className="font-mono font-bold text-rose-700">
+                    {selectedItemRow.qty} {selectedItemRow.unit}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Harga Jual:</span>
+                  <span className="font-mono text-slate-800">
+                    {formatCurrency(selectedItemRow.unit_price)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Subtotal:</span>
+                  <span className="font-mono font-bold text-slate-900">
+                    {formatCurrency(selectedItemRow.total)}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="py-8 text-center text-slate-400 italic text-[10.5px]">
+                Pilih atau klik baris item dalam tabel untuk melihat detail informasi.
+              </div>
             )}
-          </tbody>
-        </table>
+          </div>
+          <div className="text-[10px] text-slate-400 border-t border-slate-100 pt-1 text-center">
+            Standar Retur CDOB Apotek
+          </div>
+        </div>
       </div>
 
-      {/* 4. SUB-TABLE ACTION BUTTONS */}
-      <div className="shrink-0 flex items-center gap-1.5 py-0.5">
+      {/* 4. Table Action Buttons under table */}
+      <div className="flex flex-wrap items-center gap-1.5 shrink-0 py-0.5">
         <button
           type="button"
-          onClick={() => setPickerModalOpen(true)}
-          className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs"
+          onClick={() => setIsItemModalOpen(true)}
+          className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded text-[11px] font-medium flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
         >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Item</span>
+          <span>+ Item (Faktur Penjualan)</span>
         </button>
+
         <button
           type="button"
-          onClick={handleDeleteItem}
+          onClick={handleDeleteSelectedRow}
           disabled={selectedRowIndex === null}
-          className="h-6 px-2 bg-white hover:bg-slate-50 border border-slate-300 text-red-600 rounded flex items-center justify-center shadow-2xs disabled:opacity-40"
+          className="w-6 h-6 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded flex items-center justify-center shadow-2xs transition active:scale-95 disabled:opacity-40 cursor-pointer"
           title="Hapus Baris"
         >
-          <Trash2 className="w-3.5 h-3.5" />
-        </button>
-        <button
-          type="button"
-          className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-500 rounded text-[11px]"
-        >
-          Data Serial
-        </button>
-      </div>
-
-      {/* 5. BOTTOM CALCULATION PANEL (Matching Image 6) */}
-      <div className="shrink-0 bg-white p-2 rounded border border-slate-200 shadow-2xs space-y-1.5 text-[11px]">
-        {/* Row 1 */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
-          <div className="md:col-span-4 flex items-center gap-1.5">
-            <label className="text-slate-600 font-semibold whitespace-nowrap">Keterangan :</label>
-            <input
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="w-full h-6 px-2 border border-slate-300 rounded text-[11px]"
-            />
-          </div>
-          <div className="md:col-span-2 flex items-center gap-1">
-            <span className="text-slate-600 font-semibold">Item :</span>
-            <input
-              type="text"
-              value={totalItemCount.toFixed(2)}
-              disabled
-              className="w-full h-6 px-2 border border-slate-300 rounded text-right bg-slate-50 font-bold"
-            />
-          </div>
-          <div className="md:col-span-3 flex items-center gap-1">
-            <span className="text-slate-600 font-semibold whitespace-nowrap">Sub Total :</span>
-            <input
-              type="text"
-              value={formatCurrency(subTotal)}
-              disabled
-              className="w-full h-6 px-2 border border-slate-300 rounded text-right bg-slate-50 font-bold"
-            />
-          </div>
-          <div className="md:col-span-3 flex items-center gap-1">
-            <span className="text-slate-600 font-semibold">Biaya :</span>
-            <input
-              type="number"
-              value={otherCost}
-              onChange={(e) => setOtherCost(parseFloat(e.target.value) || 0)}
-              className="w-full h-6 px-2 border border-slate-300 rounded text-right font-mono"
-            />
-            <input
-              type="checkbox"
-              checked={includeCost}
-              onChange={(e) => setIncludeCost(e.target.checked)}
-              className="w-3.5 h-3.5 border rounded"
-            />
-          </div>
-        </div>
-
-        {/* Row 2 */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
-          <div className="md:col-span-3 flex items-center gap-1">
-            <span className="text-slate-600 font-semibold">Pjk % :</span>
-            <input
-              type="number"
-              value={taxPercent}
-              onChange={(e) => setTaxPercent(parseFloat(e.target.value) || 0)}
-              className="w-16 h-6 px-2 border border-slate-300 rounded text-right"
-            />
-            <input
-              type="checkbox"
-              checked={taxChecked}
-              onChange={(e) => setTaxChecked(e.target.checked)}
-              className="w-3.5 h-3.5 border rounded"
-            />
-          </div>
-          <div className="md:col-span-3 flex items-center gap-1">
-            <span className="text-slate-600 font-semibold whitespace-nowrap">Nom Pajak :</span>
-            <input
-              type="text"
-              value={formatCurrency(nomPajak)}
-              disabled
-              className="w-full h-6 px-2 border border-slate-300 rounded text-right bg-slate-50"
-            />
-            <input
-              type="checkbox"
-              checked={taxChecked}
-              onChange={(e) => setTaxChecked(e.target.checked)}
-              className="w-3.5 h-3.5 border rounded"
-            />
-          </div>
-          <div className="md:col-span-6 flex items-center gap-2 justify-end">
-            <span className="text-slate-700 font-bold whitespace-nowrap">Total Akhir :</span>
-            {/* Pink box matching screenshot */}
-            <div className="bg-[#f8b4c9] text-slate-800 font-bold text-sm px-4 py-1 rounded min-w-[180px] text-right shadow-2xs border border-[#f39bb6]">
-              {formatCurrency(totalAkhir)}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 6. BOTTOM ACTIONS (Matching Image 6) */}
-      <div className="shrink-0 flex items-center gap-2 pt-0.5">
-        <button
-          type="button"
-          onClick={() => {
-            setItems([]);
-            setNotes("");
-          }}
-          className="h-6 px-3 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Tambah</span>
+          <Trash2 className="w-3 h-3 text-rose-500" />
         </button>
 
         <button
           type="button"
+          disabled={createMutation.isPending}
           onClick={() => createMutation.mutate()}
-          disabled={createMutation.isPending || items.length === 0}
-          className="h-6 px-3 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition disabled:opacity-50"
+          className="h-6 px-3 bg-[#009b62] hover:bg-[#008754] text-white font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-50 cursor-pointer"
         >
-          <Save className="w-3.5 h-3.5" />
+          <Save className="w-3 h-3 stroke-[2.5]" />
           <span>{createMutation.isPending ? "Menyimpan..." : "Simpan"}</span>
         </button>
-
-        <button
-          type="button"
-          onClick={() => setItems([])}
-          className="h-6 px-3 bg-white hover:bg-slate-50 border border-red-300 text-red-600 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs"
-        >
-          <Trash2 className="w-3.5 h-3.5" />
-          <span>Hapus</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => window.print()}
-          className="h-6 px-3 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs"
-        >
-          <Printer className="w-3.5 h-3.5" />
-          <span>Cetak</span>
-        </button>
-
-        <button
-          type="button"
-          className="h-6 px-3 bg-white hover:bg-slate-50 border border-amber-300 text-amber-700 font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs"
-        >
-          <CreditCard className="w-3.5 h-3.5" />
-          <span>Bayar</span>
-        </button>
       </div>
 
-      {/* PICKER MODAL: Select from Sales Invoices */}
-      {pickerModalOpen && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-3">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl overflow-hidden border border-slate-200">
-            <div className="flex items-center justify-between px-4 py-2 border-b bg-emerald-600 text-white font-bold text-xs">
-              <span>Pilih Item dari Faktur Penjualan</span>
-              <button onClick={() => setPickerModalOpen(false)}>✕</button>
-            </div>
-            <div className="p-3 max-h-[70vh] overflow-y-auto space-y-2 text-[11px]">
-              {salesInvoices.length === 0 ? (
-                <div className="py-8 text-center text-slate-400">
-                  Tidak ada faktur penjualan untuk pelanggan ini
-                </div>
-              ) : (
-                salesInvoices.map((inv: any) => (
-                  <div key={inv.id} className="border rounded p-2 bg-slate-50 space-y-1">
-                    <div className="flex justify-between font-bold text-emerald-800 text-[11px]">
-                      <span>{inv.invoice_no}</span>
-                      <span>Total: {formatCurrency(inv.total_amount)}</span>
-                    </div>
-                    <table className="w-full bg-white border text-[11px]">
-                      <thead>
-                        <tr className="bg-slate-100 text-slate-600">
-                          <th className="p-1 border text-left">Item</th>
-                          <th className="p-1 border text-center w-16">Qty Jual</th>
-                          <th className="p-1 border text-right w-24">Harga</th>
-                          <th className="p-1 border text-center w-20">Aksi</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {inv.items?.map((it: any) => (
-                          <tr key={it.id} className="border-b">
-                            <td className="p-1 border font-medium">{it.product?.name}</td>
-                            <td className="p-1 border text-center">{it.qty}</td>
-                            <td className="p-1 border text-right">{formatCurrency(it.unit_price)}</td>
-                            <td className="p-1 border text-center">
-                              <button
-                                type="button"
-                                onClick={() => handleAddItemFromInvoice(inv, it)}
-                                className="px-2 py-0.5 bg-emerald-600 text-white rounded font-medium text-[10px] hover:bg-emerald-700"
-                              >
-                                + Pilih
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ))
-              )}
-            </div>
-            <div className="p-2 border-t flex justify-end">
-              <button
-                type="button"
-                onClick={() => setPickerModalOpen(false)}
-                className="h-6 px-3 border rounded hover:bg-slate-100 text-[11px]"
-              >
-                Batal
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* MODALS */}
+      <CariPelangganModal
+        isOpen={isCustomerModalOpen}
+        onClose={() => setIsCustomerModalOpen(false)}
+        onSelect={(cust) => setSelectedCustomer(cust)}
+        selectedId={selectedCustomer?.id}
+      />
+
+      <CariItemSalesModalMode1
+        isOpen={isItemModalOpen}
+        onClose={() => setIsItemModalOpen(false)}
+        onSelect={handleSelectFromMode1Modal}
+        defaultWarehouseId={warehouseId}
+        customerId={selectedCustomer?.id || ""}
+      />
     </div>
   );
 }

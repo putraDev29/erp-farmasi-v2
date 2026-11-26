@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
 import { CariPelangganModal } from "@/components/sales/CariPelangganModal";
+import { SettleSalesReturnModal } from "@/components/sales/SettleSalesReturnModal";
 import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
 
 interface DebtRow {
@@ -55,6 +56,7 @@ export default function NewCustomerPaymentPage() {
 
   // Modals
   const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+  const [selectedReturnForSettle, setSelectedReturnForSettle] = useState<any>(null);
 
   // Header State matching Bayar Hutang Baru Layout
   const [paymentNo, setPaymentNo] = useState("Auto");
@@ -143,6 +145,18 @@ export default function NewCustomerPaymentPage() {
       });
 
       return mappedSales;
+    },
+  });
+
+  // Fetch Pending Sales Returns for this customer (status=SELESAI, settlement_status=PENDING)
+  const { data: pendingReturns = [] } = useQuery({
+    queryKey: ["pending-sales-returns-settlement", selectedCustomer?.id],
+    enabled: !!selectedCustomer?.id,
+    queryFn: async () => {
+      const res = await api.get(
+        `/sales/returns?customer_id=${selectedCustomer.id}&status=SELESAI&settlement_status=PENDING`
+      );
+      return res.data?.data || [];
     },
   });
 
@@ -462,16 +476,17 @@ export default function NewCustomerPaymentPage() {
                     Memuat daftar faktur piutang pelanggan...
                   </td>
                 </tr>
-              ) : rows.length === 0 ? (
+              ) : rows.length === 0 && pendingReturns.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="py-16 text-center text-slate-400">
                     {selectedCustomer
-                      ? "Tidak ada tagihan piutang yang belum lunas untuk pelanggan ini."
+                      ? "Tidak ada tagihan piutang atau retur yang belum diselesaikan untuk pelanggan ini."
                       : "Pilih Pelanggan di atas untuk menampilkan daftar tagihan piutang."}
                   </td>
                 </tr>
               ) : (
-                rows.map((r, idx) => {
+                <>
+                {rows.map((r, idx) => {
                   const isSelected = selectedRowIndex === idx;
                   return (
                     <tr
@@ -557,7 +572,47 @@ export default function NewCustomerPaymentPage() {
                       </td>
                     </tr>
                   );
-                })
+                })}
+                {pendingReturns.map((ret: any, rIdx: number) => (
+                  <tr
+                    key={`ret-${ret.id}`}
+                    onClick={() => setSelectedReturnForSettle(ret)}
+                    className="cursor-pointer transition bg-amber-50/60 hover:bg-amber-100/70"
+                    title="Klik untuk menyelesaikan retur (Potong Piutang atau Pengembalian Dana)"
+                  >
+                    <td className="py-1 px-1.5 text-center text-slate-500 border-r border-slate-200">
+                      {rows.length + rIdx + 1}
+                    </td>
+                    <td className="py-1 px-2 font-mono whitespace-nowrap border-r border-slate-200">
+                      <span className="inline-block px-1.5 py-0.2 rounded text-[9.5px] font-bold mr-1 bg-amber-100 text-amber-800 border border-amber-300">
+                        Retur
+                      </span>
+                      <span className="font-mono font-bold text-amber-900">{ret.return_no}</span>
+                    </td>
+                    <td className="py-1 px-2 whitespace-nowrap border-r border-slate-200 text-slate-600">
+                      {formatDate(ret.date)}
+                    </td>
+                    <td className="py-1 px-2 whitespace-nowrap border-r border-slate-200 text-slate-400">
+                      -
+                    </td>
+                    <td className="py-1 px-2 text-right font-mono font-semibold text-amber-800 border-r border-slate-200">
+                      {formatCurrency(ret.total_amount)}
+                    </td>
+                    <td className="py-1 px-2 text-right text-slate-400 border-r border-slate-200">
+                      -
+                    </td>
+                    <td className="py-1 px-2 text-right font-mono font-medium text-amber-900 border-r border-slate-200">
+                      {formatCurrency(ret.total_amount)}
+                    </td>
+                    <td className="py-1 px-1.5 text-center border-r border-slate-200" />
+                    <td className="py-0.5 px-1 text-right">
+                      <span className="inline-block px-1.5 py-0.2 rounded text-[9.5px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                        Menunggu Penyelesaian
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                </>
               )}
             </tbody>
           </table>
@@ -717,6 +772,20 @@ export default function NewCustomerPaymentPage() {
         onClose={() => setIsCustomerModalOpen(false)}
         onSelect={(cust) => setSelectedCustomer(cust)}
         selectedId={selectedCustomer?.id}
+      />
+
+      <SettleSalesReturnModal
+        isOpen={!!selectedReturnForSettle}
+        onClose={() => setSelectedReturnForSettle(null)}
+        salesReturn={selectedReturnForSettle}
+        unpaidInvoices={rows.map((r) => ({
+          id: r.sale_id || r.id,
+          invoice_no: r.invoice_no,
+          date: r.date,
+          due_date: r.due_date,
+          remaining_amount: r.remaining_amount,
+        }))}
+        cashAccounts={cashAccounts}
       />
     </div>
   );

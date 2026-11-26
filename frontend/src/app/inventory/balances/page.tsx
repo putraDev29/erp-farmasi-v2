@@ -45,7 +45,7 @@ export default function StockBalancesPage() {
       <div className="shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-1">
         <div>
           <h1 className="text-sm font-bold text-slate-800">Saldo Persediaan & Stok Gudang</h1>
-          <p className="text-[11px] text-slate-500">Posisi kuantitas fisik, stok tersedia, dan valuasi harga pokok rata-rata.</p>
+          
         </div>
         <div className="px-3 py-1 bg-white border border-slate-200 rounded-lg shadow-2xs flex items-center gap-2">
           <div className="w-6 h-6 bg-purple-50 text-purple-600 rounded flex items-center justify-center">

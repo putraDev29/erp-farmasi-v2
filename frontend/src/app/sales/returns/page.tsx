@@ -372,19 +372,14 @@ export default function SalesReturnsPage() {
                           1. Draft
                         </span>
                       )}
-                      {r.status === "VERIFIED_WAREHOUSE" && (
+                      {(r.status === "VERIFIED_WAREHOUSE" || r.status === "VERIFIKASI_GUDANG") && (
                         <span className="px-1.5 py-0.2 bg-blue-50 text-blue-700 border border-blue-200 rounded font-semibold text-[10px]">
-                          2. Cek Gudang
+                          2. Konfirmasi Gudang
                         </span>
                       )}
-                      {r.status === "APPROVED" && (
+                      {(r.status === "APPROVED" || r.status === "DISETUJUI_ADMIN" || r.status === "BARANG_DITERIMA" || r.status === "RESTOCKED") && (
                         <span className="px-1.5 py-0.2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded font-semibold text-[10px]">
-                          3. Disetujui
-                        </span>
-                      )}
-                      {r.status === "RESTOCKED" && (
-                        <span className="px-1.5 py-0.2 bg-teal-50 text-teal-700 border border-teal-200 rounded font-semibold text-[10px]">
-                          4. Restocked
+                          3. Disetujui Admin
                         </span>
                       )}
                       {(r.status === "SELESAI" || r.status === "POSTED") && (
@@ -392,12 +387,12 @@ export default function SalesReturnsPage() {
                           ✓ Selesai
                         </span>
                       )}
-                      {r.status === "REJECTED" && (
+                      {(r.status === "REJECTED" || r.status === "DITOLAK") && (
                         <span className="px-1.5 py-0.2 bg-rose-50 text-rose-700 border border-rose-200 rounded font-semibold text-[10px]">
                           ✕ Ditolak
                         </span>
                       )}
-                      {!["DRAFT", "VERIFIED_WAREHOUSE", "APPROVED", "RESTOCKED", "SELESAI", "POSTED", "REJECTED"].includes(r.status) && (
+                      {!["DRAFT", "VERIFIED_WAREHOUSE", "VERIFIKASI_GUDANG", "APPROVED", "DISETUJUI_ADMIN", "BARANG_DITERIMA", "RESTOCKED", "SELESAI", "POSTED", "REJECTED", "DITOLAK"].includes(r.status) && (
                         <span className="px-1.5 py-0.2 bg-slate-100 text-slate-700 rounded text-[10px]">
                           {r.status || "POSTED"}
                         </span>

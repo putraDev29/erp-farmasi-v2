@@ -355,7 +355,7 @@ export default function PurchaseInvoicesPage() {
               <option value="all">Semua Status Alur</option>
               <option value="MENUNGGU_PENERIMAAN">Menunggu Penerimaan</option>
               <option value="VERIFIKASI_GUDANG">Verifikasi Gudang</option>
-              <option value="APPROVED">Disetujui Admin (Selesai)</option>
+              <option value="APPROVED">Selesai</option>
               <option value="REJECTED">Ditolak Admin</option>
             </select>
           </div>
@@ -516,13 +516,13 @@ export default function PurchaseInvoicesPage() {
                       )}
                     </td>
                     <td className="py-1 px-2.5 border-r border-slate-200 text-center">
-                      {p.verification_status === "APPROVED" || p.is_verified ? (
+                      {p.verification_status === "APPROVED" || p.verification_status === "SELESAI" || p.is_verified ? (
                         <span
                           className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-1 shadow-2xs"
-                          title={`Disetujui Admin: ${p.admin_approver?.full_name || p.admin_approver?.username || "Admin"} (${p.admin_approved_at ? formatDate(p.admin_approved_at) : "-"})`}
+                          title={`Verifikasi Stok Selesai (Disetujui Admin: ${p.admin_approver?.full_name || p.admin_approver?.username || "Admin"} - ${p.admin_approved_at ? formatDate(p.admin_approved_at) : "-"})`}
                         >
                           <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                          <span>🟢 Disetujui Admin</span>
+                          <span>🟢 Selesai</span>
                         </span>
                       ) : p.verification_status === "VERIFIKASI_GUDANG" ? (
                         <span

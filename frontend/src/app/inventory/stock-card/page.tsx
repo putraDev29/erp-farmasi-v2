@@ -13,6 +13,7 @@ import {
   Warehouse as WarehouseIcon,
   CheckCircle2,
   Package,
+  FileText,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
 import { BarcodeScannerModal } from "@/components/common/BarcodeScannerModal";
@@ -27,6 +28,7 @@ export default function StockCardPage() {
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [isItemPickerOpen, setIsItemPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
+  const [selectedMovement, setSelectedMovement] = useState<any>(null);
 
   const months = [
     { value: "01", label: "Januari" },
@@ -116,6 +118,7 @@ export default function StockCardPage() {
     if (match) {
       setSelectedProduct(match);
       setProductCodeInput(match.code);
+      setSelectedMovement(null);
     } else {
       setProductCodeInput(scannedCode);
       alert(`Item dengan barcode "${scannedCode}" tidak ditemukan.`);
@@ -128,29 +131,108 @@ export default function StockCardPage() {
     handleBarcodeScanned(productCodeInput);
   };
 
-  const handleRowClick = async (m: any) => {
-    if (m.purchase_id) {
-      router.push(`/purchasing/invoices/${m.purchase_id}/edit`);
+  // Resolve target URL for a transaction
+  const getTargetUrl = (m: any): string | null => {
+    if (!m) return null;
+    if (m.target_url) return m.target_url;
+    if (m.purchase_id) return `/purchasing/invoices/${m.purchase_id}/edit`;
+    if (m.sale_id) return `/sales/invoices/${m.sale_id}/edit`;
+    if (m.sales_order_id) return `/sales/orders/${m.sales_order_id}/edit`;
+
+    const docNo = m.doc_no || "";
+    const docType = m.doc_type || "";
+
+    if (docType === "PURCHASE" || docNo.startsWith("PI/")) {
+      return `/purchasing/invoices?search=${encodeURIComponent(docNo)}`;
+    }
+    if (docType.includes("PURCHASE_RETURN") || docNo.startsWith("RB/")) {
+      return `/purchasing/returns?keyword=${encodeURIComponent(docNo)}`;
+    }
+    if (docType === "SALE" || docType === "SALE_INVOICE" || docType === "SALE_VOID" || docNo.startsWith("INV/")) {
+      return `/sales/invoices?search=${encodeURIComponent(docNo)}`;
+    }
+    if (docType === "SALES_ORDER" || docNo.startsWith("SO/")) {
+      return `/sales/orders?search=${encodeURIComponent(docNo)}`;
+    }
+    if (docType.includes("SALE_RETURN") || docNo.startsWith("RS/") || docNo.startsWith("RJ/")) {
+      return `/sales/returns?keyword=${encodeURIComponent(docNo)}`;
+    }
+    if (docType === "SALES_DELIVERY" || docNo.startsWith("SJ/")) {
+      return `/sales/deliveries?search=${encodeURIComponent(docNo)}`;
+    }
+    if (docType === "OPENING" || docNo.startsWith("OP-STK")) {
+      return `/inventory/initial-stock`;
+    }
+    if (docType.includes("TRANSFER") || docNo.startsWith("TF/")) {
+      return `/inventory/transfers?search=${encodeURIComponent(docNo)}`;
+    }
+    if (docType === "ITEM_IN" || docNo.startsWith("IN/")) {
+      return `/inventory/in?search=${encodeURIComponent(docNo)}`;
+    }
+    if (docType === "ITEM_OUT" || docNo.startsWith("OUT/")) {
+      return `/inventory/out?search=${encodeURIComponent(docNo)}`;
+    }
+    if (docType === "OPNAME" || docNo.startsWith("OPN") || docNo.startsWith("SO-STK")) {
+      return `/inventory/opname?search=${encodeURIComponent(docNo)}`;
+    }
+    return null;
+  };
+
+  // Open transaction in the same tab without opening new tab
+  const handleOpenTransaction = async (movementToOpen?: any) => {
+    let m = movementToOpen || selectedMovement;
+    if (!m && movements.length > 0) {
+      // Default to first transaction if none explicitly clicked
+      m = movements[0];
+      setSelectedMovement(m);
+    }
+
+    if (!m) {
+      alert("Silakan klik / pilih salah satu baris transaksi pada tabel terlebih dahulu.");
       return;
     }
-    if (m.doc_type === "PURCHASE" || (m.doc_no && m.doc_no.startsWith("PI/"))) {
-      try {
-        const res = await api.get(`/purchases?search=${encodeURIComponent(m.doc_no)}`);
-        const purchases = res.data?.data || [];
-        const match = purchases.find((p: any) => p.invoice_no === m.doc_no) || purchases[0];
-        if (match?.id) {
-          router.push(`/purchasing/invoices/${match.id}/edit`);
-          return;
+
+    // Attempt direct ID lookup if not yet populated
+    if (!m.target_url && !m.purchase_id && !m.sale_id) {
+      if (m.doc_type === "PURCHASE" || (m.doc_no && m.doc_no.startsWith("PI/"))) {
+        try {
+          const res = await api.get(`/purchases?search=${encodeURIComponent(m.doc_no)}`);
+          const purchases = res.data?.data || [];
+          const match = purchases.find((p: any) => p.invoice_no === m.doc_no) || purchases[0];
+          if (match?.id) {
+            router.push(`/purchasing/invoices/${match.id}/edit`);
+            return;
+          }
+        } catch (e) {
+          console.error("Gagal membuka faktur pembelian:", e);
         }
-      } catch (e) {
-        console.error("Gagal membuka faktur pembelian:", e);
+      } else if (m.doc_type === "SALE" || m.doc_type === "SALE_INVOICE" || (m.doc_no && m.doc_no.startsWith("INV/"))) {
+        try {
+          const res = await api.get(`/sales?search=${encodeURIComponent(m.doc_no)}`);
+          const sales = res.data?.data?.items || res.data?.data || [];
+          const match = sales.find((s: any) => s.invoice_no === m.doc_no) || sales[0];
+          if (match?.id) {
+            router.push(`/sales/invoices/${match.id}/edit`);
+            return;
+          }
+        } catch (e) {
+          console.error("Gagal membuka faktur penjualan:", e);
+        }
       }
+    }
+
+    const url = getTargetUrl(m);
+    if (url) {
+      // Navigasi tetap di tab yang sama tanpa membuka tab baru
+      router.push(url);
+    } else {
+      alert(`Detail untuk transaksi "${m.doc_no || m.doc_type}" tidak tersedia.`);
     }
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0 space-y-1 text-xs select-none">
-      {/* Top Filter Form Card matching Screenshot 1 */}
+    <div className="flex flex-col h-full min-h-0 space-y-1 text-xs">
+      {/* Top Filter Form Card matching Screenshot */}
       <div className="shrink-0 bg-white border border-slate-200 rounded p-2.5 shadow-2xs space-y-1.5">
         {/* ROW 1: Kode Item + Scan + Keterangan + Gudang */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
@@ -174,7 +256,7 @@ export default function StockCardPage() {
               <button
                 type="button"
                 onClick={() => setIsItemPickerOpen(true)}
-                className="w-6 h-6 flex items-center justify-center border border-slate-300 hover:bg-slate-100 rounded text-slate-600 transition"
+                className="w-6 h-6 flex items-center justify-center border border-slate-300 hover:bg-slate-100 rounded text-slate-600 transition cursor-pointer"
                 title="Pilih Item dari Daftar"
               >
                 <Search className="w-3.5 h-3.5" />
@@ -184,7 +266,7 @@ export default function StockCardPage() {
               <button
                 type="button"
                 onClick={() => setIsScannerOpen(true)}
-                className="h-6 px-2 bg-[#6b21a8] hover:bg-[#581c87] text-white rounded text-[11px] font-semibold flex items-center gap-1 shadow-2xs transition shrink-0"
+                className="h-6 px-2 bg-[#6b21a8] hover:bg-[#581c87] text-white rounded text-[11px] font-semibold flex items-center gap-1 shadow-2xs transition shrink-0 cursor-pointer"
                 title="Scan Barcode via Kamera HP / Alat Scanner"
               >
                 <Camera className="w-3 h-3" />
@@ -202,7 +284,7 @@ export default function StockCardPage() {
               type="text"
               readOnly
               value={selectedProduct ? `${selectedProduct.name} (${selectedProduct.base_unit?.code || "PCS"})` : "-"}
-              className="w-full h-6 px-2 py-0 border border-slate-200 rounded text-[11px] text-slate-700 bg-slate-50 font-medium focus:outline-none truncate"
+              className="w-full h-6 px-2 py-0 border border-slate-200 rounded text-[11px] text-slate-700 bg-slate-50 font-medium focus:outline-none truncate select-text"
             />
           </div>
 
@@ -264,7 +346,7 @@ export default function StockCardPage() {
             <button
               type="button"
               onClick={() => refetch()}
-              className="h-6 px-3 bg-[#009b62] hover:bg-[#008754] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95"
+              className="h-6 px-3 bg-[#009b62] hover:bg-[#008754] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
             >
               <span>Proses</span>
             </button>
@@ -272,29 +354,40 @@ export default function StockCardPage() {
             <button
               type="button"
               onClick={() => window.print()}
-              className="h-6 px-2.5 bg-[#9faab5] hover:bg-[#8e9aa5] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95"
+              className="h-6 px-2.5 bg-[#9faab5] hover:bg-[#8e9aa5] text-white font-semibold rounded text-[11px] inline-flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
             >
               <Printer className="w-3 h-3 stroke-[2.4]" />
               <span>Cetak</span>
             </button>
 
+            {/* Buka Transaksi Button - Navigates in same tab without opening new tab */}
             <button
               type="button"
-              onClick={() => {
-                if (selectedProduct) {
-                  window.open(`/inventory/transfers?product_id=${selectedProduct.id}`, "_blank");
-                }
-              }}
-              className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 rounded text-slate-700 font-semibold text-[11px] shadow-2xs transition active:scale-95 flex items-center gap-1"
+              onClick={() => handleOpenTransaction()}
+              className={`h-6 px-2.5 rounded font-semibold text-[11px] shadow-2xs transition active:scale-95 flex items-center gap-1.5 cursor-pointer border ${
+                selectedMovement
+                  ? "bg-sky-600 hover:bg-sky-700 text-white border-sky-700 shadow-sm"
+                  : "bg-white hover:bg-slate-50 text-slate-700 border-slate-300"
+              }`}
+              title={
+                selectedMovement
+                  ? `Buka transaksi: ${selectedMovement.doc_no || selectedMovement.doc_type} (Tab Saat Ini)`
+                  : "Klik salah satu baris tabel lalu klik Buka Transaksi"
+              }
             >
-              <ExternalLink className="w-3 h-3 text-slate-600" />
+              <ExternalLink className="w-3 h-3" />
               <span>Buka Transaksi</span>
+              {selectedMovement?.doc_no && (
+                <span className="font-mono text-[10px] bg-white/20 px-1 py-0.2 rounded font-normal truncate max-w-[140px]">
+                  {selectedMovement.doc_no}
+                </span>
+              )}
             </button>
           </div>
         </div>
       </div>
 
-      {/* Table matching Screenshot 1 */}
+      {/* Table matching Screenshot */}
       <div className="flex-1 min-h-0 bg-white border border-slate-300 rounded shadow-2xs overflow-hidden flex flex-col">
         <div className="flex-1 min-h-0 overflow-auto scrollbar-thin">
           <table className="w-full text-left border-collapse text-[11px] whitespace-nowrap">
@@ -331,39 +424,40 @@ export default function StockCardPage() {
                 movements.map((m: any, idx: number) => {
                   const qtyIn = m.movement_type === "IN" ? m.qty : 0;
                   const qtyOut = m.movement_type === "OUT" ? m.qty : 0;
-                  const isPurchase =
-                    Boolean(m.purchase_id) ||
-                    m.doc_type === "PURCHASE" ||
-                    (m.doc_no && m.doc_no.startsWith("PI/"));
+                  const isSelected =
+                    selectedMovement &&
+                    (selectedMovement.id === m.id ||
+                      (selectedMovement.doc_no &&
+                        selectedMovement.doc_no === m.doc_no &&
+                        selectedMovement.created_at === m.created_at));
+
                   return (
                     <tr
                       key={m.id || idx}
-                      onClick={() => handleRowClick(m)}
-                      className={`border-b border-slate-200 transition-colors ${
-                        isPurchase
-                          ? "cursor-pointer hover:bg-sky-50/80"
-                          : "hover:bg-slate-50"
+                      onClick={() => setSelectedMovement(m)}
+                      onDoubleClick={() => handleOpenTransaction(m)}
+                      className={`border-b border-slate-200 transition-colors cursor-pointer select-text ${
+                        isSelected
+                          ? "bg-sky-100 text-sky-950 font-medium ring-1 ring-inset ring-sky-500 shadow-2xs"
+                          : "hover:bg-slate-50/90"
                       }`}
-                      title={
-                        isPurchase
-                          ? "Klik untuk membuka / edit faktur pembelian"
-                          : undefined
-                      }
+                      title="Klik untuk memilih / memblok baris ini. Klik 2x atau klik 'Buka Transaksi' untuk membuka detail transaksi di tab ini."
                     >
-                      <td className="py-1.5 px-3 border-r border-slate-200 font-mono font-medium text-slate-800">
+                      <td className="py-1.5 px-3 border-r border-slate-200 font-mono font-medium">
                         <div className="flex items-center gap-1.5">
-                          <span
-                            className={
-                              isPurchase
-                                ? "text-blue-600 underline font-semibold hover:text-blue-800"
-                                : ""
-                            }
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedMovement(m);
+                              handleOpenTransaction(m);
+                            }}
+                            className="text-blue-600 underline font-semibold hover:text-blue-800 text-left transition cursor-pointer"
+                            title="Klik untuk membuka transaksi di tab yang sama"
                           >
-                            {m.doc_no}
-                          </span>
-                          {isPurchase && (
-                            <ExternalLink className="w-3 h-3 text-blue-500 opacity-70" />
-                          )}
+                            {m.doc_no || "-"}
+                          </button>
+                          <ExternalLink className="w-3 h-3 text-blue-500 opacity-60 shrink-0" />
                         </div>
                       </td>
                       <td className="py-1.5 px-3 border-r border-slate-200 font-mono font-semibold text-slate-700">
@@ -404,7 +498,7 @@ export default function StockCardPage() {
           </table>
         </div>
 
-        {/* Bottom Summary Boxes matching Screenshot 1 */}
+        {/* Bottom Summary Boxes matching Screenshot */}
         <div className="shrink-0 p-2 bg-slate-50/80 border-t border-slate-300 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-mono">
           <div className="space-y-1.5">
             <div className="flex items-center justify-between border-b border-slate-200 pb-1">
@@ -474,6 +568,7 @@ export default function StockCardPage() {
                     onClick={() => {
                       setSelectedProduct(p);
                       setProductCodeInput(p.code);
+                      setSelectedMovement(null);
                       setIsItemPickerOpen(false);
                     }}
                     className="p-2 hover:bg-sky-50 cursor-pointer flex items-center justify-between transition"

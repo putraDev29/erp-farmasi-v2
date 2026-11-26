@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { X, Check, CornerUpLeft, Users, AlertCircle, Plus, Undo2 } from "lucide-react";
+import { X, Check, CornerUpLeft, History } from "lucide-react";
 import { api, formatDate } from "@/lib/api";
 
 interface DetailItemModalProps {
@@ -37,9 +37,8 @@ export const DetailItemModal: React.FC<DetailItemModalProps> = ({
   item,
   onSave,
   mainSupplier,
-  onOpenMultiSupplier,
 }) => {
-  // Original tracking for smart multi-supplier split
+  // Original tracking
   const [originalQty, setOriginalQty] = useState<number>(1);
   const [originalSupplierId, setOriginalSupplierId] = useState<string>("");
   const [originalSupplierName, setOriginalSupplierName] = useState<string>("");
@@ -54,13 +53,10 @@ export const DetailItemModal: React.FC<DetailItemModalProps> = ({
   const [discPercentStr, setDiscPercentStr] = useState<string>("0.00");
   const [discNominalStr, setDiscNominalStr] = useState<string>("0.00");
 
-  // Multi-Supplier Split State
-  const [isSplitActive, setIsSplitActive] = useState<boolean>(false);
-  const [splitSupplierId, setSplitSupplierId] = useState<string>("");
-  const [splitSupplierName, setSplitSupplierName] = useState<string>("");
-  const [splitQtyStr, setSplitQtyStr] = useState<string>("0.00");
-  const [splitPriceStr, setSplitPriceStr] = useState<string>("0.00");
-  const [autoPreserveOriginal, setAutoPreserveOriginal] = useState<boolean>(true);
+  // History filtering state: Default current year
+  const currentYear = new Date().getFullYear().toString();
+  const [selectedYear, setSelectedYear] = useState<string>(currentYear);
+  const [showAllSuppliers, setShowAllSuppliers] = useState<boolean>(false);
 
   // Load available units
   const { data: units = [] } = useQuery({
@@ -72,7 +68,7 @@ export const DetailItemModal: React.FC<DetailItemModalProps> = ({
     enabled: isOpen,
   });
 
-  // Load available suppliers (multi-supplier PO support)
+  // Load available suppliers
   const { data: suppliers = [] } = useQuery({
     queryKey: ["suppliers-list"],
     queryFn: async () => {
@@ -93,7 +89,7 @@ export const DetailItemModal: React.FC<DetailItemModalProps> = ({
     enabled: isOpen && Boolean(item?.product_id),
   });
 
-  // Helper formatter matching Screenshot 2 (comma thousands, dot decimal)
+  // Helper formatter matching standard (comma thousands, dot decimal)
   const formatNum = (num: number) => {
     return Number(num || 0).toLocaleString("en-US", {
       minimumFractionDigits: 2,
@@ -128,13 +124,9 @@ export const DetailItemModal: React.FC<DetailItemModalProps> = ({
       setSupplierId(initialSupId);
       setSupplierName(initialSupName);
 
-      // Reset split state
-      setIsSplitActive(false);
-      setSplitSupplierId("");
-      setSplitSupplierName("");
-      setSplitQtyStr("0.00");
-      setSplitPriceStr(formatNum(itemPrice));
-      setAutoPreserveOriginal(true);
+      // Reset filter options
+      setSelectedYear(new Date().getFullYear().toString());
+      setShowAllSuppliers(false);
 
       // Match unit
       let matchedUid = item.unit_id || "";
@@ -172,6 +164,60 @@ export const DetailItemModal: React.FC<DetailItemModalProps> = ({
   const calculatedTotal = useMemo(() => {
     return Math.max(0, baseTotal - numDiscNominal);
   }, [baseTotal, numDiscNominal]);
+
+  // Determine active supplier name for filtering history
+  const activeSupplierName = useMemo(() => {
+    if (supplierId) {
+      const found = suppliers.find((s: any) => s.id === supplierId);
+      return found ? found.name : supplierName;
+    }
+    return mainSupplier?.name || "";
+  }, [supplierId, supplierName, suppliers, mainSupplier]);
+
+  // Derive available years from history data
+  const availableYears = useMemo(() => {
+    const yearsSet = new Set<string>();
+    const curr = new Date().getFullYear();
+    yearsSet.add(curr.toString());
+    yearsSet.add((curr - 1).toString());
+    yearsSet.add((curr - 2).toString());
+    (priceHistory || []).forEach((h: any) => {
+      if (h.date) {
+        const y = new Date(h.date).getFullYear();
+        if (!isNaN(y) && y > 2000 && y < 2100) {
+          yearsSet.add(y.toString());
+        }
+      }
+    });
+    return Array.from(yearsSet).sort((a, b) => Number(b) - Number(a));
+  }, [priceHistory]);
+
+  // Filtered price history based on selected supplier and selected year
+  const filteredPriceHistory = useMemo(() => {
+    return (priceHistory || []).filter((h: any) => {
+      // 1. Filter by Supplier
+      if (!showAllSuppliers && activeSupplierName) {
+        const rowSup = (h.supplier_name || "").trim().toLowerCase();
+        const targetSup = activeSupplierName.trim().toLowerCase();
+        const matchesSupplier =
+          rowSup === targetSup ||
+          rowSup.includes(targetSup) ||
+          targetSup.includes(rowSup);
+        if (!matchesSupplier) return false;
+      }
+
+      // 2. Filter by Year
+      if (selectedYear && selectedYear !== "ALL") {
+        const rowDate = h.date ? new Date(h.date) : null;
+        if (rowDate && !isNaN(rowDate.getTime())) {
+          const rowYear = rowDate.getFullYear().toString();
+          if (rowYear !== selectedYear) return false;
+        }
+      }
+
+      return true;
+    });
+  }, [priceHistory, activeSupplierName, showAllSuppliers, selectedYear]);
 
   // Handlers for reactive inputs
   const handleQtyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -233,95 +279,17 @@ export const DetailItemModal: React.FC<DetailItemModalProps> = ({
     }
   };
 
+  const handleSupplierChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const sid = e.target.value;
+    setSupplierId(sid);
+    const found = suppliers.find((s: any) => s.id === sid);
+    setSupplierName(found ? found.name : "");
+  };
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
     if (!item) return;
 
-    // Case 1: Explicit split active with valid shortage supplier and qty
-    if (isSplitActive && splitSupplierId && parseNum(splitQtyStr) > 0) {
-      const splitQ = parseNum(splitQtyStr);
-      const splitP = parseNum(splitPriceStr) || numPrice;
-      const splitLineTotal = splitQ * splitP;
-
-      const updatedRow = {
-        ...item,
-        qty: numQty > 0 ? numQty : 1,
-        unit_id: unitId,
-        unit_name: unitName,
-        unit_price: numPrice,
-        discount_percent: numDiscPercent,
-        line_total: calculatedTotal,
-        supplier_id: supplierId || undefined,
-        supplier_name: supplierName || undefined,
-      };
-
-      const splitRow = {
-        ...item,
-        id: undefined,
-        qty: splitQ,
-        unit_id: unitId,
-        unit_name: unitName,
-        unit_price: splitP,
-        discount_percent: 0,
-        line_total: splitLineTotal,
-        supplier_id: splitSupplierId,
-        supplier_name: splitSupplierName,
-        is_fulfilled: false,
-        purchase_id: undefined,
-      };
-
-      onSave(updatedRow, splitRow);
-      onClose();
-      return;
-    }
-
-    // Case 2: User changed supplier and reduced quantity (e.g. 20 -> 5 to new supplier)
-    // and wants to preserve the original supplier's remaining quantity (15)
-    if (
-      autoPreserveOriginal &&
-      originalSupplierId &&
-      supplierId !== originalSupplierId &&
-      numQty < originalQty &&
-      numQty > 0
-    ) {
-      const remainingOriginalQty = originalQty - numQty;
-      const remainingTotal = remainingOriginalQty * numPrice;
-
-      // Row 1: Keep remaining at original supplier
-      const originalRow = {
-        ...item,
-        qty: remainingOriginalQty,
-        unit_id: unitId,
-        unit_name: unitName,
-        unit_price: numPrice,
-        discount_percent: numDiscPercent,
-        line_total: remainingTotal,
-        supplier_id: originalSupplierId,
-        supplier_name: originalSupplierName,
-      };
-
-      // Row 2: Allocate shortage to new supplier
-      const newSupplierRow = {
-        ...item,
-        id: undefined,
-        qty: numQty,
-        unit_id: unitId,
-        unit_name: unitName,
-        unit_price: numPrice,
-        discount_percent: numDiscPercent,
-        line_total: calculatedTotal,
-        supplier_id: supplierId,
-        supplier_name: supplierName,
-        is_fulfilled: false,
-        purchase_id: undefined,
-      };
-
-      onSave(originalRow, newSupplierRow);
-      onClose();
-      return;
-    }
-
-    // Normal Single Item Update
     const updatedRow = {
       ...item,
       qty: numQty > 0 ? numQty : 1,
@@ -340,380 +308,349 @@ export const DetailItemModal: React.FC<DetailItemModalProps> = ({
 
   if (!isOpen || !item) return null;
 
-  const hasShortage = originalQty > numQty;
-  const isChangedSupplier = originalSupplierId && supplierId !== originalSupplierId;
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-2xs p-3 animate-in fade-in duration-150 select-none">
-      <div className="bg-white rounded-md shadow-2xl border border-slate-300 w-full max-w-3xl max-h-[92vh] overflow-y-auto text-xs">
-        {/* Header matching Screenshot 2: Detail Item (left) + X (right) */}
-        <div className="flex items-center justify-between px-3.5 py-2 bg-[#00c875] text-white sticky top-0 z-10 shadow-xs">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-2xs p-3 md:p-6 animate-in fade-in duration-150 select-none">
+      <div className="bg-white rounded-lg shadow-2xl border border-slate-300 w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col text-xs">
+        {/* Header: Detail Item (Clean Title, without alokasi supplier text) */}
+        <div className="flex items-center justify-between px-4 py-2.5 bg-[#00c875] text-white shrink-0 shadow-xs">
           <div className="flex items-center gap-2">
-            <h2 className="text-[13px] font-semibold text-white tracking-tight">Detail Item &amp; Alokasi Supplier</h2>
-            {isSplitActive && (
-              <span className="bg-white/20 text-white text-[9px] px-1.5 py-0.2 rounded font-bold uppercase tracking-wider">
-                Mode Multi-Supplier Aktif
-              </span>
-            )}
+            <h2 className="text-sm font-bold text-white tracking-tight">Detail Item</h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 rounded text-white/80 hover:text-white hover:bg-white/10 transition"
+            className="p-1 rounded text-white/80 hover:text-white hover:bg-white/10 transition cursor-pointer"
+            title="Tutup"
           >
-            <X className="w-3.5 h-3.5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Form Body matching Screenshot 2 (Left Input Form, Right History Harga Beli) */}
-        <form onSubmit={handleSave}>
-          <div className="p-3.5 grid grid-cols-1 md:grid-cols-12 gap-3.5 bg-white">
-            {/* LEFT COLUMN: Input form matching Screenshot 2 */}
-            <div className="md:col-span-6 space-y-2">
-              {/* Nama Item */}
-              <div>
-                <label className="block text-slate-600 font-normal text-[10.5px] mb-0.5">
-                  Nama Item :
-                </label>
-                <div className="w-full h-6 px-2 flex items-center border border-dashed border-slate-400 rounded bg-white text-slate-800 font-medium text-[11px] truncate">
-                  {item.name}
-                </div>
-              </div>
-
-              {/* Supplier Pemenuhan Item (Multi-Supplier PO Support) */}
-              <div>
-                <div className="flex items-center justify-between mb-0.5">
-                  <label className="text-slate-700 font-semibold text-[10.5px]">
-                    Supplier Pemenuhan Item :
-                  </label>
-                  {!isSplitActive && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (onOpenMultiSupplier) {
-                          onClose();
-                          onOpenMultiSupplier();
-                        } else {
-                          setIsSplitActive(true);
-                          const rem = Math.max(0, originalQty - numQty);
-                          setSplitQtyStr(rem > 0 ? rem.toFixed(2) : "1.00");
-                        }
-                      }}
-                      className="text-[9.5px] text-emerald-700 hover:text-emerald-900 font-bold inline-flex items-center gap-0.5 underline cursor-pointer"
-                      title="Alokasi kekurangan item ini ke banyak supplier (Bisa berapapun supplier)"
-                    >
-                      <Users className="w-3 h-3 text-emerald-600" />
-                      <span>👥 Alokasi Banyak Supplier</span>
-                    </button>
-                  )}
-                </div>
-                <select
-                  value={supplierId}
-                  onChange={(e) => {
-                    const sid = e.target.value;
-                    setSupplierId(sid);
-                    const found = suppliers.find((s: any) => s.id === sid);
-                    setSupplierName(found ? found.name : "");
-                  }}
-                  className="w-full h-6 px-1.5 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 cursor-pointer font-medium"
-                >
-                  <option value="">-- Ikuti Supplier Utama PO --</option>
-                  {suppliers.map((s: any) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.code || "SUP"})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Jumlah | Satuan */}
-              <div className="grid grid-cols-2 gap-2">
+        {/* Modal Form Body - Full Width Layout */}
+        <form onSubmit={handleSave} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          <div className="p-4 space-y-4 overflow-y-auto flex-1">
+            {/* 1. TOP SECTION: Form Detail Item (Full Width Grid) */}
+            <div className="bg-slate-50/80 p-3.5 rounded-lg border border-slate-200 shadow-2xs space-y-3">
+              {/* Row 1: Nama Item & Supplier */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-600 font-normal text-[10.5px] mb-0.5">
-                    Jumlah :
+                  <label className="block text-slate-600 font-semibold text-[11px] mb-1">
+                    Nama Item :
                   </label>
-                  <input
-                    type="text"
-                    required
-                    value={qtyStr}
-                    onChange={handleQtyChange}
-                    onBlur={handleQtyBlur}
-                    className="w-full h-6 px-2 border border-slate-300 rounded text-right font-mono text-[11px] text-slate-900 bg-white focus:outline-none focus:border-sky-500 font-bold"
-                  />
+                  <div className="w-full h-7 px-2.5 flex items-center border border-dashed border-slate-400 rounded bg-white text-slate-800 font-semibold text-[11px] truncate shadow-2xs">
+                    {item.code ? (
+                      <span className="font-mono text-slate-500 mr-1.5 font-bold">[{item.code}]</span>
+                    ) : null}
+                    <span>{item.name}</span>
+                  </div>
                 </div>
+
                 <div>
-                  <label className="block text-slate-600 font-normal text-[10.5px] mb-0.5">
-                    Satuan :
+                  <label className="block text-slate-600 font-semibold text-[11px] mb-1">
+                    Supplier :
                   </label>
                   <select
-                    value={unitId || units.find((u: any) => u.name?.toLowerCase() === unitName.toLowerCase())?.id || ""}
-                    onChange={handleUnitSelect}
-                    className="w-full h-6 px-1.5 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 cursor-pointer"
+                    value={supplierId}
+                    onChange={handleSupplierChange}
+                    className="w-full h-7 px-2 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 cursor-pointer font-medium shadow-2xs"
                   >
-                    {units.length > 0 ? (
-                      units.map((u: any) => (
-                        <option key={u.id} value={u.id}>
-                          {u.name}
-                        </option>
-                      ))
-                    ) : (
-                      <option value={unitId || unitName}>{unitName}</option>
-                    )}
+                    <option value="">
+                      -- Ikuti Supplier Utama PO {mainSupplier?.name ? `(${mainSupplier.name})` : ""} --
+                    </option>
+                    {suppliers.map((s: any) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.code || "SUP"})
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
 
-              {/* SMART HELPER 1: User changed supplier and reduced quantity */}
-              {isChangedSupplier && hasShortage && !isSplitActive && (
-                <div className="p-2 rounded bg-amber-50 border border-amber-200 text-[10.5px] text-amber-900 space-y-1">
-                  <div className="flex items-center gap-1 font-bold text-amber-800">
-                    <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                    <span>Perubahan Supplier &amp; Kekurangan Terdeteksi</span>
-                  </div>
-                  <p className="leading-tight">
-                    Anda memindahkan <strong>{numQty.toFixed(2)} {unitName}</strong> ke <strong>{supplierName || "Supplier Baru"}</strong> dari total pesanan awal <strong>{originalQty.toFixed(2)} {unitName}</strong>.
-                  </p>
-                  <label className="flex items-center gap-1.5 cursor-pointer font-bold text-emerald-800 pt-0.5 select-none">
+              {/* Row 2: Jumlah, Satuan, Harga, Potongan & Nominal */}
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                {/* Jumlah & Satuan (4 cols) */}
+                <div className="md:col-span-4 grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-slate-600 font-semibold text-[11px] mb-1">
+                      Jumlah :
+                    </label>
                     <input
-                      type="checkbox"
-                      checked={autoPreserveOriginal}
-                      onChange={(e) => setAutoPreserveOriginal(e.target.checked)}
-                      className="rounded text-emerald-600 w-3.5 h-3.5"
+                      type="text"
+                      required
+                      value={qtyStr}
+                      onChange={handleQtyChange}
+                      onBlur={handleQtyBlur}
+                      className="w-full h-7 px-2 border border-slate-300 rounded text-right font-mono text-[11px] text-slate-900 bg-white focus:outline-none focus:border-sky-500 font-bold shadow-2xs"
                     />
-                    <span>Pertahankan sisa {(originalQty - numQty).toFixed(2)} {unitName} di {originalSupplierName || "Supplier Awal"}</span>
-                  </label>
-                </div>
-              )}
-
-              {/* SMART HELPER 2: User reduced quantity for same supplier, prompt to allocate shortage */}
-              {!isChangedSupplier && hasShortage && !isSplitActive && (
-                <div className="p-2 rounded bg-emerald-50 border border-emerald-200 text-[10.5px] text-emerald-950 flex items-center justify-between gap-2">
-                  <div>
-                    <span className="font-bold text-emerald-900 block leading-tight">
-                      Kekurangan: {(originalQty - numQty).toFixed(2)} {unitName}
-                    </span>
-                    <span className="text-[9.5px] text-emerald-700 leading-tight">
-                      Pesan kekurangan obat ini dari supplier lain?
-                    </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsSplitActive(true);
-                      setSplitQtyStr((originalQty - numQty).toFixed(2));
-                    }}
-                    className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold shadow-2xs transition shrink-0"
-                  >
-                    + Alokasikan
-                  </button>
-                </div>
-              )}
-
-              {/* MULTI-SUPPLIER SPLIT SECTION (When isSplitActive is true) */}
-              {isSplitActive && (
-                <div className="p-2.5 rounded bg-emerald-50/70 border border-emerald-300 space-y-2 text-[10.5px] animate-in fade-in duration-150">
-                  <div className="flex items-center justify-between border-b border-emerald-200 pb-1">
-                    <span className="font-bold text-emerald-900 flex items-center gap-1">
-                      <Users className="w-3.5 h-3.5 text-emerald-700" />
-                      <span>Pemenuhan Kekurangan (Supplier #2)</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setIsSplitActive(false)}
-                      className="text-slate-400 hover:text-rose-600 text-[10px] font-semibold"
-                    >
-                      Batal Bagi
-                    </button>
-                  </div>
-
                   <div>
-                    <label className="block text-slate-700 font-semibold mb-0.5">
-                      Pilih Supplier Pemenuhan Kekurangan :
+                    <label className="block text-slate-600 font-semibold text-[11px] mb-1">
+                      Satuan :
                     </label>
                     <select
-                      value={splitSupplierId}
-                      onChange={(e) => {
-                        const sid = e.target.value;
-                        setSplitSupplierId(sid);
-                        const found = suppliers.find((s: any) => s.id === sid);
-                        setSplitSupplierName(found ? found.name : "");
-                      }}
-                      className="w-full h-6 px-1.5 border border-emerald-300 rounded text-[11px] bg-white font-medium text-slate-800"
+                      value={
+                        unitId ||
+                        units.find((u: any) => u.name?.toLowerCase() === unitName.toLowerCase())?.id ||
+                        ""
+                      }
+                      onChange={handleUnitSelect}
+                      className="w-full h-7 px-2 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 cursor-pointer shadow-2xs font-medium"
                     >
-                      <option value="">-- Pilih Supplier Lain --</option>
-                      {suppliers
-                        .filter((s: any) => s.id !== supplierId)
-                        .map((s: any) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name} ({s.code || "SUP"})
+                      {units.length > 0 ? (
+                        units.map((u: any) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name}
                           </option>
-                        ))}
+                        ))
+                      ) : (
+                        <option value={unitId || unitName}>{unitName}</option>
+                      )}
                     </select>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-slate-700 font-semibold mb-0.5">
-                        Jumlah Kekurangan :
-                      </label>
-                      <input
-                        type="text"
-                        value={splitQtyStr}
-                        onChange={(e) => setSplitQtyStr(e.target.value)}
-                        className="w-full h-6 px-2 border border-emerald-300 rounded text-right font-mono bg-white font-bold text-emerald-900 text-[11px]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-700 font-semibold mb-0.5">
-                        Harga Satuan :
-                      </label>
-                      <input
-                        type="text"
-                        value={splitPriceStr}
-                        onChange={(e) => setSplitPriceStr(e.target.value)}
-                        className="w-full h-6 px-2 border border-emerald-300 rounded text-right font-mono bg-white text-[11px]"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="bg-white p-1.5 rounded border border-emerald-200 text-[10px] text-emerald-900 flex items-center justify-between">
-                    <span>Total Kebutuhan Obat Terpenuhi:</span>
-                    <strong className="font-bold text-emerald-900 font-mono text-[11px]">
-                      {(numQty + parseNum(splitQtyStr)).toFixed(2)} {unitName}
-                    </strong>
-                  </div>
                 </div>
-              )}
 
-              {/* Harga */}
-              <div>
-                <label className="block text-slate-600 font-normal text-[10.5px] mb-0.5">
-                  Harga :
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={priceStr}
-                  onChange={handlePriceChange}
-                  onBlur={handlePriceBlur}
-                  className="w-full h-6 px-2 border border-slate-300 rounded text-right font-mono text-[11px] text-slate-900 bg-white focus:outline-none focus:border-sky-500"
-                />
-              </div>
-
-              {/* Potongan | Nominal */}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-slate-600 font-normal text-[10.5px] mb-0.5">
-                    Potongan:
+                {/* Harga Satuan (4 cols) */}
+                <div className="md:col-span-4">
+                  <label className="block text-slate-600 font-semibold text-[11px] mb-1">
+                    Harga Satuan :
                   </label>
                   <input
                     type="text"
-                    value={discPercentStr}
-                    onChange={handleDiscPercentChange}
-                    onBlur={handleDiscPercentBlur}
-                    className="w-full h-6 px-2 border border-slate-300 rounded text-right font-mono text-[11px] text-slate-900 bg-white focus:outline-none focus:border-sky-500"
+                    required
+                    value={priceStr}
+                    onChange={handlePriceChange}
+                    onBlur={handlePriceBlur}
+                    className="w-full h-7 px-2 border border-slate-300 rounded text-right font-mono text-[11px] text-slate-900 bg-white focus:outline-none focus:border-sky-500 shadow-2xs font-semibold"
                   />
                 </div>
-                <div>
-                  <label className="block text-slate-600 font-normal text-[10.5px] mb-0.5">
-                    Nominal :
-                  </label>
-                  <input
-                    type="text"
-                    value={discNominalStr}
-                    onChange={handleDiscNominalChange}
-                    onBlur={handleDiscNominalBlur}
-                    className="w-full h-6 px-2 border border-slate-300 rounded text-right font-mono text-[11px] text-slate-900 bg-white focus:outline-none focus:border-sky-500"
-                  />
+
+                {/* Potongan & Nominal (4 cols) */}
+                <div className="md:col-span-4 grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-slate-600 font-semibold text-[11px] mb-1">
+                      Potongan (%) :
+                    </label>
+                    <input
+                      type="text"
+                      value={discPercentStr}
+                      onChange={handleDiscPercentChange}
+                      onBlur={handleDiscPercentBlur}
+                      className="w-full h-7 px-2 border border-slate-300 rounded text-right font-mono text-[11px] text-slate-900 bg-white focus:outline-none focus:border-sky-500 shadow-2xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-600 font-semibold text-[11px] mb-1">
+                      Nominal Potongan :
+                    </label>
+                    <input
+                      type="text"
+                      value={discNominalStr}
+                      onChange={handleDiscNominalChange}
+                      onBlur={handleDiscNominalBlur}
+                      className="w-full h-7 px-2 border border-slate-300 rounded text-right font-mono text-[11px] text-slate-900 bg-white focus:outline-none focus:border-sky-500 shadow-2xs"
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Total (Dashed Box matching Screenshot 2) */}
-              <div>
-                <label className="block text-slate-700 font-bold text-[10.5px] mb-0.5">
-                  Total :
-                </label>
-                <div className="w-full h-7 px-2 flex items-center justify-end border border-dashed border-slate-400 rounded bg-white font-mono font-bold text-xs text-slate-900 shadow-2xs">
-                  {formatNum(calculatedTotal)}
+              {/* Row 3: Total Akhir Item */}
+              <div className="flex items-center justify-between pt-2 border-t border-slate-200">
+                <span className="text-slate-700 font-bold text-[11.5px]">
+                  Total Pembelian Item :
+                </span>
+                <div className="h-7 px-4 flex items-center justify-end border border-dashed border-emerald-500 bg-emerald-50 rounded font-mono font-bold text-xs text-emerald-900 shadow-2xs min-w-[200px]">
+                  Rp {formatNum(calculatedTotal)}
                 </div>
               </div>
             </div>
 
-            {/* RIGHT COLUMN: History Harga Beli matching Screenshot 2 */}
-            <div className="md:col-span-7 flex flex-col min-h-0">
-              <label className="block text-slate-600 font-normal text-[10.5px] mb-0.5">
-                History Harga Beli :
-              </label>
+            {/* 2. BOTTOM SECTION: History Harga Beli (Full Width Table with Year Filter) */}
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-800 font-bold text-[11.5px] flex items-center gap-1.5">
+                    <History className="w-4 h-4 text-slate-600" />
+                    <span>History Harga Beli :</span>
+                  </span>
+                  {activeSupplierName && !showAllSuppliers && (
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold">
+                      Supplier: <strong className="underline">{activeSupplierName}</strong>
+                    </span>
+                  )}
+                  {showAllSuppliers && (
+                    <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 font-semibold">
+                      Semua Supplier
+                    </span>
+                  )}
+                </div>
 
-              <div className="border border-slate-300 rounded overflow-hidden flex-1 flex flex-col min-h-[175px]">
-                <table className="w-full text-left border-collapse text-[10px] whitespace-nowrap">
-                  <thead className="bg-slate-100 border-b border-slate-300 text-slate-700 font-bold h-6">
-                    <tr>
-                      <th className="py-0.5 px-2 border-r border-slate-200">Tanggal</th>
-                      <th className="py-0.5 px-2 border-r border-slate-200 text-right">Jumlah</th>
-                      <th className="py-0.5 px-1.5 border-r border-slate-200 text-center">Satuan</th>
-                      <th className="py-0.5 px-2 border-r border-slate-200 text-right">Harga Seb....</th>
-                      <th className="py-0.5 px-2 text-right">Pot %</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 flex-1">
-                    {isHistoryLoading ? (
+                <div className="flex items-center gap-2.5">
+                  {activeSupplierName && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAllSuppliers(!showAllSuppliers)}
+                      className="text-[10.5px] text-sky-600 hover:text-sky-800 font-semibold underline cursor-pointer"
+                    >
+                      {showAllSuppliers ? "Filter Sesuai Supplier" : "Lihat Semua Supplier"}
+                    </button>
+                  )}
+
+                  <div className="flex items-center gap-1.5 bg-slate-50 px-2 py-0.5 rounded border border-slate-200 shadow-2xs">
+                    <label className="text-slate-600 text-[10.5px] font-semibold">
+                      Filter Tahun :
+                    </label>
+                    <select
+                      value={selectedYear}
+                      onChange={(e) => setSelectedYear(e.target.value)}
+                      className="h-6 px-1.5 border border-slate-300 rounded text-[11px] bg-white text-slate-800 font-bold focus:outline-none focus:border-sky-500 cursor-pointer"
+                    >
+                      {availableYears.map((y) => (
+                        <option key={y} value={y}>
+                          {y === currentYear ? `${y} (Tahun Ini)` : y}
+                        </option>
+                      ))}
+                      <option value="ALL">Semua Tahun</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Table History (Full Width) */}
+              <div className="border border-slate-200 rounded-md overflow-hidden bg-white shadow-2xs">
+                <div className="max-h-56 overflow-y-auto">
+                  <table className="w-full text-left border-collapse text-[11px] whitespace-nowrap">
+                    <thead className="bg-slate-100 border-b border-slate-200 text-slate-700 font-bold sticky top-0 z-10 h-7">
                       <tr>
-                        <td colSpan={5} className="py-12 text-center text-slate-400">
-                          Memuat data...
-                        </td>
+                        <th className="py-1 px-3 border-r border-slate-200">Tanggal</th>
+                        <th className="py-1 px-3 border-r border-slate-200">No. Faktur</th>
+                        <th className="py-1 px-3 border-r border-slate-200">Supplier</th>
+                        <th className="py-1 px-3 border-r border-slate-200 text-right">Jumlah</th>
+                        <th className="py-1 px-2 border-r border-slate-200 text-center">Satuan</th>
+                        <th className="py-1 px-3 border-r border-slate-200 text-right">Harga Seb....</th>
+                        <th className="py-1 px-3 border-r border-slate-200 text-right">Potongan (Rp)</th>
+                        <th className="py-1 px-3 text-right">Total</th>
                       </tr>
-                    ) : priceHistory.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="py-14 text-center text-slate-400 font-normal">
-                          No data
-                        </td>
-                      </tr>
-                    ) : (
-                      priceHistory.slice(0, 10).map((h: any, idx: number) => (
-                        <tr key={idx} className="h-5.5 hover:bg-slate-50 border-b border-slate-100">
-                          <td className="py-0.5 px-2 border-r border-slate-200">
-                            {formatDate(h.date)}
-                          </td>
-                          <td className="py-0.5 px-2 text-right font-mono border-r border-slate-200">
-                            {Number(h.qty || 0).toFixed(2)}
-                          </td>
-                          <td className="py-0.5 px-1.5 text-center border-r border-slate-200">
-                            {h.unit_name || "-"}
-                          </td>
-                          <td className="py-0.5 px-2 text-right font-mono border-r border-slate-200">
-                            {formatNum(h.unit_price)}
-                          </td>
-                          <td className="py-0.5 px-2 text-right font-mono">
-                            {Number(h.discount || 0).toFixed(2)}
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {isHistoryLoading ? (
+                        <tr>
+                          <td colSpan={8} className="py-10 text-center text-slate-400">
+                            Memuat riwayat harga beli...
                           </td>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                      ) : filteredPriceHistory.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="py-10 text-center text-slate-400">
+                            <div className="flex flex-col items-center justify-center gap-1.5 text-[11px]">
+                              <span>
+                                Tidak ditemukan riwayat harga beli obat ini
+                                {activeSupplierName && !showAllSuppliers
+                                  ? ` untuk supplier "${activeSupplierName}"`
+                                  : ""}
+                                {selectedYear !== "ALL" ? ` pada tahun ${selectedYear}` : ""}.
+                              </span>
+                              {activeSupplierName && !showAllSuppliers && (
+                                <button
+                                  type="button"
+                                  onClick={() => setShowAllSuppliers(true)}
+                                  className="text-sky-600 hover:underline font-semibold text-[10.5px]"
+                                >
+                                  Tampilkan dari semua supplier
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredPriceHistory.map((h: any, idx: number) => {
+                          const itemQty = Number(h.qty || 0);
+                          const itemPrice = Number(h.unit_price || 0);
+                          const base = itemQty * itemPrice;
+                          const itemDiscNominal = Number(h.discount || 0);
+                          const itemDiscPct =
+                            h.discount_percent !== undefined && Number(h.discount_percent) > 0
+                              ? Number(h.discount_percent)
+                              : base > 0
+                              ? (itemDiscNominal / base) * 100
+                              : 0;
+                          const rowTotal =
+                            h.total_amount !== undefined && Number(h.total_amount) > 0
+                              ? Number(h.total_amount)
+                              : Math.max(0, base - itemDiscNominal);
+
+                          return (
+                            <tr
+                              key={idx}
+                              onClick={() => {
+                                setPriceStr(formatNum(itemPrice));
+                                setDiscNominalStr(formatNum(itemDiscNominal));
+                                setDiscPercentStr(itemDiscPct.toFixed(2));
+                              }}
+                              className="h-6.5 hover:bg-sky-50/80 border-b border-slate-100 transition cursor-pointer"
+                              title={`Klik untuk pakai harga ini (Harga: Rp ${formatNum(itemPrice)}, Potongan: Rp ${formatNum(itemDiscNominal)}${itemDiscPct > 0 ? ` / ${itemDiscPct.toFixed(2)}%` : ""})`}
+                            >
+                              <td className="py-1 px-3 border-r border-slate-200 font-medium text-slate-700">
+                                {formatDate(h.date)}
+                              </td>
+                              <td className="py-1 px-3 border-r border-slate-200 font-mono text-slate-600">
+                                {h.invoice_no || "-"}
+                              </td>
+                              <td className="py-1 px-3 border-r border-slate-200 font-medium text-slate-800">
+                                {h.supplier_name || "-"}
+                              </td>
+                              <td className="py-1 px-3 text-right font-mono font-bold text-slate-800 border-r border-slate-200">
+                                {itemQty.toFixed(2)}
+                              </td>
+                              <td className="py-1 px-2 text-center text-slate-600 border-r border-slate-200">
+                                {h.unit_name || "-"}
+                              </td>
+                              <td className="py-1 px-3 text-right font-mono border-r border-slate-200 text-slate-800">
+                                {formatNum(itemPrice)}
+                              </td>
+                              <td
+                                className="py-1 px-3 text-right font-mono text-slate-700 border-r border-slate-200"
+                                title={itemDiscPct > 0 ? `Setara diskon ${itemDiscPct.toFixed(2)}%` : undefined}
+                              >
+                                {itemDiscNominal > 0 ? formatNum(itemDiscNominal) : "0.00"}
+                              </td>
+                              <td className="py-1 px-3 text-right font-mono font-semibold text-emerald-800">
+                                {formatNum(rowTotal)}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Bottom Actions matching Screenshot 2: [✔ Ok] [↩ Kembali] */}
-          <div className="px-3.5 py-2 bg-white border-t border-slate-200 flex items-center justify-end gap-2">
-            <button
-              type="submit"
-              className="h-6.5 px-3.5 bg-white hover:bg-slate-50 border border-slate-300 rounded text-slate-700 font-medium text-[11px] flex items-center gap-1.5 shadow-2xs transition active:scale-95"
-            >
-              <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[2.8]" />
-              <span>Ok</span>
-            </button>
+          {/* 3. BOTTOM ACTIONS: [✔ Ok] [↩ Kembali] */}
+          <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
+            <div className="text-[11px] text-slate-500">
+              Menampilkan <strong>{filteredPriceHistory.length}</strong> riwayat harga beli
+            </div>
 
-            <button
-              type="button"
-              onClick={onClose}
-              className="h-6.5 px-3 bg-white hover:bg-slate-50 border border-slate-300 rounded text-slate-700 font-medium text-[11px] flex items-center gap-1.5 shadow-2xs transition active:scale-95"
-            >
-              <CornerUpLeft className="w-3.5 h-3.5 text-amber-500 stroke-[2.8]" />
-              <span>Kembali</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="submit"
+                className="h-7 px-4 bg-[#00c875] hover:bg-[#00b066] text-white font-semibold rounded text-[11px] flex items-center gap-1.5 shadow-2xs transition active:scale-95 cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5 stroke-[2.8]" />
+                <span>Ok</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={onClose}
+                className="h-7 px-3.5 bg-white hover:bg-slate-100 border border-slate-300 rounded text-slate-700 font-medium text-[11px] flex items-center gap-1.5 shadow-2xs transition active:scale-95 cursor-pointer"
+              >
+                <CornerUpLeft className="w-3.5 h-3.5 text-amber-500 stroke-[2.8]" />
+                <span>Kembali</span>
+              </button>
+            </div>
           </div>
         </form>
       </div>

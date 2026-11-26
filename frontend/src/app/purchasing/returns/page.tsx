@@ -187,9 +187,7 @@ export default function PurchaseReturnsPage() {
             <span className="w-1.5 h-3.5 bg-rose-500 rounded-xs inline-block" />
             Daftar Retur Pembelian Obat
           </h1>
-          <p className="text-[10px] text-slate-500">
-            Alur 6 tahap retur ke PBF (Draft &gt; Verifikasi Gudang &gt; Setujui Admin &gt; Kirim PBF &gt; Konfirmasi PBF &gt; Finalisasi Jurnal &amp; Hutang)
-          </p>
+          
         </div>
 
         <div className="flex items-center gap-1.5">

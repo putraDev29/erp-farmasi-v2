@@ -31,6 +31,7 @@ type PurchaseOrder struct {
 	TotalOrderedQty  float64             `gorm:"type:numeric(15,4);default:0" json:"total_ordered_qty"`
 	TotalReceivedQty float64             `gorm:"type:numeric(15,4);default:0" json:"total_received_qty"`
 	Notes            string              `gorm:"type:text" json:"notes"`
+	DeliveryMethod   string              `gorm:"size:20;default:'DIKIRIM';not null" json:"delivery_method"` // DIKIRIM, DIAMBIL
 	// PBF / SP Requirements
 	SPType           string              `gorm:"size:50;default:'REGULER'" json:"sp_type"` // REGULER, NARKOTIKA, PSIKOTROPIKA, PREKURSOR, OOT
 	SPNumber         string              `gorm:"size:100" json:"sp_number"`
@@ -95,6 +96,7 @@ type Purchase struct {
 	DPAmount        float64        `gorm:"type:numeric(15,2);default:0" json:"dp_amount"`
 	RemainingAmount float64        `gorm:"type:numeric(15,2);default:0" json:"remaining_amount"`
 	CashAccountID   *uuid.UUID     `gorm:"type:uuid;index" json:"cash_account_id"`
+	DeliveryMethod  string         `gorm:"size:20;default:'DIKIRIM';not null" json:"delivery_method"` // DIKIRIM, DIAMBIL
 	Notes           string         `gorm:"type:text" json:"notes"`
 	// PBF Invoicing Requirements
 	PBFInvoiceNo       string      `gorm:"size:100" json:"pbf_invoice_no"`
@@ -151,8 +153,9 @@ type PurchaseReturn struct {
 	WarehouseID  uuid.UUID            `gorm:"type:uuid;not null;index" json:"warehouse_id"`
 	SupplierID   uuid.UUID            `gorm:"type:uuid;not null;index" json:"supplier_id"`
 	PurchaseID   *uuid.UUID           `gorm:"type:uuid;index" json:"purchase_id"`
-	ReturnNo     string               `gorm:"size:50;uniqueIndex;not null" json:"return_no"`
-	ReturnMode   string               `gorm:"size:20;default:'MODE_1';not null" json:"return_mode"` // MODE_1, MODE_2
+	ReturnNo       string               `gorm:"size:50;uniqueIndex;not null" json:"return_no"`
+	ReturnMode     string               `gorm:"size:20;default:'MODE_1';not null" json:"return_mode"` // MODE_1, MODE_2
+	DeliveryMethod string               `gorm:"size:20;default:'DIAMBIL';not null" json:"delivery_method"` // DIAMBIL, DIKIRIM
 	Date         time.Time            `gorm:"not null" json:"date"`
 	TaxType      string               `gorm:"size:20;default:'NON'" json:"tax_type"` // NON, INCLUDE, EXCLUDE
 	Subtotal     float64              `gorm:"type:numeric(15,2);default:0" json:"subtotal"`
@@ -191,7 +194,11 @@ type PurchaseReturn struct {
 	RejectedTotalAmount float64    `gorm:"type:numeric(15,2);default:0" json:"rejected_total_amount"`
 
 	// Integrasi Hutang & Keuangan
+	SettlementStatus    string     `gorm:"size:20;default:'PENDING';index" json:"settlement_status"` // PENDING, SETTLED
 	SettlementType      string     `gorm:"size:50" json:"settlement_type"` // POTONG_HUTANG, KREDIT_SUPPLIER, KEMBALI_DANA_KAS
+	SettledPurchaseID   *uuid.UUID `gorm:"type:uuid;index" json:"settled_purchase_id"`
+	SettledAt           *time.Time `json:"settled_at"`
+	SettledBy           *uuid.UUID `gorm:"type:uuid" json:"settled_by"`
 	CashAccountID       *uuid.UUID `gorm:"type:uuid;index" json:"cash_account_id"`
 	DebtDeductionAmount float64    `gorm:"type:numeric(15,2);default:0" json:"debt_deduction_amount"`
 	CreditBalanceAmount float64    `gorm:"type:numeric(15,2);default:0" json:"credit_balance_amount"`

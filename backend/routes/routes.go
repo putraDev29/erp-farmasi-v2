@@ -282,6 +282,7 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			protected.POST("/purchases/returns/:id/ship", purchaseHandler.ShipPurchaseReturn)
 			protected.POST("/purchases/returns/:id/pbf-confirm", purchaseHandler.PbfConfirmPurchaseReturn)
 			protected.POST("/purchases/returns/:id/finalize", purchaseHandler.FinalizePurchaseReturn)
+			protected.POST("/purchases/returns/:id/settle", purchaseHandler.SettlePurchaseReturn)
 			protected.DELETE("/purchases/returns/:id", purchaseHandler.DeletePurchaseReturn)
 			protected.GET("/purchases/returnable-items", purchaseHandler.GetReturnablePurchaseItems)
 			protected.GET("/purchases/product-batches", purchaseHandler.GetProductBatchesForReturn)
@@ -334,7 +335,10 @@ func SetupRouter(cfg *config.Config) *gin.Engine {
 			protected.POST("/sales/returns/:id/admin-reject", salesHandler.AdminRejectSalesReturn)
 			protected.POST("/sales/returns/:id/restock", salesHandler.RestockSalesReturn)
 			protected.POST("/sales/returns/:id/finalize", salesHandler.FinalizeSalesReturn)
+			protected.POST("/sales/returns/:id/settle", salesHandler.SettleSalesReturn)
 			protected.DELETE("/sales/returns/:id", salesHandler.DeleteSalesReturn)
+			protected.GET("/sales/returnable-items", salesHandler.GetReturnableSalesItems)
+			protected.GET("/sales/product-batches", purchaseHandler.GetProductBatchesForReturn)
 
 			// Sales Price History
 			protected.GET("/sales/price-history", salesHandler.GetSalesPriceHistory)

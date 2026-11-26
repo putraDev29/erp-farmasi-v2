@@ -35,10 +35,10 @@ func (h *DashboardHandler) GetSummary(c *gin.Context) {
 
 	// 3. Receivables & Payables
 	var totalReceivables float64
-	database.DB.Model(&models.Sale{}).Where("company_id = ? AND status = 'POSTED'", companyID).Select("COALESCE(SUM(remaining_amount), 0)").Scan(&totalReceivables)
+	database.DB.Model(&models.Sale{}).Where("company_id = ? AND status NOT IN ('CANCELLED', 'DRAFT')", companyID).Select("COALESCE(SUM(remaining_amount), 0)").Scan(&totalReceivables)
 
 	var totalPayables float64
-	database.DB.Model(&models.Purchase{}).Where("company_id = ? AND status = 'POSTED'", companyID).Select("COALESCE(SUM(remaining_amount), 0)").Scan(&totalPayables)
+	database.DB.Model(&models.Purchase{}).Where("company_id = ? AND status NOT IN ('CANCELLED', 'DRAFT')", companyID).Select("COALESCE(SUM(remaining_amount), 0)").Scan(&totalPayables)
 
 	// 4. Cash & Bank balance from COA
 	var cashBankBalance float64
@@ -279,6 +279,128 @@ func (h *DashboardHandler) GetSummary(c *gin.Context) {
 		uniqueDocMap[p.InvoiceNo] = true
 	}
 
+	// 13. Peringatan Piutang Jatuh Tempo (Kurang 7 Hari & Overdue)
+	type DueReceivableItem struct {
+		ID              uuid.UUID `json:"id"`
+		InvoiceNo       string    `json:"invoice_no"`
+		Date            time.Time `json:"date"`
+		DueDate         time.Time `json:"due_date"`
+		CustomerID      uuid.UUID `json:"customer_id"`
+		CustomerName    string    `json:"customer_name"`
+		TotalAmount     float64   `json:"total_amount"`
+		RemainingAmount float64   `json:"remaining_amount"`
+		DaysRemaining   int       `json:"days_remaining"`
+		Status          string    `json:"status"` // "OVERDUE", "TODAY", "DUE_SOON"
+		StatusLabel     string    `json:"status_label"`
+	}
+
+	var rawDueSales []models.Sale
+	database.DB.Model(&models.Sale{}).
+		Where("company_id = ? AND status NOT IN ('CANCELLED', 'DRAFT') AND remaining_amount > 0 AND due_date <= ?", companyID, oneWeekFromNow).
+		Preload("Customer").
+		Order("due_date ASC").
+		Limit(100).
+		Find(&rawDueSales)
+
+	dueReceivablesItems := make([]DueReceivableItem, 0)
+	var dueReceivablesTotal float64
+	var dueReceivablesOverdueCount int
+
+	for _, s := range rawDueSales {
+		dueReceivablesTotal += s.RemainingAmount
+		custName := "Pelanggan Umum"
+		if s.Customer.Name != "" {
+			custName = s.Customer.Name
+		}
+		days := int(time.Date(s.DueDate.Year(), s.DueDate.Month(), s.DueDate.Day(), 0, 0, 0, 0, s.DueDate.Location()).Sub(todayMidnight).Hours() / 24)
+		st := "DUE_SOON"
+		stLabel := fmt.Sprintf("%d hari lagi", days)
+		if days < 0 {
+			st = "OVERDUE"
+			stLabel = fmt.Sprintf("Lewat %d hari", -days)
+			dueReceivablesOverdueCount++
+		} else if days == 0 {
+			st = "TODAY"
+			stLabel = "Hari Ini"
+		}
+
+		dueReceivablesItems = append(dueReceivablesItems, DueReceivableItem{
+			ID:              s.ID,
+			InvoiceNo:       s.InvoiceNo,
+			Date:            s.Date,
+			DueDate:         s.DueDate,
+			CustomerID:      s.CustomerID,
+			CustomerName:    custName,
+			TotalAmount:     s.TotalAmount,
+			RemainingAmount: s.RemainingAmount,
+			DaysRemaining:   days,
+			Status:          st,
+			StatusLabel:     stLabel,
+		})
+	}
+
+	// 14. Peringatan Hutang Jatuh Tempo (Kurang 7 Hari & Overdue)
+	type DuePayableItem struct {
+		ID              uuid.UUID `json:"id"`
+		InvoiceNo       string    `json:"invoice_no"`
+		PBFInvoiceNo    string    `json:"pbf_invoice_no"`
+		Date            time.Time `json:"date"`
+		DueDate         time.Time `json:"due_date"`
+		SupplierID      uuid.UUID `json:"supplier_id"`
+		SupplierName    string    `json:"supplier_name"`
+		TotalAmount     float64   `json:"total_amount"`
+		RemainingAmount float64   `json:"remaining_amount"`
+		DaysRemaining   int       `json:"days_remaining"`
+		Status          string    `json:"status"` // "OVERDUE", "TODAY", "DUE_SOON"
+		StatusLabel     string    `json:"status_label"`
+	}
+
+	var rawDuePurchases []models.Purchase
+	database.DB.Model(&models.Purchase{}).
+		Where("company_id = ? AND status NOT IN ('CANCELLED', 'DRAFT') AND remaining_amount > 0 AND due_date <= ?", companyID, oneWeekFromNow).
+		Preload("Supplier").
+		Order("due_date ASC").
+		Limit(100).
+		Find(&rawDuePurchases)
+
+	duePayablesItems := make([]DuePayableItem, 0)
+	var duePayablesTotal float64
+	var duePayablesOverdueCount int
+
+	for _, p := range rawDuePurchases {
+		duePayablesTotal += p.RemainingAmount
+		suppName := "Supplier PBF"
+		if p.Supplier != nil && p.Supplier.Name != "" {
+			suppName = p.Supplier.Name
+		}
+		days := int(time.Date(p.DueDate.Year(), p.DueDate.Month(), p.DueDate.Day(), 0, 0, 0, 0, p.DueDate.Location()).Sub(todayMidnight).Hours() / 24)
+		st := "DUE_SOON"
+		stLabel := fmt.Sprintf("%d hari lagi", days)
+		if days < 0 {
+			st = "OVERDUE"
+			stLabel = fmt.Sprintf("Lewat %d hari", -days)
+			duePayablesOverdueCount++
+		} else if days == 0 {
+			st = "TODAY"
+			stLabel = "Hari Ini"
+		}
+
+		duePayablesItems = append(duePayablesItems, DuePayableItem{
+			ID:              p.ID,
+			InvoiceNo:       p.InvoiceNo,
+			PBFInvoiceNo:    p.PBFInvoiceNo,
+			Date:            p.Date,
+			DueDate:         p.DueDate,
+			SupplierID:      p.SupplierID,
+			SupplierName:    suppName,
+			TotalAmount:     p.TotalAmount,
+			RemainingAmount: p.RemainingAmount,
+			DaysRemaining:   days,
+			Status:          st,
+			StatusLabel:     stLabel,
+		})
+	}
+
 	utils.SendSuccess(c, "Ringkasan data dashboard eksekutif", gin.H{
 		"sales_summary": gin.H{
 			"total_amount": totalSalesAmount,
@@ -307,6 +429,18 @@ func (h *DashboardHandler) GetSummary(c *gin.Context) {
 		"low_stock_count":         lowStockCount,
 		"expiring_critical_count": len(expiringCriticalItems),
 		"expiring_critical_items": expiringCriticalItems,
+		"due_receivables": gin.H{
+			"count":         len(dueReceivablesItems),
+			"total_amount":  dueReceivablesTotal,
+			"overdue_count": dueReceivablesOverdueCount,
+			"items":         dueReceivablesItems,
+		},
+		"due_payables": gin.H{
+			"count":         len(duePayablesItems),
+			"total_amount":  duePayablesTotal,
+			"overdue_count": duePayablesOverdueCount,
+			"items":         duePayablesItems,
+		},
 		"recent_sales":            recentSales,
 		"chart_data":              chartData,
 		"top_products":            topProducts,

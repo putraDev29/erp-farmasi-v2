@@ -12,10 +12,9 @@ export default function PromotionsPage() {
 
   return (
     <div className="space-y-3 text-xs">
-      <div className="bg-white border border-slate-200 rounded p-4 shadow-sm flex items-center justify-between">
+      <div className="bg-white border border-slate-200 rounded p-3 shadow-2xs flex items-center justify-between">
         <div>
           <h2 className="text-sm font-semibold text-slate-800">Diskon & Promosi</h2>
-          <p className="text-slate-500 text-[11px]">Program diskon kupon, promosi grosir, dan potongan harga berjenjang</p>
         </div>
         <button className="h-8 px-3.5 bg-[#009b62] hover:bg-[#008754] text-white font-bold rounded-xl text-xs inline-flex items-center gap-1.5 shadow-xs transition active:scale-95">
           <Plus className="w-3.5 h-3.5 stroke-[2.8]" />

@@ -281,9 +281,7 @@ export default function AccountSettingsPage() {
               <Settings className="w-4 h-4 text-emerald-600" />
               <span>Pengaturan Perkiraan Akun Otomatis</span>
             </h1>
-            <p className="text-[10px] text-slate-400">
-              Konfigurasi kode akun jurnal untuk faktur, kasir, dan pelunasan
-            </p>
+            
           </div>
         </div>
 

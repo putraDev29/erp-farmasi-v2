@@ -35,10 +35,10 @@ interface AlurPenjualanModalProps {
 }
 
 const SALES_STAGES = [
-  { step: 1, key: "order", label: "1. Pemesanan (SP/SO)", desc: "" },
-  { step: 2, key: "shipping", label: "2. Pengiriman Gudang", desc: "" },
-  { step: 3, key: "receive", label: "3. Konfirmasi Pelanggan", desc: "" },
-  { step: 4, key: "payment", label: "4. Pelunasan Piutang", desc: "" },
+  { step: 1, key: "order", label: "Pemesanan (SP/SO)" },
+  { step: 2, key: "shipping", label: "Pengiriman Gudang" },
+  { step: 3, key: "receive", label: "Konfirmasi Pelanggan" },
+  { step: 4, key: "payment", label: "Pelunasan Piutang" },
 ];
 
 export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
@@ -52,6 +52,7 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"action" | "items" | "documents" | "history">("action");
   const [docSubTab, setDocSubTab] = useState<"sp" | "pbf">("sp");
+  const [selectedStep, setSelectedStep] = useState<number | null>(null);
 
   // Fetch Company Profile for custom Stempel & Tanda Tangan uploaded from Pengaturan
   const { data: companies = [] } = useQuery({
@@ -125,11 +126,17 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
     }
   }, [sale]);
 
+  useEffect(() => {
+    setSelectedStep(null);
+  }, [saleId, isOpen]);
+
   // Determine Current Step based on Sales Status
   // Status: DRAFT, POSTED, CANCELLED, MENUNGGU_PENGIRIMAN, APPROVED, DIPROSES, DIKIRIM, SELESAI
   let currentStep = 1;
   const status = (sale?.status || "").toUpperCase();
   const isPaid = sale?.payment_status === "PAID" || (sale?.remaining_amount != null && sale.remaining_amount <= 0 && sale.total_amount > 0);
+  const deliveryMethod = ((sale?.delivery_method || sale?.sales_order?.delivery_method || (sale?.type === "POS" ? "DIAMBIL" : "DIKIRIM")) as string).toUpperCase();
+  const isSelfPickup = deliveryMethod === "DIAMBIL";
   const isShipped = status === "DIKIRIM" || status === "SELESAI" || !!sale?.warehouse_shipped_at;
   const isReceived = status === "SELESAI" || !!sale?.received_date;
 
@@ -145,6 +152,8 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
   } else {
     currentStep = 1;
   }
+
+  const activeStep = selectedStep ?? currentStep;
 
   // Ship Mutation (HANYA Petugas Gudang - Verifikasi Fisik & Nomor Batch / ED)
   const shipMutation = useMutation({
@@ -182,7 +191,7 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
     mutationFn: async () => {
       if (!sale?.id) throw new Error("ID Faktur tidak valid");
       const payload = {
-        courier: courier || "Kurir Internal Apotek",
+        courier: isSelfPickup ? "Diambil Pelanggan Langsung" : courier || "Kurir Internal Apotek",
         tracking_no: trackingNo || sale.delivery_order_no || undefined,
         delivery_date: deliveryDate ? new Date(deliveryDate).toISOString() : undefined,
         received_by: receivedBy || sale.customer?.name || "Pelanggan",
@@ -250,6 +259,16 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                 >
                   {isPaid ? "Lunas" : "Belum Lunas"}
                 </span>
+                {/* Metode Penyerahan Badge */}
+                <span
+                  className={`text-[10px] px-2 py-0.5 rounded-full font-bold shadow-2xs ${
+                    isSelfPickup
+                      ? "bg-amber-500/20 text-amber-300 border border-amber-400/40"
+                      : "bg-sky-500/20 text-sky-300 border border-sky-400/40"
+                  }`}
+                >
+                  {isSelfPickup ? "Diambil Pelanggan Langsung" : "Melalui Pengiriman"}
+                </span>
               </div>
               <p className="text-[11px] text-slate-400">
                 Pelanggan: <strong className="text-slate-200">{sale?.customer?.name || "-"}</strong> &nbsp;|&nbsp; Gudang:{" "}
@@ -280,20 +299,33 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
           </div>
         </div>
 
-        {/* 2. PROGRESS STEPPER (Tahapan 1, 2, 3 sampai 4 tetap tampil lengkap di atas) */}
-        <div className="shrink-0 bg-slate-50 border-b border-slate-200 px-4 py-2.5">
+        {/* 2. PROGRESS STEPPER (Teks di bawah ikon seperti Alur Pembelian) */}
+        <div className="shrink-0 bg-slate-50 border-b border-slate-200 px-4 py-3">
           <div className="flex items-center justify-between max-w-3xl mx-auto">
             {SALES_STAGES.map((stage, idx) => {
               const isPassed = stage.step < currentStep || (stage.step === 4 && isPaid);
               const isCurrent = stage.step === currentStep && !(stage.step === 4 && isPaid);
+              const isViewing = stage.step === activeStep && activeTab === "action";
 
               return (
                 <React.Fragment key={stage.key}>
-                  <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedStep(stage.step);
+                      setActiveTab("action");
+                    }}
+                    className="flex flex-col items-center gap-1.5 text-center px-2 py-0.5 rounded-lg transition shrink-0 cursor-pointer hover:opacity-90 select-none"
+                    title={`Klik untuk membuka Tahap ${stage.step}: ${stage.label}`}
+                  >
                     <div
                       className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs shadow-2xs transition-all ${
-                        isPassed
-                          ? "bg-emerald-600 text-white ring-2 ring-emerald-200"
+                        isViewing
+                          ? isPassed
+                            ? "bg-emerald-600 text-white ring-4 ring-sky-300 scale-110"
+                            : "bg-blue-600 text-white ring-4 ring-blue-200 scale-110"
+                          : isPassed
+                          ? "bg-emerald-600 text-white ring-4 ring-emerald-200"
                           : isCurrent
                           ? "bg-blue-600 text-white ring-4 ring-blue-100 scale-105"
                           : "bg-slate-200 text-slate-400 border border-slate-300"
@@ -301,26 +333,29 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                     >
                       {isPassed ? <Check className="w-4 h-4 stroke-[3]" /> : stage.step}
                     </div>
-                    <div>
-                      <span
-                        className={`text-xs block font-bold leading-tight ${
-                          isCurrent ? "text-blue-700" : isPassed ? "text-slate-800" : "text-slate-400"
-                        }`}
-                      >
-                        {stage.label}
-                      </span>
-                      <span className="text-[10px] text-slate-500 block leading-tight">
-                        {stage.desc}
-                      </span>
-                    </div>
-                  </div>
+                    <span
+                      className={`text-[11px] font-bold leading-tight whitespace-nowrap ${
+                        isViewing
+                          ? isPassed
+                            ? "text-emerald-900 underline decoration-sky-500 decoration-2 underline-offset-4"
+                            : "text-blue-700 underline decoration-blue-500 decoration-2 underline-offset-4"
+                          : isPassed
+                          ? "text-emerald-800"
+                          : isCurrent
+                          ? "text-blue-600"
+                          : "text-slate-400"
+                      }`}
+                    >
+                      {stage.label}
+                    </span>
+                  </button>
 
                   {idx < SALES_STAGES.length - 1 && (
                     <div
-                      className={`flex-1 h-0.5 mx-3 transition-colors ${
-                        idx < currentStep - 1
+                      className={`flex-1 h-0.5 mx-2 -mt-5 transition-colors ${
+                        idx < currentStep - 1 || (currentStep === 4 && isPaid)
                           ? "bg-emerald-500"
-                          : idx === currentStep - 1
+                          : idx === currentStep - 1 && !(currentStep === 4 && isPaid)
                           ? "bg-blue-300"
                           : "bg-slate-200"
                       }`}
@@ -407,8 +442,8 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
           ) : activeTab === "action" ? (
             /* TAB 1: EKSEKUSI TAHAPAN AKTIF (Hanya memunculkan tahapan aktif saat itu saja) */
             <div className="max-w-4xl mx-auto space-y-4">
-              {/* TAHAP 1: INFO PEMESANAN (Hanya muncul jika currentStep === 1) */}
-              {currentStep === 1 && (
+              {/* TAHAP 1: INFO PEMESANAN (Hanya muncul jika activeStep === 1) */}
+              {activeStep === 1 && (
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2.5">
                   <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                     <div className="flex items-center gap-2.5">
@@ -444,12 +479,24 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                       <span className="text-slate-400 block">Faktur PBF Asal:</span>
                       <strong className="text-slate-800 font-mono">{sale?.pbf_origin_invoice_no || "-"}</strong>
                     </div>
+                    <div>
+                      <span className="text-slate-400 block">Metode Penyerahan:</span>
+                      <span
+                        className={`inline-block mt-0.5 px-2 py-0.5 rounded text-[10px] font-bold ${
+                          isSelfPickup
+                            ? "bg-amber-100 text-amber-800 border border-amber-300"
+                            : "bg-sky-100 text-sky-800 border border-sky-300"
+                        }`}
+                      >
+                        {isSelfPickup ? "Diambil Pelanggan Langsung" : "Melalui Pengiriman"}
+                      </span>
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* TAHAP 2: VERIFIKASI FISIK & OBAT OLEH GUDANG (Muncul HANYA jika currentStep === 2) */}
-              {currentStep === 2 && (
+              {/* TAHAP 2: VERIFIKASI FISIK & OBAT OLEH GUDANG (Muncul jika activeStep === 2) */}
+              {activeStep === 2 && (
                 <div className="p-4 rounded-xl border border-indigo-300 ring-2 ring-indigo-50 bg-white shadow-2xs space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                     <div className="flex items-center gap-2.5">
@@ -461,13 +508,21 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                           Tahap 2: Verifikasi Fisik Obat &amp; Penyiapan Barang oleh Gudang
                         </h4>
                         <p className="text-[10.5px] text-slate-500">
-                          Petugas gudang memeriksa kondisi fisik obat, mencocokkan nomor batch dan tanggal kedaluwarsa sebelum disiapkan.
+                          {isSelfPickup
+                            ? "Petugas gudang memeriksa fisik, nomor batch & ED untuk diserahkan saat pelanggan mengambil langsung di apotek."
+                            : "Petugas gudang memeriksa kondisi fisik obat, mencocokkan nomor batch dan tanggal kedaluwarsa sebelum dikirim."}
                         </p>
                       </div>
                     </div>
 
-                    <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-300 animate-pulse">
-                      Sedang Berlangsung (Tahap Gudang)
+                    <span
+                      className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
+                        currentStep > 2
+                          ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                          : "bg-indigo-100 text-indigo-800 border border-indigo-300 animate-pulse"
+                      }`}
+                    >
+                      {currentStep > 2 ? "✓ Tahap Gudang Selesai" : "Sedang Berlangsung (Tahap Gudang)"}
                     </span>
                   </div>
 
@@ -530,7 +585,7 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                                   <td className="py-1 px-1.5">
                                     <input
                                       type="text"
-                                      disabled={!isGudang}
+                                      disabled={!isGudang || currentStep > 2}
                                       value={batchVal}
                                       onChange={(e) => {
                                         const v = e.target.value;
@@ -543,7 +598,7 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                                   <td className="py-1 px-1.5">
                                     <input
                                       type="date"
-                                      disabled={!isGudang}
+                                      disabled={!isGudang || currentStep > 2}
                                       value={expVal}
                                       onChange={(e) => {
                                         const v = e.target.value;
@@ -568,7 +623,7 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                       </label>
                       <textarea
                         rows={2}
-                        disabled={!isGudang}
+                        disabled={!isGudang || currentStep > 2}
                         value={warehouseNotes}
                         onChange={(e) => setWarehouseNotes(e.target.value)}
                         placeholder="Tuliskan catatan verifikasi fisik obat oleh Gudang (misal: Kemasan tersegel rapi, batch & ED obat sesuai fisik rak gudang, siap diserahkan ke Admin/Ekspedisi)..."
@@ -581,28 +636,35 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
 
                     {/* Tombol Eksekusi Verifikasi Gudang */}
                     <div className="flex justify-end pt-1">
-                      <button
-                        type="button"
-                        disabled={!isGudang || shipMutation.isPending}
-                        onClick={() => shipMutation.mutate()}
-                        className={`px-5 py-2 font-bold rounded-lg flex items-center gap-2 shadow-sm transition active:scale-95 ${
-                          isGudang && !shipMutation.isPending
-                            ? "bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer ring-2 ring-indigo-300"
-                            : "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed"
-                        }`}
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>
-                          {shipMutation.isPending ? "Menyimpan Verifikasi..." : "Verifikasi Fisik & Siapkan Obat (Selesaikan Tahap Gudang)"}
-                        </span>
-                      </button>
+                      {currentStep > 2 ? (
+                        <div className="px-4 py-2 bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold rounded-lg flex items-center gap-2 text-xs">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>Pemeriksaan fisik dan penyiapan obat oleh Gudang telah selesai</span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={!isGudang || shipMutation.isPending}
+                          onClick={() => shipMutation.mutate()}
+                          className={`px-5 py-2 font-bold rounded-lg flex items-center gap-2 shadow-sm transition active:scale-95 ${
+                            isGudang && !shipMutation.isPending
+                              ? "bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer ring-2 ring-indigo-300"
+                              : "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed"
+                          }`}
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>
+                            {shipMutation.isPending ? "Menyimpan Verifikasi..." : "Verifikasi Fisik & Siapkan Obat (Selesaikan Tahap Gudang)"}
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
               )}
 
               {/* TAHAP 3: VERIFIKASI ADMIN SETELAH GUDANG & PENGIRIMAN EKSPEDISI / SERAH TERIMA */}
-              {currentStep === 3 && (
+              {activeStep === 3 && (
                 <div className="p-4 rounded-xl border border-teal-300 ring-2 ring-teal-50 bg-white shadow-2xs space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                     <div className="flex items-center gap-2.5">
@@ -619,8 +681,14 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                       </div>
                     </div>
 
-                    <span className="px-2.5 py-0.5 rounded text-[10px] font-bold bg-teal-100 text-teal-800 border border-teal-300 animate-pulse">
-                      Sedang Berlangsung (Tahap Admin)
+                    <span
+                      className={`px-2.5 py-0.5 rounded text-[10px] font-bold ${
+                        currentStep > 3
+                          ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                          : "bg-teal-100 text-teal-800 border border-teal-300 animate-pulse"
+                      }`}
+                    >
+                      {currentStep > 3 ? "✓ Tahap Admin & Ekspedisi Selesai" : "Sedang Berlangsung (Tahap Admin)"}
                     </span>
                   </div>
 
@@ -671,7 +739,15 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Form Informasi Ekspedisi / Kurir Pengantar (Diinput oleh ADMIN saat Verifikasi Setelah Gudang) */}
+                    {/* Form Informasi Ekspedisi / Kurir Pengantar (Diinput oleh ADMIN saat Verifikasi Setelah Gudang, hanya jika Melalui Pengiriman) */}
+                    {isSelfPickup ? (
+                      <div className="bg-amber-50/70 p-3 rounded-lg border border-amber-200 flex items-center gap-2 text-amber-900 text-[11px]">
+                        <PackageCheck className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>
+                          <strong>Diambil Pelanggan Langsung:</strong> Transaksi ini diambil langsung oleh pelanggan di apotek (tidak melalui ekspedisi pengiriman). Silakan konfirmasi data penerima di bawah ini.
+                        </span>
+                      </div>
+                    ) : (
                     <div className="bg-indigo-50/40 p-3 rounded-lg border border-indigo-200 space-y-2.5">
                       <h5 className="font-bold text-[11.5px] text-indigo-950 flex items-center gap-1.5 border-b border-indigo-200 pb-1.5">
                         <Truck className="w-3.5 h-3.5 text-indigo-600" />
@@ -685,7 +761,7 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                           </label>
                           <input
                             type="text"
-                            disabled={isGudang || !isAdmin}
+                            disabled={isGudang || !isAdmin || currentStep > 3}
                             value={courier}
                             onChange={(e) => setCourier(e.target.value)}
                             placeholder="Kurir Internal / JNE / Driver PBF"
@@ -699,7 +775,7 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                           </label>
                           <input
                             type="text"
-                            disabled={isGudang || !isAdmin}
+                            disabled={isGudang || !isAdmin || currentStep > 3}
                             value={trackingNo}
                             onChange={(e) => setTrackingNo(e.target.value)}
                             placeholder="Contoh: SJ-2026/11/0088 / RESI-12345"
@@ -713,7 +789,7 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                           </label>
                           <input
                             type="date"
-                            disabled={isGudang || !isAdmin}
+                            disabled={isGudang || !isAdmin || currentStep > 3}
                             value={deliveryDate}
                             onChange={(e) => setDeliveryDate(e.target.value)}
                             className="w-full h-7 px-2 border border-slate-300 rounded text-[11px] bg-white text-slate-900 focus:outline-none focus:border-indigo-500 disabled:bg-slate-100"
@@ -721,6 +797,7 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                         </div>
                       </div>
                     </div>
+                    )}
 
                     {/* Form Input Serah Terima Pelanggan */}
                     <div className="bg-teal-50/40 p-3 rounded-lg border border-teal-200 space-y-2.5">
@@ -736,7 +813,7 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                           </label>
                           <input
                             type="text"
-                            disabled={isGudang || !isAdmin}
+                            disabled={isGudang || !isAdmin || currentStep > 3}
                             value={receivedBy}
                             onChange={(e) => setReceivedBy(e.target.value)}
                             placeholder="Contoh: Apt. Sarah, S.Farm / Petugas Klinik"
@@ -750,7 +827,7 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                           </label>
                           <input
                             type="date"
-                            disabled={isGudang || !isAdmin}
+                            disabled={isGudang || !isAdmin || currentStep > 3}
                             value={receivedDate}
                             onChange={(e) => setReceivedDate(e.target.value)}
                             className="w-full h-7 px-2 border border-slate-300 rounded text-[11px] bg-white text-slate-900 focus:outline-none focus:border-teal-500 disabled:bg-slate-100"
@@ -764,7 +841,7 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
                         </label>
                         <input
                           type="text"
-                          disabled={isGudang || !isAdmin}
+                          disabled={isGudang || !isAdmin || currentStep > 3}
                           value={receiveNotes}
                           onChange={(e) => setReceiveNotes(e.target.value)}
                           placeholder="Obat diterima lengkap dalam kondisi baik berstempel sarana..."
@@ -775,28 +852,39 @@ export const AlurPenjualanModal: React.FC<AlurPenjualanModalProps> = ({
 
                     {/* Tombol Eksekusi Konfirmasi Terima */}
                     <div className="flex justify-end pt-1">
-                      <button
-                        type="button"
-                        disabled={isGudang || !isAdmin || receiveMutation.isPending}
-                        onClick={() => receiveMutation.mutate()}
-                        className={`px-5 py-2 font-bold rounded-lg flex items-center gap-2 shadow-sm transition active:scale-95 ${
-                          !isGudang && isAdmin && !receiveMutation.isPending
-                            ? "bg-teal-600 hover:bg-teal-700 text-white cursor-pointer ring-2 ring-teal-300"
-                            : "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed"
-                        }`}
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>
-                          {receiveMutation.isPending ? "Menyimpan Ekspedisi & Konfirmasi..." : "Simpan Ekspedisi & Konfirmasi Selesai"}
-                        </span>
-                      </button>
+                      {currentStep > 3 ? (
+                        <div className="px-4 py-2 bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold rounded-lg flex items-center gap-2 text-xs">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          <span>Ekspedisi dan konfirmasi penerimaan pelanggan telah selesai diverifikasi</span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={isGudang || !isAdmin || receiveMutation.isPending}
+                          onClick={() => receiveMutation.mutate()}
+                          className={`px-5 py-2 font-bold rounded-lg flex items-center gap-2 shadow-sm transition active:scale-95 ${
+                            !isGudang && isAdmin && !receiveMutation.isPending
+                              ? "bg-teal-600 hover:bg-teal-700 text-white cursor-pointer ring-2 ring-teal-300"
+                              : "bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed"
+                          }`}
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>
+                            {receiveMutation.isPending
+                              ? "Menyimpan Konfirmasi..."
+                              : isSelfPickup
+                              ? "Konfirmasi Diambil Pelanggan (Selesai)"
+                              : "Simpan Ekspedisi & Konfirmasi Selesai"}
+                          </span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* TAHAP 4: STATUS PELUNASAN PIUTANG & SELESAI (Muncul HANYA jika currentStep === 4) */}
-              {currentStep === 4 && (
+              {/* TAHAP 4: STATUS PELUNASAN PIUTANG & SELESAI (Muncul jika activeStep === 4) */}
+              {activeStep === 4 && (
                 <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-2xs space-y-3">
                   <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                     <div className="flex items-center gap-2.5">

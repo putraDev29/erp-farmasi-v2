@@ -29,8 +29,10 @@ import {
   FileCheck,
   CheckCircle2,
   CheckSquare,
+  ShoppingCart,
 } from "lucide-react";
 import { api, formatCurrency, formatDate } from "@/lib/api";
+import { CurrencyInput } from "@/components/common/CurrencyInput";
 import { CariSupplierModal } from "./CariSupplierModal";
 import { CariItemModal } from "./CariItemModal";
 import { IncludeBiayaModal } from "./IncludeBiayaModal";
@@ -86,6 +88,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
   const [isUploadPbfDocOpen, setIsUploadPbfDocOpen] = useState(false);
   const [pbfDocUrl, setPbfDocUrl] = useState("");
   const [isSaveConfirmModalOpen, setIsSaveConfirmModalOpen] = useState(false);
+  const [isMasterCostModalOpen, setIsMasterCostModalOpen] = useState(false);
   const [isTerimaModalOpen, setIsTerimaModalOpen] = useState(false);
   const [isIncludeBiayaModalOpen, setIsIncludeBiayaModalOpen] = useState(false);
   const [selectedItemIndices, setSelectedItemIndices] = useState<number[]>([]);
@@ -162,6 +165,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
     return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   });
   const [notes, setNotes] = useState("");
+  const [deliveryMethod, setDeliveryMethod] = useState<"DIKIRIM" | "DIAMBIL">("DIKIRIM");
   const [taxPercent, setTaxPercent] = useState<number>(0);
   const [taxCheckbox, setTaxCheckbox] = useState(false);
   const [discountPercent, setDiscountPercent] = useState<number>(0);
@@ -307,6 +311,17 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
     enabled: isEdit && Boolean(orderId),
   });
 
+  // Status apakah PO sudah selesai (semua item terpenuhi / status selesai) -> Transaksi Terkunci
+  const isCompleted = Boolean(
+    existingPO && (
+      existingPO.status === "COMPLETED" ||
+      existingPO.status === "SELESAI" ||
+      existingPO.process_status === "Selesai" ||
+      orderStatus === "SELESAI" ||
+      orderStatus === "COMPLETED"
+    )
+  );
+
   // Status apakah pembayaran sudah pernah disubmit (DP / Sebagian / Lunas / Tempo kredit)
   // Sesuai aturan: jika pembayaran sudah disubmit, tombol bayar didisable karena sisa hutang muncul di menu Bayar Hutang
   const isPaymentSubmitted = Boolean(
@@ -329,6 +344,15 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
   useEffect(() => {
     if (existingPO) {
       setOrderNo(existingPO.order_no || "Auto");
+      if (existingPO.date) {
+        const d = new Date(existingPO.date);
+        const pad = (n: number) => String(n).padStart(2, "0");
+        setOrderDate(
+          `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(
+            d.getHours()
+          )}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+        );
+      }
       if (existingPO.supplier) {
         setSelectedSupplier(existingPO.supplier);
       } else if (existingPO.supplier_id && suppliers.length > 0) {
@@ -344,13 +368,17 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
       if (existingPO.notes) {
         setNotes(existingPO.notes);
       }
+      if (existingPO.delivery_method === "DIAMBIL" || existingPO.delivery_method === "DIKIRIM") {
+        setDeliveryMethod(existingPO.delivery_method);
+      }
       if (existingPO.sp_type) setSpType(existingPO.sp_type);
       if (existingPO.sp_number) setSpNumber(existingPO.sp_number);
       if (existingPO.apj_name) setApjName(existingPO.apj_name);
       if (existingPO.apj_sipa_no) setApjSipaNo(existingPO.apj_sipa_no);
       if (existingPO.pbf_document_url) setPbfDocUrl(existingPO.pbf_document_url);
       if (existingPO.expected_date) {
-        setExpectedDate(existingPO.expected_date.split("T")[0]);
+        const expStr = String(existingPO.expected_date);
+        setExpectedDate(expStr.includes("T") ? expStr.split("T")[0] : expStr.substring(0, 10));
       }
       if (existingPO.dp_amount !== undefined) setDpAmount(Number(existingPO.dp_amount));
       if (existingPO.paid_amount !== undefined) {
@@ -362,18 +390,21 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
       if (existingPO.payment_status) setPaymentStatus(existingPO.payment_status);
       if (existingPO.cash_account_id) setCashAccountId(existingPO.cash_account_id);
       if (existingPO.tax_percent !== undefined) {
-        setTaxPercent(existingPO.tax_percent);
-        if (existingPO.tax_percent > 0) {
-          setPpnType("Exclude");
-        }
+        const tp = Number(existingPO.tax_percent) || 0;
+        setTaxPercent(tp);
+        setTaxCheckbox(tp > 0);
+        setPpnType(tp > 0 ? "Exclude" : "Non");
       }
       if (existingPO.discount !== undefined) {
-        setNominalDiscount(existingPO.discount);
+        setNominalDiscount(Number(existingPO.discount) || 0);
       }
-      if (existingPO.shipping_fee !== undefined && existingPO.shipping_fee > 0) {
-        setExtraFee(existingPO.shipping_fee);
-        setExtraFeeCheckbox(true);
-        setIncludeBiayaData((prev) => ({ ...prev, nominal: existingPO.shipping_fee }));
+      if (existingPO.shipping_fee !== undefined) {
+        const sf = Number(existingPO.shipping_fee) || 0;
+        setExtraFee(sf);
+        setExtraFeeCheckbox(sf > 0);
+        if (sf > 0) {
+          setIncludeBiayaData((prev) => ({ ...prev, nominal: sf }));
+        }
       }
 
       if (Array.isArray(existingPO.items)) {
@@ -411,18 +442,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         if (mappedItems.length > 0) setSelectedRowIndex(0);
       }
     }
-  }, [existingPO]);
-
-  // Adjust tax percentage based on PPN dropdown
-  useEffect(() => {
-    if (ppnType === "Non") {
-      setTaxPercent(0);
-      setTaxCheckbox(false);
-    } else if (ppnType === "Include" || ppnType === "Exclude") {
-      setTaxPercent(11); // Standard PPN 11% / 12%
-      setTaxCheckbox(true);
-    }
-  }, [ppnType]);
+  }, [existingPO, suppliers]);
 
   // Calculations
   const itemCount = items.length;
@@ -705,6 +725,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
     setItems([]);
     setSelectedRowIndex(null);
     setNotes("");
+    setDeliveryMethod("DIKIRIM");
     setTaxPercent(0);
     setPpnType("Non");
     setNominalDiscount(0);
@@ -728,7 +749,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
 
   // Save PO Mutation
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (updateMasterCost: boolean = false) => {
       const finalSupplierId = selectedSupplier?.id || items.find((it) => it.supplier_id)?.supplier_id || suppliers[0]?.id;
       if (!finalSupplierId) {
         throw new Error("Pilih Supplier terlebih dahulu.");
@@ -773,6 +794,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         warehouse_id: warehouseId || undefined,
         supplier_id: finalSupplierId,
         expected_date: expectedDate ? new Date(expectedDate) : undefined,
+        delivery_method: deliveryMethod,
         notes: notes,
         tax_percent: taxPercent,
         discount: calculatedNominalDiscount,
@@ -788,6 +810,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         remaining_amount: Math.max(0, grandTotal - finalPaidAmount),
         payment_status: finalPaymentStatus,
         cash_account_id: cashAccountId || undefined,
+        update_master_cost: Boolean(updateMasterCost),
         items: (() => {
           const seenIds = new Set<string>();
           return items.map((it) => {
@@ -834,14 +857,19 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
     },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
       queryClient.invalidateQueries({ queryKey: ["journals"] });
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
       queryClient.invalidateQueries({ queryKey: ["cash-transactions"] });
       setIsBayarModalOpen(false);
       setIsSaveConfirmModalOpen(false);
+      setIsMasterCostModalOpen(false);
+      const targetPoId = res?.data?.data?.id || orderId;
       if (isPrintAfterSave) {
         setIsDokumenSPOpen(true);
-      } else if (confirm((isEdit ? "Pesanan Pembelian berhasil diperbarui!" : "Pesanan Pembelian baru berhasil disimpan!") + "\n\nDokumen Surat Pesanan (SP) otomatis digenerate.\nApakah Anda ingin melihat & mencetak Dokumen SP sekarang?")) {
+      } else if (targetPoId && confirm((isEdit ? "Pesanan Pembelian berhasil diperbarui!" : "Pesanan Pembelian baru berhasil disimpan!") + "\n\nApakah Anda ingin langsung memproses pesanan ini ke menu Pembelian (Faktur Pembelian)?\n\n• Klik 'OK' untuk buka Faktur Pembelian (semua field otomatis terisi)\n• Klik 'Cancel' untuk tetap di halaman PO / lihat Dokumen SP")) {
+        router.push(`/purchasing/invoices/new?po_id=${targetPoId}`);
+      } else if (confirm("Apakah Anda ingin melihat & mencetak Dokumen Surat Pesanan (SP) sekarang?")) {
         setIsDokumenSPOpen(true);
       } else {
         router.push("/purchasing/orders");
@@ -906,6 +934,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         warehouse_id: warehouseId || undefined,
         supplier_id: finalSupplierId,
         expected_date: expectedDate ? new Date(expectedDate) : undefined,
+        delivery_method: deliveryMethod,
         notes: notes,
         tax_percent: taxPercent,
         discount: calculatedNominalDiscount,
@@ -1114,6 +1143,21 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         </div>
       </div>
 
+      {/* Locked Status Banner */}
+      {isEdit && isCompleted && (
+        <div className="shrink-0 px-3 py-1.5 rounded-lg border bg-emerald-50 border-emerald-300 text-emerald-900 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span className="font-bold">
+              🟢 STATUS: PESANAN PEMBELIAN SELESAI (Semua Item Telah Terpenuhi - Transaksi Terkunci)
+            </span>
+          </div>
+          <span className="text-[11px] bg-emerald-200/70 text-emerald-900 px-2 py-0.5 rounded font-mono font-bold">
+            READ-ONLY
+          </span>
+        </div>
+      )}
+
       {/* 2. Top Form Section */}
       <div className="bg-slate-50/70 border border-slate-300 rounded p-1 sm:p-1.5 space-y-1 shadow-2xs shrink-0">
         {/* ROW 1: No Transaksi | Tanggal | Supplier | Status Pesanan */}
@@ -1160,9 +1204,10 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
               />
               <button
                 type="button"
-                onClick={() => setIsSupplierModalOpen(true)}
-                className="w-6 h-6 flex items-center justify-center border border-slate-300 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition shrink-0"
-                title="Cari Supplier (🔍)"
+                disabled={isCompleted}
+                onClick={() => !isCompleted && setIsSupplierModalOpen(true)}
+                className="w-6 h-6 flex items-center justify-center border border-slate-300 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 transition shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                title={isCompleted ? "Transaksi terkunci" : "Cari Supplier (🔍)"}
               >
                 <Search className="w-3 h-3" />
               </button>
@@ -1176,8 +1221,9 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
             </label>
             <select
               value={orderStatus}
+              disabled={isCompleted}
               onChange={(e) => setOrderStatus(e.target.value)}
-              className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500"
+              className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
             >
               <option value="Select...">Select...</option>
               <option value="PENDING">PENDING</option>
@@ -1216,7 +1262,17 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
             </label>
             <select
               value={ppnType}
-              onChange={(e) => setPpnType(e.target.value as any)}
+              onChange={(e) => {
+                const val = e.target.value as any;
+                setPpnType(val);
+                if (val === "Non") {
+                  setTaxPercent(0);
+                  setTaxCheckbox(false);
+                } else if (taxPercent === 0) {
+                  setTaxPercent(11);
+                  setTaxCheckbox(true);
+                }
+              }}
               className="w-full h-6 px-1.5 py-0 border border-slate-300 rounded text-[11px] text-slate-800 bg-white focus:outline-none focus:border-sky-500 cursor-pointer"
             >
               <option value="Non">Non</option>
@@ -1266,6 +1322,20 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                 SP
               </span>
             </button>
+          </div>
+          {/* Metode Penerimaan Barang */}
+          <div className="md:col-span-2">
+            <label className="block text-slate-600 font-semibold text-[10px] mb-0.5 leading-none">
+              Metode Pengiriman :
+            </label>
+            <select
+              value={deliveryMethod}
+              onChange={(e) => setDeliveryMethod(e.target.value as "DIKIRIM" | "DIAMBIL")}
+              className="w-full h-6 px-1.5 py-0 border border-emerald-300 rounded text-[11px] font-semibold text-emerald-900 bg-emerald-50/40 focus:outline-none focus:border-emerald-500 cursor-pointer"
+            >
+              <option value="DIKIRIM">Dikirim Supplier</option>
+              <option value="DIAMBIL">Diambil ke Supplier</option>
+            </select>
           </div>
         </div>
       </div>
@@ -1399,11 +1469,27 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                         <td className="py-0.5 px-1.5 border-r border-slate-200 text-center font-semibold text-slate-700">
                           {it.unit_name}
                         </td>
-                        <td className="py-0.5 px-2 border-r border-slate-200 text-right font-mono text-slate-800">
-                          {Number(it.unit_price).toLocaleString("id-ID", {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                        <td className="py-0.5 px-1 border-r border-slate-200 text-right font-mono text-slate-800">
+                          <CurrencyInput
+                            disabled={isCompleted || Boolean(it.is_fulfilled)}
+                            value={it.unit_price}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(newPrice) => {
+                              setItems((prev) =>
+                                prev.map((row, rIdx) => {
+                                  if (rIdx !== idx) return row;
+                                  const base = row.qty * newPrice;
+                                  const disc = (base * (row.discount_percent || 0)) / 100;
+                                  return {
+                                    ...row,
+                                    unit_price: newPrice,
+                                    line_total: Math.max(0, base - disc),
+                                  };
+                                })
+                              );
+                            }}
+                            className="w-full px-1 py-0.5 text-right font-mono bg-transparent hover:bg-white focus:bg-white border border-transparent hover:border-slate-300 focus:border-sky-500 rounded text-slate-900 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
+                          />
                         </td>
                         <td className="py-0.5 px-1.5 border-r border-slate-200 text-right font-mono text-slate-600">
                           {it.discount_percent.toFixed(2)}
@@ -1481,9 +1567,10 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
       <div className="flex flex-wrap items-center gap-1 py-0.5 shrink-0">
         <button
           type="button"
-          onClick={() => setIsItemModalOpen(true)}
-          className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 rounded font-bold text-[10.5px] flex items-center gap-1 shadow-2xs transition active:scale-95"
-          title="Tambah Item Pesanan (+ Item)"
+          disabled={isCompleted}
+          onClick={() => !isCompleted && setIsItemModalOpen(true)}
+          className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 rounded font-bold text-[10.5px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+          title={isCompleted ? "Transaksi terkunci" : "Tambah Item Pesanan (+ Item)"}
         >
           <span>+ Item</span>
         </button>
@@ -1491,9 +1578,9 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         <button
           type="button"
           onClick={handleOpenEditRow}
-          disabled={selectedRowIndex === null || Boolean(selectedItemRow?.is_fulfilled)}
+          disabled={selectedRowIndex === null || Boolean(selectedItemRow?.is_fulfilled) || isCompleted}
           className="w-6 h-6 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded flex items-center justify-center shadow-2xs transition active:scale-95 disabled:opacity-40"
-          title="Ubah Item Terpilih (Pencil)"
+          title={isCompleted ? "Transaksi terkunci" : "Ubah Item Terpilih (Pencil)"}
         >
           <Pencil className="w-3 h-3" />
         </button>
@@ -1501,7 +1588,7 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         <button
           type="button"
           onClick={handleDeleteRow}
-          disabled={selectedRowIndex === null || Boolean(selectedItemRow?.is_fulfilled)}
+          disabled={selectedRowIndex === null || Boolean(selectedItemRow?.is_fulfilled) || isCompleted}
           className="w-6 h-6 bg-white hover:bg-slate-50 border border-slate-300 text-rose-600 rounded flex items-center justify-center shadow-2xs transition active:scale-95 disabled:opacity-40"
           title="Hapus Item Terpilih (Trash)"
         >
@@ -1809,6 +1896,10 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         <button
           type="button"
           onClick={() => {
+            if (isCompleted) {
+              alert("Pesanan pembelian sudah selesai. Transaksi yang sudah selesai tidak dapat diedit.");
+              return;
+            }
             const finalSupplierId = selectedSupplier?.id || items.find((it) => it.supplier_id)?.supplier_id || suppliers[0]?.id;
             if (!finalSupplierId) {
               alert("Pilih Supplier terlebih dahulu.");
@@ -1818,11 +1909,11 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
               alert("Tabel item pesanan masih kosong. Silakan klik [+ Item].");
               return;
             }
-            setIsSaveConfirmModalOpen(true);
+            setIsMasterCostModalOpen(true);
           }}
-          disabled={saveMutation.isPending}
-          className="h-6 px-3 bg-[#009b62] hover:bg-[#008754] text-white font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-50 cursor-pointer"
-          title="Simpan Pesanan Pembelian"
+          disabled={saveMutation.isPending || isCompleted}
+          className="h-6 px-3 bg-[#009b62] hover:bg-[#008754] text-white font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          title={isCompleted ? "Pesanan pembelian sudah selesai. Transaksi yang sudah selesai tidak dapat diedit." : "Simpan Pesanan Pembelian"}
         >
           <Save className="w-3 h-3" />
           <span>{saveMutation.isPending ? "Menyimpan..." : "Simpan"}</span>
@@ -1831,9 +1922,9 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         <button
           type="button"
           onClick={handleDeletePO}
-          disabled={!isEdit}
-          className="h-6 px-2.5 bg-white hover:bg-rose-50 border border-slate-300 text-rose-600 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-40 cursor-pointer"
-          title="Hapus Pesanan Pembelian"
+          disabled={!isEdit || isCompleted}
+          className="h-6 px-2.5 bg-white hover:bg-rose-50 border border-slate-300 text-rose-600 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          title={isCompleted ? "Pesanan pembelian sudah selesai. Transaksi yang sudah selesai tidak dapat dihapus." : "Hapus Pesanan Pembelian"}
         >
           <Trash2 className="w-3 h-3" />
           <span>Hapus</span>
@@ -1864,6 +1955,23 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
         >
           <FileText className="w-3 h-3 text-sky-600" />
           <span>Dokumen SP</span>
+        </button>
+
+        {/* 🛒 Proses ke Pembelian */}
+        <button
+          type="button"
+          onClick={() => {
+            if (isEdit && orderId) {
+              router.push(`/purchasing/invoices/new?po_id=${orderId}`);
+            } else {
+              alert("Silakan klik [Simpan] terlebih dahulu agar pesanan pembelian tercatat, lalu sistem akan otomatis mengarahkan ke menu Pembelian.");
+            }
+          }}
+          className="h-6 px-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
+          title="Lanjut buat Faktur Pembelian berdasarkan Pesanan Pembelian ini"
+        >
+          <ShoppingCart className="w-3 h-3 text-emerald-600" />
+          <span>Proses ke Pembelian</span>
         </button>
       </div>
 
@@ -2383,13 +2491,55 @@ export const PurchaseOrderForm: React.FC<PurchaseOrderFormProps> = ({
                 type="button"
                 disabled={saveMutation.isPending}
                 onClick={() => {
-                  saveMutation.mutate();
+                  saveMutation.mutate(false);
                 }}
                 className="h-7 px-4 bg-[#00c875] hover:bg-[#00b066] text-white font-bold rounded shadow-2xs transition active:scale-95 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
               >
                 <Save className="w-3.5 h-3.5" />
                 <span>{saveMutation.isPending ? "Menyimpan..." : "Ya, Simpan Data"}</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL KONFIRMASI UPDATE HARGA POKOK MASTER DATA */}
+      {isMasterCostModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-2xs p-3 animate-in fade-in duration-150">
+          <div className="bg-white rounded-md shadow-2xl border border-slate-300 w-full max-w-md overflow-hidden">
+            <div className="px-4 py-2 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+              <span className="font-semibold text-xs text-slate-700">Konfirmasi</span>
+              <button
+                type="button"
+                onClick={() => setIsMasterCostModalOpen(false)}
+                className="p-0.5 text-slate-400 hover:text-slate-700 rounded cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-5 text-xs text-slate-800 space-y-5">
+              <div className="leading-relaxed text-[13px] text-slate-800">
+                <p>Apakah Harga Pokok akan di ubah pada master data ?</p>
+                <p>Harga Pokok akan disimpan setelah klik tombol Simpan.</p>
+              </div>
+              <div className="flex justify-center gap-3 pt-1">
+                <button
+                  type="button"
+                  disabled={saveMutation.isPending}
+                  onClick={() => saveMutation.mutate(true)}
+                  className="min-w-[90px] h-7 px-4 bg-slate-100 hover:bg-slate-200 border border-slate-400 rounded text-slate-800 font-medium text-xs transition cursor-pointer disabled:opacity-50"
+                >
+                  {saveMutation.isPending ? "Menyimpan..." : "Yes"}
+                </button>
+                <button
+                  type="button"
+                  disabled={saveMutation.isPending}
+                  onClick={() => saveMutation.mutate(false)}
+                  className="min-w-[90px] h-7 px-4 bg-white hover:bg-slate-100 border border-slate-300 rounded text-slate-800 font-medium text-xs transition cursor-pointer disabled:opacity-50"
+                >
+                  No
+                </button>
+              </div>
             </div>
           </div>
         </div>

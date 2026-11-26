@@ -97,7 +97,7 @@ export default function BOMsPage() {
       <div className="shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-1">
         <div>
           <h1 className="text-sm font-bold text-slate-800">Formula Bill of Materials (BOM)</h1>
-          <p className="text-[11px] text-slate-500">Definisi resep perakitan barang jadi, formula obat racikan, atau paket P3K.</p>
+          
         </div>
         <button
           onClick={() => setModalOpen(true)}

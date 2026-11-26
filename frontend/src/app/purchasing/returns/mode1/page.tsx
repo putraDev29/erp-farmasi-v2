@@ -72,6 +72,7 @@ export default function PurchaseReturnMode1Page() {
   const [notes, setNotes] = useState("");
   const [extraFee, setExtraFee] = useState<number>(0);
   const [extraFeeCheckbox, setExtraFeeCheckbox] = useState(false);
+  const [deliveryMethod, setDeliveryMethod] = useState<"DIAMBIL" | "DIKIRIM">("DIAMBIL");
 
   // Table items & selection
   const [items, setItems] = useState<ReturnItemMode1Row[]>([]);
@@ -236,6 +237,7 @@ export default function PurchaseReturnMode1Page() {
     setNotes("");
     setExtraFee(0);
     setExtraFeeCheckbox(false);
+    setDeliveryMethod("DIAMBIL");
   };
 
   // Mutation to save return
@@ -265,6 +267,7 @@ export default function PurchaseReturnMode1Page() {
 
       const payload = {
         return_mode: "MODE_1",
+        delivery_method: deliveryMethod,
         purchase_id: items[0]?.purchase_id || undefined,
         warehouse_id: warehouseId,
         supplier_id: selectedSupplier.id,
@@ -339,19 +342,10 @@ export default function PurchaseReturnMode1Page() {
           <button
             type="button"
             onClick={handleResetForm}
-            className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded text-xs font-medium flex items-center gap-1 shadow-2xs transition active:scale-95"
+            className="h-6 px-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded text-xs font-medium flex items-center gap-1 shadow-2xs transition active:scale-95 cursor-pointer"
           >
             <RotateCcw className="w-3 h-3 text-slate-500" />
             <span>Baru</span>
-          </button>
-          <button
-            type="button"
-            disabled={createMutation.isPending}
-            onClick={() => createMutation.mutate()}
-            className="h-6 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-semibold flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-50"
-          >
-            <Save className="w-3 h-3" />
-            <span>{createMutation.isPending ? "Menyimpan..." : "Simpan (Draft)"}</span>
           </button>
         </div>
       </div>
@@ -467,6 +461,20 @@ export default function PurchaseReturnMode1Page() {
               onChange={(e) => setNotes(e.target.value)}
               className="col-span-8 h-6 px-2 border border-slate-300 rounded text-[11px] bg-white"
             />
+          </div>
+
+          <div className="grid grid-cols-12 items-center gap-1">
+            <label className="col-span-4 text-slate-600 font-semibold text-[11px]">
+              Metode Retur :
+            </label>
+            <select
+              value={deliveryMethod}
+              onChange={(e) => setDeliveryMethod(e.target.value as "DIAMBIL" | "DIKIRIM")}
+              className="col-span-8 h-6 px-1.5 border border-emerald-300 rounded text-[11px] font-semibold bg-emerald-50/40 text-emerald-900 focus:outline-none focus:border-emerald-500 cursor-pointer"
+            >
+              <option value="DIAMBIL">Diambil Supplier</option>
+              <option value="DIKIRIM">Dikirim ke Supplier</option>
+            </select>
           </div>
         </div>
 
@@ -711,10 +719,20 @@ export default function PurchaseReturnMode1Page() {
           type="button"
           onClick={handleDeleteSelectedRow}
           disabled={selectedRowIndex === null}
-          className="w-6 h-6 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded flex items-center justify-center shadow-2xs transition active:scale-95 disabled:opacity-40"
+          className="w-6 h-6 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded flex items-center justify-center shadow-2xs transition active:scale-95 disabled:opacity-40 cursor-pointer"
           title="Hapus Baris"
         >
           <Trash2 className="w-3 h-3 text-rose-500" />
+        </button>
+
+        <button
+          type="button"
+          disabled={createMutation.isPending}
+          onClick={() => createMutation.mutate()}
+          className="h-6 px-3 bg-[#009b62] hover:bg-[#008754] text-white font-semibold rounded text-[11px] flex items-center gap-1 shadow-2xs transition active:scale-95 disabled:opacity-50 cursor-pointer"
+        >
+          <Save className="w-3 h-3 stroke-[2.5]" />
+          <span>{createMutation.isPending ? "Menyimpan..." : "Simpan"}</span>
         </button>
       </div>
 

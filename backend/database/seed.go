@@ -1325,5 +1325,42 @@ func EnsureDiscountAccounts(db *gorm.DB) {
 			upsertSetting("sales_discount", accKeringananPiutang.ID, "Akun Keringanan Piutang (KERINGANAN PIUTANG)")
 			upsertSetting("ar_discount", accKeringananPiutang.ID, "Akun Potongan Piutang (KERINGANAN PIUTANG)")
 		}
+
+		// 5. Akun PPN MASUKAN (1-1410) & PPN KELUARAN (2-4110)
+		var accPPNMasukan models.Account
+		if err := db.Where("company_id = ? AND code = '1-1410'", comp.ID).First(&accPPNMasukan).Error; err == nil {
+			upsertSetting("purch_tax", accPPNMasukan.ID, "Akun Pajak Masukan (PPN MASUKAN)")
+			// Migrasi jurnal entries dari akun header 1-1400 ke akun detail 1-1410
+			var accPPNHeader models.Account
+			if errH := db.Where("company_id = ? AND code = '1-1400'", comp.ID).First(&accPPNHeader).Error; errH == nil {
+				db.Model(&models.JournalEntry{}).Where("account_id = ?", accPPNHeader.ID).Update("account_id", accPPNMasukan.ID)
+			}
+		}
+		var accHutangUsaha models.Account
+		if err := db.Where("company_id = ? AND code = '2-1100'", comp.ID).First(&accHutangUsaha).Error; err == nil {
+			upsertSetting("purch_credit_payable", accHutangUsaha.ID, "Akun Hutang Usaha (HUTANG USAHA)")
+		}
+		var accPersediaan models.Account
+		if err := db.Where("company_id = ? AND code = '1-1300'", comp.ID).First(&accPersediaan).Error; err == nil {
+			upsertSetting("item_inventory", accPersediaan.ID, "Akun Persediaan Obat & Barang Dagang")
+		}
+		var accBiayaAngkut models.Account
+		if err := db.Where("company_id = ? AND code = '5-3000'", comp.ID).First(&accBiayaAngkut).Error; err != nil {
+			accBiayaAngkut = models.Account{
+				CompanyID:     comp.ID,
+				Code:          "5-3000",
+				Name:          "Biaya Angkut Pembelian",
+				Type:          "EXPENSE",
+				Subtype:       "OPERATING_EXPENSE",
+				NormalBalance: "DEBIT",
+				ParentID:      pParentID,
+				IsHeader:      false,
+				IsActive:      true,
+			}
+			db.Create(&accBiayaAngkut)
+		}
+		if accBiayaAngkut.ID != uuid.Nil {
+			upsertSetting("purch_other_cost", accBiayaAngkut.ID, "Akun Biaya Angkut Pembelian (Biaya Angkut Pembelian)")
+		}
 	}
 }

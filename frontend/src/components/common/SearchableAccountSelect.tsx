@@ -12,8 +12,34 @@ export interface AccountOption {
   category?: string;
   classification?: string;
   balance?: number;
+  is_header?: boolean | number | string;
+  isHeader?: boolean | number | string;
+  type?: string;
+  subtype?: string;
   [key: string]: any;
 }
+
+export const isHeaderAccount = (acc: any): boolean => {
+  if (!acc) return false;
+  if (
+    acc.is_header === true ||
+    acc.is_header === 1 ||
+    String(acc.is_header).toLowerCase() === "true" ||
+    acc.isHeader === true ||
+    acc.isHeader === 1 ||
+    String(acc.isHeader).toLowerCase() === "true"
+  ) {
+    return true;
+  }
+  if (
+    acc.type === "HEADER" ||
+    acc.subtype === "HEADER" ||
+    acc.classification === "HEADER"
+  ) {
+    return true;
+  }
+  return false;
+};
 
 export interface SearchableAccountSelectProps {
   accounts: AccountOption[];
@@ -26,6 +52,7 @@ export interface SearchableAccountSelectProps {
   allowClear?: boolean;
   buttonClassName?: string;
   dropdownClassName?: string;
+  includeHeaders?: boolean;
 }
 
 export const SearchableAccountSelect: React.FC<SearchableAccountSelectProps> = ({
@@ -38,6 +65,7 @@ export const SearchableAccountSelect: React.FC<SearchableAccountSelectProps> = (
   allowClear = true,
   buttonClassName = "",
   dropdownClassName = "",
+  includeHeaders = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -47,33 +75,58 @@ export const SearchableAccountSelect: React.FC<SearchableAccountSelectProps> = (
   const inputSearchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // Normalize account representation
+  // Normalize account representation (filters out header accounts by default)
   const normalizedAccounts = useMemo(() => {
-    return (accounts || []).map((acc) => {
-      const code = acc.code || acc.account_code || "";
-      const name = acc.name || acc.account_name || "";
-      const id = String(acc.id || code || "");
-      const category = acc.category || acc.classification || "";
-      return {
-        ...acc,
-        _id: id,
-        _code: code,
-        _name: name,
-        _category: category,
-        _label: code ? `${code} - ${name}` : name,
-      };
-    });
-  }, [accounts]);
+    return (accounts || [])
+      .filter((acc) => {
+        if (includeHeaders) return true;
+        return !isHeaderAccount(acc);
+      })
+      .map((acc) => {
+        const code = acc.code || acc.account_code || "";
+        const name = acc.name || acc.account_name || "";
+        const id = String(acc.id || code || "");
+        const category = acc.category || acc.classification || "";
+        return {
+          ...acc,
+          _id: id,
+          _code: code,
+          _name: name,
+          _category: category,
+          _label: code ? `${code} - ${name}` : name,
+        };
+      });
+  }, [accounts, includeHeaders]);
 
   // Selected account
   const selectedAccount = useMemo(() => {
     if (!value || value === "all" || value === "Select...") return null;
-    return (
-      normalizedAccounts.find(
-        (a) => a._id === String(value) || a._code === String(value) || a.id === value
-      ) || null
+    const found = normalizedAccounts.find(
+      (a) => a._id === String(value) || a._code === String(value) || a.id === value
     );
-  }, [normalizedAccounts, value]);
+    if (found) return found;
+
+    // Fallback: in case an existing record references an account that was filtered out
+    const rawFound = (accounts || []).find(
+      (a: any) =>
+        String(a.id) === String(value) ||
+        String(a.code) === String(value) ||
+        String(a.account_code) === String(value)
+    );
+    if (rawFound) {
+      const code = rawFound.code || rawFound.account_code || "";
+      const name = rawFound.name || rawFound.account_name || "";
+      return {
+        ...rawFound,
+        _id: String(rawFound.id || code),
+        _code: code,
+        _name: name,
+        _category: rawFound.category || rawFound.classification || "",
+        _label: code ? `${code} - ${name}` : name,
+      };
+    }
+    return null;
+  }, [normalizedAccounts, accounts, value]);
 
   // Filtered accounts based on search
   const filteredAccounts = useMemo(() => {

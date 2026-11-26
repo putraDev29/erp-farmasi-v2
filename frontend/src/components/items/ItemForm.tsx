@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { SearchableAccountSelect } from "@/components/common/SearchableAccountSelect";
+import { CurrencyInput } from "@/components/common/CurrencyInput";
 
 interface ItemDiscountRow {
   group_code: string;
@@ -38,6 +39,70 @@ interface ItemDiscountRow {
   discount_3: number;
   discount_4: number;
 }
+
+interface PricingRow {
+  unit_id: string;
+  is_base: boolean;
+  conversion: number;
+  barcode: string;
+  sku: string;
+  points: number;
+  sales_commission: number;
+  purchase_price: number;
+  proc1: number;
+  price1: number;
+  proc2: number;
+  price2: number;
+  proc3: number;
+  price3: number;
+  proc4: number;
+  price4: number;
+  proc5: number;
+  price5: number;
+  proc6: number;
+  price6: number;
+  qty1: number;
+  qty2: number;
+  qty3: number;
+  qty4: number;
+}
+
+const calcProcFromPrices = (cost: number, sell: number): number => {
+  if (cost <= 0 || sell <= 0) return 0;
+  return Number((((sell - cost) / cost) * 100).toFixed(2));
+};
+
+const calcSellFromProc = (cost: number, proc: number): number => {
+  if (cost <= 0) return 0;
+  return Number((cost * (1 + proc / 100)).toFixed(2));
+};
+
+const createEmptyPricingRow = (isBase = false): PricingRow => ({
+  unit_id: "",
+  is_base: isBase,
+  conversion: 1,
+  barcode: "",
+  sku: "",
+  points: 0,
+  sales_commission: 0,
+  purchase_price: 0,
+  proc1: 0,
+  price1: 0,
+  proc2: 0,
+  price2: 0,
+  proc3: 0,
+  price3: 0,
+  proc4: 0,
+  price4: 0,
+  proc5: 0,
+  price5: 0,
+  proc6: 0,
+  price6: 0,
+  qty1: 0,
+  qty2: 0,
+  qty3: 0,
+  qty4: 0,
+});
 
 interface ItemFormProps {
   initialData?: any;
@@ -78,6 +143,8 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
   const [sellingPrice, setSellingPrice] = useState<number>(0);
   const [points, setPoints] = useState<number>(0);
   const [salesCommission, setSalesCommission] = useState<number>(0);
+  const [pricingRows, setPricingRows] = useState<PricingRow[]>([createEmptyPricingRow(true)]);
+  const [selectedPricingRowIdx, setSelectedPricingRowIdx] = useState<number | null>(null);
 
   // TAB 3: DIMENSI BARANG
   const [weight, setWeight] = useState<number>(0);
@@ -151,14 +218,117 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
 
       setLockPriceOnSale(Boolean(initialData.lock_price_on_sale));
       setPricingType(initialData.pricing_type || "SATU_HARGA");
-      setBaseUnitID(initialData.base_unit_id || "");
+      const initBaseUnitID = initialData.base_unit_id || "";
+      const initPurchasePrice = Number(initialData.purchase_price || 0);
+      const initSellingPrice = Number(initialData.selling_price || 0);
+      // Proc1 dipertahankan dari markup_percent yang tersimpan (jika belum ada baru hitung dari selisih harga)
+      const storedMarkup = Number(initialData.markup_percent || 0);
+      const initProc1 =
+        storedMarkup !== 0
+          ? storedMarkup
+          : initPurchasePrice > 0 && initSellingPrice > 0
+          ? calcProcFromPrices(initPurchasePrice, initSellingPrice)
+          : 0;
+
+      setBaseUnitID(initBaseUnitID);
       setBarcode(initialData.barcode || "");
       setSku(initialData.sku || "");
-      setPurchasePrice(initialData.purchase_price || 0);
-      setMarkupPercent(initialData.markup_percent || 0);
-      setSellingPrice(initialData.selling_price || 0);
+      setPurchasePrice(initPurchasePrice);
+      setMarkupPercent(initProc1);
+      setSellingPrice(initSellingPrice);
       setPoints(initialData.points || 0);
       setSalesCommission(initialData.sales_commission || 0);
+
+      // Build pricingRows from initialData + prices + conversions
+      const rawPrices: any[] = Array.isArray(initialData.prices) ? initialData.prices : [];
+      const rawConversions: any[] = Array.isArray(initialData.conversions) ? initialData.conversions : [];
+
+      const applyUnitPrices = (row: PricingRow, unitId: string) => {
+        const unitPrices = rawPrices.filter((p) => p.unit_id === unitId);
+        unitPrices.forEach((p) => {
+          const tier = Number(p.tier_index || 1);
+          const priceVal = Number(p.price || 0);
+          const storedProc = Number(p.markup_percent || 0);
+          const procVal =
+            storedProc !== 0
+              ? storedProc
+              : row.purchase_price > 0 && priceVal > 0
+              ? calcProcFromPrices(row.purchase_price, priceVal)
+              : 0;
+          if (tier === 1) {
+            row.price1 = priceVal || row.price1;
+            row.proc1 = procVal || row.proc1;
+            if (p.price_type === "JUMLAH") row.qty1 = Number(p.min_qty || 0);
+          } else if (tier === 2) {
+            row.price2 = priceVal;
+            row.proc2 = procVal;
+            if (p.price_type === "JUMLAH") row.qty2 = Number(p.min_qty || 0);
+          } else if (tier === 3) {
+            row.price3 = priceVal;
+            row.proc3 = procVal;
+            if (p.price_type === "JUMLAH") row.qty3 = Number(p.min_qty || 0);
+          } else if (tier === 4) {
+            row.price4 = priceVal;
+            row.proc4 = procVal;
+            if (p.price_type === "JUMLAH") row.qty4 = Number(p.min_qty || 0);
+          } else if (tier === 5) {
+            row.price5 = priceVal;
+            row.proc5 = procVal;
+          } else if (tier === 6) {
+            row.price6 = priceVal;
+            row.proc6 = procVal;
+          }
+        });
+        return row;
+      };
+
+      const baseRow: PricingRow = applyUnitPrices(
+        {
+          ...createEmptyPricingRow(true),
+          unit_id: initBaseUnitID,
+          conversion: 1,
+          barcode: initialData.barcode || "",
+          sku: initialData.sku || "",
+          points: Number(initialData.points || 0),
+          sales_commission: Number(initialData.sales_commission || 0),
+          purchase_price: initPurchasePrice,
+          proc1: initProc1,
+          price1: initSellingPrice,
+        },
+        initBaseUnitID
+      );
+
+      const convRows: PricingRow[] = rawConversions
+        .filter((c) => !(c.from_unit_id === initBaseUnitID && Number(c.multiplier) === 1))
+        .map((c) => {
+          const convMult = Number(c.multiplier || 1);
+          const convCost = Number(c.purchase_price || initPurchasePrice * convMult || 0);
+          const convSell = Number(c.selling_price || 0);
+          const convStoredProc = Number(c.markup_percent || 0);
+          const convProc =
+            convStoredProc !== 0
+              ? convStoredProc
+              : convCost > 0 && convSell > 0
+              ? calcProcFromPrices(convCost, convSell)
+              : 0;
+          return applyUnitPrices(
+            {
+              ...createEmptyPricingRow(false),
+              unit_id: c.from_unit_id || "",
+              conversion: convMult,
+              barcode: c.barcode || "",
+              sku: c.sku || "",
+              points: Number(c.points || 0),
+              sales_commission: Number(c.sales_commission || 0),
+              purchase_price: convCost,
+              proc1: convProc,
+              price1: convSell,
+            },
+            c.from_unit_id
+          );
+        });
+
+      setPricingRows([baseRow, ...convRows]);
 
       setWeight(initialData.weight || 0);
       setLength(initialData.length || 0);
@@ -304,55 +474,123 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
   // Set default base unit if not set
   useEffect(() => {
     if (units.length > 0 && !baseUnitID) {
-      setBaseUnitID(units[0].id);
+      const defaultUnitId = units[0].id;
+      setBaseUnitID(defaultUnitId);
+      setPricingRows((prev) => {
+        if (prev.length === 0) return [{ ...createEmptyPricingRow(true), unit_id: defaultUnitId }];
+        const next = [...prev];
+        if (!next[0].unit_id) {
+          next[0] = { ...next[0], unit_id: defaultUnitId };
+        }
+        return next;
+      });
     }
   }, [units, baseUnitID]);
 
-  // Auto-fill default markup from general settings if new item and markup is 0
-  useEffect(() => {
-    if (!isEdit && generalSettings?.min_profit_percent) {
-      const defaultMargin = parseFloat(generalSettings.min_profit_percent);
-      if (!isNaN(defaultMargin) && defaultMargin > 0 && markupPercent === 0) {
-        setMarkupPercent(defaultMargin);
-        if (purchasePrice > 0) {
-          setSellingPrice(Math.round(purchasePrice * (1 + defaultMargin / 100)));
-        }
+  // Inline table cell updater for Satuan dan Harga
+  const updatePricingRow = (rowIndex: number, updater: (row: PricingRow, allRows: PricingRow[]) => PricingRow) => {
+    setPricingRows((prev) => {
+      const next = [...prev];
+      const updated = updater({ ...next[rowIndex] }, next);
+      next[rowIndex] = updated;
+
+      // Sync row 0 (Satuan Dasar) back to top-level states
+      if (rowIndex === 0) {
+        setBaseUnitID(updated.unit_id);
+        setBarcode(updated.barcode);
+        setSku(updated.sku);
+        setPoints(updated.points);
+        setSalesCommission(updated.sales_commission);
+        setPurchasePrice(updated.purchase_price);
+        setMarkupPercent(updated.proc1);
+        setSellingPrice(updated.price1);
       }
-    }
-  }, [generalSettings, isEdit, markupPercent, purchasePrice]);
-
-  // Calculate Harga Jual from Harga Pokok and Proc %
-  const handlePurchasePriceChange = (val: number) => {
-    setPurchasePrice(val);
-    const effectiveMarkup =
-      markupPercent > 0
-        ? markupPercent
-        : parseFloat(generalSettings?.min_profit_percent || "0") || 0;
-
-    if (markupPercent === 0 && effectiveMarkup > 0) {
-      setMarkupPercent(effectiveMarkup);
-    }
-
-    if (effectiveMarkup > 0) {
-      const calculatedSell = val * (1 + effectiveMarkup / 100);
-      setSellingPrice(Math.round(calculatedSell));
-    }
+      return next;
+    });
   };
 
-  const handleMarkupChange = (val: number) => {
-    setMarkupPercent(val);
-    if (purchasePrice > 0) {
-      const calculatedSell = purchasePrice * (1 + val / 100);
-      setSellingPrice(Math.round(calculatedSell));
-    }
+  const handleRowCostChange = (rowIndex: number, newCost: number) => {
+    updatePricingRow(rowIndex, (row) => {
+      row.purchase_price = newCost;
+      ([1, 2, 3, 4, 5, 6] as const).forEach((n) => {
+        const procKey = `proc${n}` as keyof PricingRow;
+        const priceKey = `price${n}` as keyof PricingRow;
+        const procVal = Number(row[procKey] || 0);
+        const priceVal = Number(row[priceKey] || 0);
+        if (procVal !== 0) {
+          (row as any)[priceKey] = calcSellFromProc(newCost, procVal);
+        } else if (priceVal > 0 && newCost > 0) {
+          (row as any)[procKey] = calcProcFromPrices(newCost, priceVal);
+        }
+      });
+      return row;
+    });
   };
 
-  const handleSellingPriceChange = (val: number) => {
-    setSellingPrice(val);
-    if (purchasePrice > 0) {
-      const calculatedMarkup = ((val - purchasePrice) / purchasePrice) * 100;
-      setMarkupPercent(parseFloat(calculatedMarkup.toFixed(2)));
+  const handleRowProcChange = (rowIndex: number, tier: 1 | 2 | 3 | 4 | 5 | 6, newProc: number) => {
+    updatePricingRow(rowIndex, (row) => {
+      const procKey = `proc${tier}` as keyof PricingRow;
+      const priceKey = `price${tier}` as keyof PricingRow;
+      (row as any)[procKey] = newProc;
+      if (row.purchase_price > 0) {
+        (row as any)[priceKey] = calcSellFromProc(row.purchase_price, newProc);
+      }
+      return row;
+    });
+  };
+
+  const handleRowPriceChange = (rowIndex: number, tier: 1 | 2 | 3 | 4 | 5 | 6, newPrice: number) => {
+    updatePricingRow(rowIndex, (row) => {
+      const procKey = `proc${tier}` as keyof PricingRow;
+      const priceKey = `price${tier}` as keyof PricingRow;
+      (row as any)[priceKey] = newPrice;
+      if (row.purchase_price > 0) {
+        (row as any)[procKey] = calcProcFromPrices(row.purchase_price, newPrice);
+      }
+      return row;
+    });
+  };
+
+  const handleRowConversionChange = (rowIndex: number, newConv: number) => {
+    updatePricingRow(rowIndex, (row, allRows) => {
+      row.conversion = newConv;
+      const baseCost = allRows[0]?.purchase_price || 0;
+      if (baseCost > 0 && newConv > 0) {
+        const newCost = Number((baseCost * newConv).toFixed(2));
+        row.purchase_price = newCost;
+        ([1, 2, 3, 4, 5, 6] as const).forEach((n) => {
+          const procKey = `proc${n}` as keyof PricingRow;
+          const priceKey = `price${n}` as keyof PricingRow;
+          const procVal = Number(row[procKey] || 0);
+          if (procVal !== 0) {
+            (row as any)[priceKey] = calcSellFromProc(newCost, procVal);
+          }
+        });
+      }
+      return row;
+    });
+  };
+
+  const handleAddUnitRow = () => {
+    const baseRow = pricingRows[0] || createEmptyPricingRow(true);
+    const defaultUnit = units.find((u: any) => u.id !== baseRow.unit_id)?.id || units[0]?.id || "";
+    setPricingRows((prev) => [
+      ...prev,
+      {
+        ...createEmptyPricingRow(false),
+        unit_id: defaultUnit,
+        conversion: 1,
+        purchase_price: baseRow.purchase_price,
+      },
+    ]);
+  };
+
+  const handleDeleteUnitRow = () => {
+    if (selectedPricingRowIdx === null || selectedPricingRowIdx === 0) {
+      return;
     }
+    setPricingRows((prev) => prev.filter((_, idx) => idx !== selectedPricingRowIdx));
+    setSelectedPricingRowIdx(null);
   };
 
   // Save Mutation
@@ -381,6 +619,75 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
       return;
     }
 
+    const row0 = pricingRows[0] || createEmptyPricingRow(true);
+    const activeBaseUnitId = row0.unit_id || baseUnitID || null;
+
+    // Build conversions from non-base rows
+    const conversionsPayload = pricingRows
+      .filter((r, idx) => idx > 0 && r.unit_id && activeBaseUnitId)
+      .map((r) => ({
+        from_unit_id: r.unit_id,
+        to_unit_id: activeBaseUnitId,
+        multiplier: Number(r.conversion) || 1,
+        barcode: r.barcode.trim(),
+        sku: r.sku.trim(),
+        points: Number(r.points) || 0,
+        sales_commission: Number(r.sales_commission) || 0,
+        purchase_price: Number(r.purchase_price) || 0,
+        markup_percent: Number(r.proc1) || 0,
+        selling_price: Number(r.price1) || 0,
+      }));
+
+    // Build prices from rows based on pricingType
+    const pricesPayload: any[] = [];
+    pricingRows.forEach((r) => {
+      const uid = r.unit_id || activeBaseUnitId;
+      if (!uid) return;
+      if (pricingType === "LEVEL") {
+        ([1, 2, 3, 4, 5, 6] as const).forEach((tier) => {
+          const priceVal = Number((r as any)[`price${tier}`] || 0);
+          const procVal = Number((r as any)[`proc${tier}`] || 0);
+          if (priceVal > 0 || procVal !== 0) {
+            pricesPayload.push({
+              unit_id: uid,
+              price_type: "LEVEL",
+              tier_index: tier,
+              min_qty: 1,
+              markup_percent: procVal,
+              price: priceVal,
+            });
+          }
+        });
+      } else if (pricingType === "JUMLAH") {
+        ([1, 2, 3, 4] as const).forEach((tier) => {
+          const priceVal = Number((r as any)[`price${tier}`] || 0);
+          const procVal = Number((r as any)[`proc${tier}`] || 0);
+          const qtyVal = Number((r as any)[`qty${tier}`] || 0);
+          if (priceVal > 0 || procVal !== 0 || qtyVal > 0) {
+            pricesPayload.push({
+              unit_id: uid,
+              price_type: "JUMLAH",
+              tier_index: tier,
+              min_qty: qtyVal,
+              markup_percent: procVal,
+              price: priceVal,
+            });
+          }
+        });
+      } else {
+        if (r.price1 > 0 || r.proc1 !== 0) {
+          pricesPayload.push({
+            unit_id: uid,
+            price_type: pricingType,
+            tier_index: 1,
+            min_qty: 1,
+            markup_percent: Number(r.proc1) || 0,
+            price: Number(r.price1) || 0,
+          });
+        }
+      }
+    });
+
     const payload = {
       type: itemType,
       is_serial: isSerial,
@@ -405,14 +712,16 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
 
       lock_price_on_sale: lockPriceOnSale,
       pricing_type: pricingType,
-      base_unit_id: baseUnitID || null,
-      barcode: barcode.trim(),
-      sku: sku.trim(),
-      purchase_price: Number(purchasePrice),
-      markup_percent: Number(markupPercent),
-      selling_price: Number(sellingPrice),
-      points: Number(points),
-      sales_commission: Number(salesCommission),
+      base_unit_id: activeBaseUnitId,
+      barcode: row0.barcode.trim(),
+      sku: row0.sku.trim(),
+      purchase_price: Number(row0.purchase_price),
+      markup_percent: Number(row0.proc1),
+      selling_price: Number(row0.price1),
+      points: Number(row0.points),
+      sales_commission: Number(row0.sales_commission),
+      conversions: conversionsPayload,
+      prices: pricesPayload,
 
       weight: Number(weight),
       length: Number(length),
@@ -853,7 +1162,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
 
         {/* ======================= TAB 2: SATUAN DAN HARGA ======================= */}
         {activeTab === "satuan-harga" && (
-          <div className="space-y-4 max-w-4xl">
+          <div className="space-y-3 w-full">
             {/* Warning Alert Box matching screenshot */}
             <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded text-[11.5px] space-y-1">
               <div className="flex items-center gap-1.5 font-bold text-amber-800">
@@ -868,8 +1177,8 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
 
             {/* Kunci Harga di Transaksi Jual */}
             <div className="pt-1">
-              <label className="flex items-center gap-2 cursor-pointer text-slate-700">
-                <span className="font-semibold">Kunci Harga di Transaksi Jual :</span>
+              <label className="inline-flex items-center gap-2 cursor-pointer text-slate-700">
+                <span className="font-medium">Kunci Harga di Transaksi Jual :</span>
                 <input
                   type="checkbox"
                   checked={lockPriceOnSale}
@@ -881,15 +1190,15 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
 
             {/* Tipe Harga Jual */}
             <div>
-              <label className="block text-slate-700 font-semibold mb-1.5">Tipe Harga Jual :</label>
-              <div className="flex flex-wrap items-center gap-4 pl-1">
+              <label className="block text-slate-700 font-medium mb-1.5">Tipe Harga Jual :</label>
+              <div className="flex flex-wrap items-center gap-5 pl-0.5">
                 {[
                   { id: "SATU_HARGA", label: "Satu Harga" },
                   { id: "SATUAN", label: "Satuan" },
                   { id: "LEVEL", label: "Level" },
                   { id: "JUMLAH", label: "Jumlah" },
                 ].map((p) => (
-                  <label key={p.id} className="flex items-center gap-2 cursor-pointer text-slate-700">
+                  <label key={p.id} className="inline-flex items-center gap-2 cursor-pointer text-slate-700">
                     <input
                       type="radio"
                       name="pricingType"
@@ -904,129 +1213,305 @@ export const ItemForm: React.FC<ItemFormProps> = ({ initialData, isEdit = false 
               </div>
             </div>
 
-            {/* Satuan */}
-            <div>
-              <label className="block text-slate-700 font-medium mb-1">Satuan :</label>
-              <select
-                value={baseUnitID}
-                onChange={(e) => setBaseUnitID(e.target.value)}
-                className="w-full sm:w-80 px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-sky-500 bg-white"
-              >
-                <option value="">Select...</option>
-                {units.map((u: any) => (
-                  <option key={u.id} value={u.id}>
-                    {u.code} - {u.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* Inline Editable Table matching Screenshot 1, 2, 3 */}
+            <div className="border border-slate-300 rounded overflow-x-auto bg-white">
+              <table className="w-full text-left border-collapse text-[11px] whitespace-nowrap">
+                <thead className="bg-slate-50 border-b border-slate-300 text-slate-700 font-semibold">
+                  <tr>
+                    <th className="py-2 px-2.5 border-r border-slate-300 text-center w-9">No</th>
+                    <th className="py-2 px-2.5 border-r border-slate-300 min-w-[90px]">Satuan</th>
+                    <th className="py-2 px-2.5 border-r border-slate-300 min-w-[100px]">Jns Satuan</th>
+                    <th className="py-2 px-2.5 border-r border-slate-300 text-right min-w-[85px]">
+                      {pricingType === "SATUAN" || pricingType === "SATU_HARGA" ? "Jml Konversi" : "Konversi"}
+                    </th>
+                    <th className="py-2 px-2.5 border-r border-slate-300 min-w-[110px]">Barcode</th>
+                    <th className="py-2 px-2.5 border-r border-slate-300 min-w-[95px]">SKU</th>
+                    <th className="py-2 px-2.5 border-r border-slate-300 text-right min-w-[65px]">Poin</th>
+                    <th className="py-2 px-2.5 border-r border-slate-300 text-right min-w-[75px]">Komisi</th>
+                    <th className="py-2 px-2.5 border-r border-slate-300 text-right min-w-[105px]">Harga Pokok</th>
 
-            {/* Kode Barcode */}
-            <div>
-              <label className="block text-slate-700 font-medium mb-1">Kode Barcode :</label>
-              <input
-                type="text"
-                value={barcode}
-                onChange={(e) => setBarcode(e.target.value)}
-                placeholder="Scan / ketik barcode"
-                className="w-full sm:w-80 px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-sky-500 bg-white"
-              />
-            </div>
-
-            {/* SKU */}
-            <div>
-              <label className="block text-slate-700 font-medium mb-1">SKU (Stock Keeping Unit) :</label>
-              <input
-                type="text"
-                value={sku}
-                onChange={(e) => setSku(e.target.value)}
-                placeholder="Kode SKU internal produk"
-                className="w-full sm:w-80 px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 focus:outline-none focus:border-sky-500 bg-white"
-              />
-            </div>
-
-            {/* Row: Harga Pokok, Proc %, Harga Jual */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-              <div>
-                <label className="block text-slate-700 font-medium mb-1">Harga Pokok :</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={purchasePrice}
-                  onChange={(e) => handlePurchasePriceChange(parseFloat(e.target.value) || 0)}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 text-right focus:outline-none focus:border-sky-500 bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-medium mb-1">Proc % :</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={markupPercent}
-                  onChange={(e) => handleMarkupChange(parseFloat(e.target.value) || 0)}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 text-right focus:outline-none focus:border-sky-500 bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-medium mb-1">Harga Jual :</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={sellingPrice}
-                  onChange={(e) => handleSellingPriceChange(parseFloat(e.target.value) || 0)}
-                  className={`w-full px-2.5 py-1.5 border rounded text-slate-800 text-right focus:outline-none bg-white ${
-                    purchasePrice > 0 && sellingPrice < purchasePrice
-                      ? "border-rose-500 text-rose-700 bg-rose-50/40"
-                      : "border-slate-300 focus:border-sky-500"
-                  }`}
-                />
-                {/* Min. Profit Alert / Guideline from General Settings */}
-                {generalSettings?.min_profit_percent && parseFloat(generalSettings.min_profit_percent) > 0 && (
-                  <div className="mt-1 text-[10px]">
-                    {markupPercent < parseFloat(generalSettings.min_profit_percent) ? (
-                      <span className="text-amber-600 font-semibold flex items-center gap-1">
-                        ⚠️ Margin ({markupPercent.toFixed(1)}%) &lt; Min Profit ({generalSettings.min_profit_percent}%)
-                      </span>
-                    ) : (
-                      <span className="text-emerald-600 font-medium">
-                        ✓ Memenuhi Min Profit ({generalSettings.min_profit_percent}%)
-                      </span>
+                    {(pricingType === "SATU_HARGA" || pricingType === "SATUAN") && (
+                      <>
+                        <th className="py-2 px-2.5 border-r border-slate-300 text-right min-w-[80px]">Proc(%)</th>
+                        <th className="py-2 px-2.5 text-right min-w-[110px]">Harga Jual</th>
+                      </>
                     )}
-                  </div>
-                )}
-                {purchasePrice > 0 && sellingPrice < purchasePrice && (
-                  <div className="mt-0.5 text-[10px] text-rose-600 font-bold">
-                    ⚠️ Harga jual di bawah harga pokok!
-                  </div>
-                )}
-              </div>
+
+                    {pricingType === "LEVEL" && (
+                      <>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[72px]">Proc1(%)</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[72px]">Proc2(%)</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[72px]">Proc3(%)</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[72px]">Proc4(%)</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[72px]">Proc5(%)</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[72px]">Proc6(%)</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[95px]">HJ Level 1</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[95px]">HJ Level 2</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[95px]">HJ level 3</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[95px]">HJ level 4</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[95px]">HJ level 5</th>
+                        <th className="py-2 px-2 text-right min-w-[95px]">HJ level 6</th>
+                      </>
+                    )}
+
+                    {pricingType === "JUMLAH" && (
+                      <>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[75px]">Jumlah 1</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[75px]">Jumlah 2</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[75px]">Jumlah 3</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[75px]">Jumlah 4</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[72px]">Proc1(%)</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[72px]">Proc2(%)</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[72px]">Proc3(%)</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[72px]">Proc4(%)</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[95px]">Harga 1</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[95px]">Harga 2</th>
+                        <th className="py-2 px-2 border-r border-slate-300 text-right min-w-[95px]">Harga 3</th>
+                        <th className="py-2 px-2 text-right min-w-[95px]">Harga 4</th>
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {(pricingType === "SATU_HARGA" ? pricingRows.slice(0, 1) : pricingRows).map((row, idx) => {
+                    const isSelected = selectedPricingRowIdx === idx;
+                    return (
+                      <tr
+                        key={idx}
+                        onClick={() => setSelectedPricingRowIdx(idx)}
+                        className={`transition-colors ${
+                          isSelected ? "bg-sky-50/90" : "hover:bg-slate-50/70"
+                        }`}
+                      >
+                        <td className="py-1.5 px-2.5 border-r border-slate-200 text-center text-slate-600 font-medium">
+                          {idx + 1}
+                        </td>
+                        <td className="py-1 px-1.5 border-r border-slate-200">
+                          <select
+                            value={row.unit_id}
+                            onChange={(e) =>
+                              updatePricingRow(idx, (r) => ({ ...r, unit_id: e.target.value }))
+                            }
+                            className="w-full px-1.5 py-1 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded bg-transparent focus:bg-white text-slate-800 font-medium focus:outline-none"
+                          >
+                            <option value="">Pilih...</option>
+                            {units.map((u: any) => (
+                              <option key={u.id} value={u.id}>
+                                {u.code}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="py-1.5 px-2.5 border-r border-slate-200 text-slate-700">
+                          {idx === 0 ? "Satuan Dasar" : "Satuan Konversi"}
+                        </td>
+                        <td className="py-1 px-1.5 border-r border-slate-200">
+                          {idx === 0 ? (
+                            <div className="px-1.5 py-1 text-right font-mono text-slate-700">1.00</div>
+                          ) : (
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={row.conversion}
+                              onChange={(e) => handleRowConversionChange(idx, parseFloat(e.target.value) || 1)}
+                              className="w-full px-1.5 py-1 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded bg-transparent focus:bg-white text-right font-mono text-slate-800 focus:outline-none"
+                            />
+                          )}
+                        </td>
+                        <td className="py-1 px-1.5 border-r border-slate-200">
+                          <input
+                            type="text"
+                            value={row.barcode}
+                            onChange={(e) =>
+                              updatePricingRow(idx, (r) => ({ ...r, barcode: e.target.value }))
+                            }
+                            placeholder="-"
+                            className="w-full px-1.5 py-1 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded bg-transparent focus:bg-white font-mono text-slate-800 focus:outline-none"
+                          />
+                        </td>
+                        <td className="py-1 px-1.5 border-r border-slate-200">
+                          <input
+                            type="text"
+                            value={row.sku}
+                            onChange={(e) =>
+                              updatePricingRow(idx, (r) => ({ ...r, sku: e.target.value }))
+                            }
+                            placeholder="-"
+                            className="w-full px-1.5 py-1 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded bg-transparent focus:bg-white font-mono text-slate-800 focus:outline-none"
+                          />
+                        </td>
+                        <td className="py-1 px-1.5 border-r border-slate-200">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={row.points}
+                            onChange={(e) =>
+                              updatePricingRow(idx, (r) => ({ ...r, points: parseFloat(e.target.value) || 0 }))
+                            }
+                            className="w-full px-1.5 py-1 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded bg-transparent focus:bg-white text-right font-mono text-slate-800 focus:outline-none"
+                          />
+                        </td>
+                        <td className="py-1 px-1.5 border-r border-slate-200">
+                          <CurrencyInput
+                            value={row.sales_commission}
+                            onChange={(val) =>
+                              updatePricingRow(idx, (r) => ({
+                                ...r,
+                                sales_commission: val,
+                              }))
+                            }
+                            className="w-full px-1.5 py-1 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded bg-transparent focus:bg-white text-right font-mono text-slate-800 focus:outline-none"
+                          />
+                        </td>
+                        <td className="py-1 px-1.5 border-r border-slate-200">
+                          <CurrencyInput
+                            value={row.purchase_price}
+                            onChange={(val) => handleRowCostChange(idx, val)}
+                            className="w-full px-1.5 py-1 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded bg-transparent focus:bg-white text-right font-mono text-slate-800 focus:outline-none"
+                          />
+                        </td>
+
+                        {(pricingType === "SATU_HARGA" || pricingType === "SATUAN") && (
+                          <>
+                            <td className="py-1 px-1.5 border-r border-slate-200">
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={row.proc1}
+                                onChange={(e) => handleRowProcChange(idx, 1, parseFloat(e.target.value) || 0)}
+                                className="w-full px-1.5 py-1 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded bg-transparent focus:bg-white text-right font-mono text-slate-800 focus:outline-none"
+                              />
+                            </td>
+                            <td className="py-1 px-1.5">
+                              <CurrencyInput
+                                value={row.price1}
+                                onChange={(val) => handleRowPriceChange(idx, 1, val)}
+                                className={`w-full px-1.5 py-1 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded bg-transparent focus:bg-white text-right font-mono font-semibold focus:outline-none ${
+                                  row.purchase_price > 0 && row.price1 < row.purchase_price
+                                    ? "text-rose-600"
+                                    : "text-slate-900"
+                                }`}
+                              />
+                            </td>
+                          </>
+                        )}
+
+                        {pricingType === "LEVEL" && (
+                          <>
+                            {([1, 2, 3, 4, 5, 6] as const).map((tier) => (
+                              <td key={`proc-${tier}`} className="py-1 px-1 border-r border-slate-200">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={(row as any)[`proc${tier}`]}
+                                  onChange={(e) =>
+                                    handleRowProcChange(idx, tier, parseFloat(e.target.value) || 0)
+                                  }
+                                  className="w-full px-1 py-1 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded bg-transparent focus:bg-white text-right font-mono text-slate-800 focus:outline-none"
+                                />
+                              </td>
+                            ))}
+                            {([1, 2, 3, 4, 5, 6] as const).map((tier) => (
+                              <td
+                                key={`price-${tier}`}
+                                className={`py-1 px-1 ${tier < 6 ? "border-r border-slate-200" : ""}`}
+                              >
+                                <CurrencyInput
+                                  value={(row as any)[`price${tier}`]}
+                                  onChange={(val) => handleRowPriceChange(idx, tier, val)}
+                                  className={`w-full px-1 py-1 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded bg-transparent focus:bg-white text-right font-mono font-semibold focus:outline-none ${
+                                    row.purchase_price > 0 &&
+                                    (row as any)[`price${tier}`] > 0 &&
+                                    (row as any)[`price${tier}`] < row.purchase_price
+                                      ? "text-rose-600"
+                                      : "text-slate-900"
+                                  }`}
+                                />
+                              </td>
+                            ))}
+                          </>
+                        )}
+
+                        {pricingType === "JUMLAH" && (
+                          <>
+                            {([1, 2, 3, 4] as const).map((tier) => (
+                              <td key={`qty-${tier}`} className="py-1 px-1 border-r border-slate-200">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={(row as any)[`qty${tier}`]}
+                                  onChange={(e) =>
+                                    updatePricingRow(idx, (r) => ({
+                                      ...r,
+                                      [`qty${tier}`]: parseFloat(e.target.value) || 0,
+                                    }))
+                                  }
+                                  className="w-full px-1 py-1 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded bg-transparent focus:bg-white text-right font-mono text-slate-800 focus:outline-none"
+                                />
+                              </td>
+                            ))}
+                            {([1, 2, 3, 4] as const).map((tier) => (
+                              <td key={`jproc-${tier}`} className="py-1 px-1 border-r border-slate-200">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={(row as any)[`proc${tier}`]}
+                                  onChange={(e) =>
+                                    handleRowProcChange(idx, tier, parseFloat(e.target.value) || 0)
+                                  }
+                                  className="w-full px-1 py-1 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded bg-transparent focus:bg-white text-right font-mono text-slate-800 focus:outline-none"
+                                />
+                              </td>
+                            ))}
+                            {([1, 2, 3, 4] as const).map((tier) => (
+                              <td
+                                key={`jprice-${tier}`}
+                                className={`py-1 px-1 ${tier < 4 ? "border-r border-slate-200" : ""}`}
+                              >
+                                <CurrencyInput
+                                  value={(row as any)[`price${tier}`]}
+                                  onChange={(val) => handleRowPriceChange(idx, tier, val)}
+                                  className={`w-full px-1 py-1 border border-transparent hover:border-slate-300 focus:border-sky-500 rounded bg-transparent focus:bg-white text-right font-mono font-semibold focus:outline-none ${
+                                    row.purchase_price > 0 &&
+                                    (row as any)[`price${tier}`] > 0 &&
+                                    (row as any)[`price${tier}`] < row.purchase_price
+                                      ? "text-rose-600"
+                                      : "text-slate-900"
+                                  }`}
+                                />
+                              </td>
+                            ))}
+                          </>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
 
-            {/* Row: Poin, Komisi Sales */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-              <div>
-                <label className="block text-slate-700 font-medium mb-1">Poin :</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={points}
-                  onChange={(e) => setPoints(parseFloat(e.target.value) || 0)}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 text-right focus:outline-none focus:border-sky-500 bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-medium mb-1">Komisi Sales :</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={salesCommission}
-                  onChange={(e) => setSalesCommission(parseFloat(e.target.value) || 0)}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded text-slate-800 text-right focus:outline-none focus:border-sky-500 bg-white"
-                />
-              </div>
+            {/* Action buttons below table: Tambah Satuan & Hapus Satuan */}
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                type="button"
+                disabled={pricingType === "SATU_HARGA"}
+                onClick={handleAddUnitRow}
+                className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-300 rounded text-slate-700 font-medium text-xs shadow-2xs transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Tambah Satuan
+              </button>
+              <button
+                type="button"
+                disabled={
+                  pricingType === "SATU_HARGA" ||
+                  selectedPricingRowIdx === null ||
+                  selectedPricingRowIdx === 0
+                }
+                onClick={handleDeleteUnitRow}
+                className="px-3 py-1.5 bg-white hover:bg-rose-50 border border-slate-300 rounded text-slate-700 hover:text-rose-700 font-medium text-xs shadow-2xs transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Hapus Satuan
+              </button>
             </div>
           </div>
         )}

@@ -41,6 +41,7 @@ type SalesOrder struct {
 	CustomerSPType     string     `gorm:"size:50;default:'REGULER'" json:"customer_sp_type"`
 	PBFOriginInvoiceNo string     `gorm:"size:100" json:"pbf_origin_invoice_no"`
 	// Pengiriman & Ekspedisi (Sync Delivery)
+	DeliveryMethod     string     `gorm:"size:20;default:'DIKIRIM';not null" json:"delivery_method"` // DIKIRIM, DIAMBIL
 	DeliveryOrderNo    string     `gorm:"size:100" json:"delivery_order_no"`
 	DeliveryTrackingNo string     `gorm:"size:100" json:"delivery_tracking_no"`
 	DeliveryCourier    string     `gorm:"size:100" json:"delivery_courier"`
@@ -123,6 +124,7 @@ type Sale struct {
 	PBFOriginInvoiceNo string     `gorm:"size:100" json:"pbf_origin_invoice_no"`
 	OriginPurchaseID   *uuid.UUID `gorm:"type:uuid;index" json:"origin_purchase_id"`
 	TaxInvoiceNo       string     `gorm:"size:100" json:"tax_invoice_no"`
+	DeliveryMethod     string     `gorm:"size:20;default:'DIKIRIM';not null" json:"delivery_method"` // DIKIRIM, DIAMBIL
 	DeliveryOrderNo    string     `gorm:"size:100" json:"delivery_order_no"`
 	DeliveryCourier    string     `gorm:"size:100" json:"delivery_courier"`
 	DeliveryDate       *time.Time `json:"delivery_date"`
@@ -194,8 +196,12 @@ type SalesReturn struct {
 	SalesRepID   *uuid.UUID        `gorm:"type:uuid;index" json:"sales_rep_id"`
 	SaleID       *uuid.UUID        `gorm:"type:uuid;index" json:"sale_id"`
 	ReturnNo     string            `gorm:"size:50;uniqueIndex;not null" json:"return_no"`
-	Date         time.Time         `gorm:"not null" json:"date"`
-	ReturnMode   string            `gorm:"size:20;default:'MODE_1'" json:"return_mode"` // MODE_1 or MODE_2
+	Date           time.Time         `gorm:"not null" json:"date"`
+	ReturnMode     string            `gorm:"size:20;default:'MODE_1'" json:"return_mode"` // MODE_1 or MODE_2
+	DeliveryMethod string            `gorm:"size:20;default:'DIAMBIL';not null" json:"delivery_method"` // DIAMBIL, DIKIRIM
+	ShippingCourier    string        `gorm:"size:100" json:"shipping_courier"`
+	ShippingTrackingNo string        `gorm:"size:100" json:"shipping_tracking_no"`
+	ShippingNotes      string        `gorm:"type:text" json:"shipping_notes"`
 	TaxType      string            `gorm:"size:20;default:'NON'" json:"tax_type"`
 	TaxPercent   float64           `gorm:"type:numeric(5,2);default:0" json:"tax_percent"`
 	OtherCost    float64           `gorm:"type:numeric(15,2);default:0" json:"other_cost"`
@@ -225,11 +231,16 @@ type SalesReturn struct {
 	RestockedBy      *uuid.UUID `gorm:"type:uuid" json:"restocked_by"`
 
 	// Finalisasi & Penyelesaian Keuangan
-	SettlementType      string     `gorm:"size:50" json:"settlement_type"` // POTONG_PIUTANG, KREDIT_PELANGGAN, KAS_PENGEMBALIAN
+	SettlementStatus    string     `gorm:"size:20;default:'PENDING';index" json:"settlement_status"` // PENDING, SETTLED
+	SettlementType      string     `gorm:"size:50" json:"settlement_type"` // POTONG_PIUTANG, KREDIT_PELANGGAN, KAS_PENGEMBALIAN, KEMBALI_DANA_KAS
+	SettledSaleID       *uuid.UUID `gorm:"type:uuid;index" json:"settled_sale_id"`
+	SettledAt           *time.Time `json:"settled_at"`
+	SettledBy           *uuid.UUID `gorm:"type:uuid" json:"settled_by"`
 	CashAccountID       *uuid.UUID `gorm:"type:uuid;index" json:"cash_account_id"`
 	DebtDeductionAmount float64    `gorm:"type:numeric(15,2);default:0" json:"debt_deduction_amount"` // Potong Piutang
 	CreditBalanceAmount float64    `gorm:"type:numeric(15,2);default:0" json:"credit_balance_amount"` // Kredit / Deposit Pelanggan
 	RefundAmount        float64    `gorm:"type:numeric(15,2);default:0" json:"refund_amount"`         // Kas Refund
+	IsJournalCreated    bool       `gorm:"default:false" json:"is_journal_created"`
 	FinalizedAt         *time.Time `json:"finalized_at"`
 	FinalizedBy         *uuid.UUID `gorm:"type:uuid" json:"finalized_by"`
 
@@ -261,6 +272,7 @@ type SalesReturnItem struct {
 	BatchNumber       string     `gorm:"size:100" json:"batch_number"`
 	ExpiredDate       *time.Time `json:"expired_date"`
 	Condition         string     `gorm:"size:50;default:'BAIK'" json:"condition"` // BAIK, RUSAK
+	Reason            string     `gorm:"type:text" json:"reason"`
 	AcceptedQty       float64    `gorm:"type:numeric(15,4);default:0" json:"accepted_qty"`
 	RejectedQty       float64    `gorm:"type:numeric(15,4);default:0" json:"rejected_qty"`
 

@@ -275,6 +275,22 @@ func (h *MasterHandler) UpdateProduct(c *gin.Context) {
 	payload.CompanyID = existing.CompanyID
 
 	tx := database.DB.Begin()
+	// Update conversions if provided
+	if payload.Conversions != nil {
+		tx.Unscoped().Where("product_id = ?", id).Delete(&models.UnitConversion{})
+		for i := range payload.Conversions {
+			payload.Conversions[i].ID = uuid.Nil
+			payload.Conversions[i].ProductID = id
+		}
+	}
+	// Update prices if provided
+	if payload.Prices != nil {
+		tx.Unscoped().Where("product_id = ?", id).Delete(&models.ProductPrice{})
+		for i := range payload.Prices {
+			payload.Prices[i].ID = uuid.Nil
+			payload.Prices[i].ProductID = id
+		}
+	}
 	// Update discounts if provided
 	if len(payload.Discounts) > 0 {
 		tx.Where("product_id = ?", id).Delete(&models.ItemDiscount{})

@@ -155,10 +155,10 @@ export default function PosPage() {
         return prev.map((item) =>
           item.product_id === prod.id
             ? {
-                ...item,
-                qty: item.qty + 1,
-                total_amount: (item.qty + 1) * item.unit_price - item.discount,
-              }
+              ...item,
+              qty: item.qty + 1,
+              total_amount: (item.qty + 1) * item.unit_price - item.discount,
+            }
             : item
         );
       } else {
@@ -555,11 +555,10 @@ export default function PosPage() {
                     <button
                       key={m.id}
                       onClick={() => setTenderMethod(m.id)}
-                      className={`p-2.5 rounded-xl border text-center flex flex-col items-center gap-1 transition ${
-                        tenderMethod === m.id
-                          ? "border-emerald-600 bg-emerald-50 text-emerald-700 font-bold"
-                          : "border-slate-200 text-slate-600 hover:bg-slate-50"
-                      }`}
+                      className={`p-2.5 rounded-xl border text-center flex flex-col items-center gap-1 transition ${tenderMethod === m.id
+                        ? "border-emerald-600 bg-emerald-50 text-emerald-700 font-bold"
+                        : "border-slate-200 text-slate-600 hover:bg-slate-50"
+                        }`}
                     >
                       <Icon className="w-4 h-4" />
                       <span className="text-[11px]">{m.label}</span>

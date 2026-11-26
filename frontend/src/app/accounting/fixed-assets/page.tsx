@@ -76,7 +76,7 @@ export default function FixedAssetsPage() {
       <div className="shrink-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-1">
         <div>
           <h1 className="text-sm font-bold text-slate-800">Aset Tetap & Amortisasi Penyusutan</h1>
-          <p className="text-[11px] text-slate-500">Pencatatan inventaris medis (refrigerator 2-8°C, rak obat, komputer) dan jadwal depresiasi garis lurus.</p>
+          
         </div>
         <button
           onClick={() => setModalOpen(true)}
